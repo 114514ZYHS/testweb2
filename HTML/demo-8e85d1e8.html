@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="./">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>跳一跳</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;overflow:hidden;}
+  body{
+    background:#cfccc4;
+    background-image:radial-gradient(circle at 50% 35%, #dedbd4 0%, #c3c0b8 100%);
+    display:flex;align-items:center;justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    user-select:none;-webkit-user-select:none;
+  }
+  #stage{
+    position:relative;width:420px;height:720px;flex:0 0 auto;
+    border-radius:8px;overflow:hidden;
+    box-shadow:0 18px 50px rgba(0,0,0,.28), 0 2px 6px rgba(0,0,0,.12);
+    touch-action:none;
+  }
+  canvas{display:block;width:420px;height:720px;}
+
+  .layer{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+  }
+  .layer.hide{display:none;}
+
+  /* 开始页 */
+  #start{background:rgba(247,245,241,.78);backdrop-filter:blur(2px);}
+  #start .logo{
+    font-size:52px;font-weight:800;letter-spacing:6px;color:#5c5750;
+    margin-bottom:6px;
+  }
+  #start .sub{font-size:15px;color:#8d877e;margin-bottom:44px;letter-spacing:1px;}
+  #start .tips{font-size:13px;color:#a09a91;line-height:2;text-align:center;margin-top:34px;}
+  .btn{
+    border:none;outline:none;cursor:pointer;
+    background:#6bcf6b;color:#fff;font-size:17px;font-weight:600;
+    padding:13px 46px;border-radius:26px;letter-spacing:2px;
+    box-shadow:0 6px 16px rgba(90,190,90,.38);
+    transition:transform .12s ease, box-shadow .12s ease;
+    font-family:inherit;
+  }
+  .btn:active{transform:translateY(2px) scale(.98);box-shadow:0 3px 8px rgba(90,190,90,.34);}
+
+  /* 结束页 */
+  #over{background:rgba(30,28,26,.30);}
+  .card{
+    width:266px;background:#fbfaf8;border-radius:18px;padding:30px 24px 26px;
+    text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.22);
+  }
+  .card .ttl{font-size:15px;color:#9b958c;letter-spacing:3px;margin-bottom:14px;}
+  .card .num{font-size:74px;font-weight:800;color:#4a453e;line-height:1;}
+  .card .unit{font-size:12px;color:#b3ada4;margin-top:8px;letter-spacing:2px;}
+  .card .hr{height:1px;background:#ece8e2;margin:20px 0 16px;}
+  .card .best{font-size:13px;color:#9b958c;margin-bottom:22px;letter-spacing:1px;}
+  .card .best b{color:#f0a03c;font-weight:700;}
+
+  /* 音量 */
+  #sound{
+    position:absolute;top:16px;right:16px;width:34px;height:34px;border-radius:50%;
+    background:rgba(255,255,255,.55);border:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;line-height:1;color:#7d776f;padding:0;
+    font-family:inherit;
+  }
+  #sound:active{transform:scale(.92);}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+
+  <div class="layer" id="start">
+    <div class="logo">跳一跳</div>
+    <div class="sub">T I A O &nbsp; Y I &nbsp; T I A O</div>
+    <button class="btn" id="btnStart">开始游戏</button>
+    <div class="tips">
+      按住屏幕蓄力，松手起跳<br>
+      落在方块中心可连击加分<br>
+      井盖 +5 &nbsp;·&nbsp; 魔方 +10 &nbsp;·&nbsp; 士多 +15 &nbsp;·&nbsp; 音乐盒 +30
+    </div>
+  </div>
+
+  <div class="layer hide" id="over">
+    <div class="card">
+      <div class="ttl">游 戏 结 束</div>
+      <div class="num" id="finalScore">0</div>
+      <div class="unit">本 局 得 分</div>
+      <div class="hr"></div>
+      <div class="best">历史最高 <b id="bestScore">0</b></div>
+      <button class="btn" id="btnRetry">再来一局</button>
+    </div>
+  </div>
+
+  <button id="sound" title="音效">🔊</button>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   基础工具
+   ============================================================ */
+var W = 420, H = 720;
+var COS30 = Math.sqrt(3) / 2;   // 0.8660
+var PI2 = Math.PI * 2;
+
+function rand(a, b){ return a + Math.random() * (b - a); }
+function clamp(v, a, b){ return v < a ? a : (v > b ? b : v); }
+function lerp(a, b, t){ return a + (b - a) * t; }
+function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+function easeInOutSine(t){ return -(Math.cos(Math.PI * t) - 1) / 2; }
+
+function hex2rgb(h){
+  h = h.replace('#','');
+  return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+}
+function mixHex(c, t, target){
+  var c1 = hex2rgb(c);
+  return 'rgb(' + Math.round(lerp(c1[0], target, t)) + ',' +
+                  Math.round(lerp(c1[1], target, t)) + ',' +
+                  Math.round(lerp(c1[2], target, t)) + ')';
+}
+function lighten(c, t){ return mixHex(c, t, 255); }
+function darken(c, t){ return mixHex(c, t, 0); }
+
+/* ============================================================
+   音效（WebAudio 合成，无外部资源）
+   ============================================================ */
+var AC = null, muted = false;
+function ac(){
+  if(!AC){
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ AC = null; }
+  }
+  if(AC && AC.state === 'suspended'){ AC.resume(); }
+  return AC;
+}
+function beep(freq, dur, type, vol, delay){
+  if(muted) return;
+  var a = ac(); if(!a) return;
+  var t0 = a.currentTime + (delay || 0);
+  var o = a.createOscillator(), g = a.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol == null ? 0.16 : vol, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0006, t0 + dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function sweep(f0, f1, dur, type, vol){
+  if(muted) return;
+  var a = ac(); if(!a) return;
+  var t0 = a.currentTime;
+  var o = a.createOscillator(), g = a.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(f0, t0);
+  o.frequency.exponentialRampToValueAtTime(Math.max(24, f1), t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol == null ? 0.14 : vol, t0 + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0006, t0 + dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function melody(list, step, dur, type, vol){
+  for(var i = 0; i < list.length; i++) beep(list[i], dur, type, vol, i * step);
+}
+// 蓄力音阶（do re mi sol la si do…）
+var SCALE = [523.25, 587.33, 659.25, 783.99, 880.00, 987.77, 1046.50, 1174.66, 1318.51];
+var lastNote = -1;
+
+var SFX = {
+  land:    function(){ beep(190, 0.11, 'sine', 0.24); beep(96, 0.16, 'sine', 0.16); },
+  center:  function(){ beep(1046.5, 0.11, 'triangle', 0.16); beep(1567.98, 0.22, 'triangle', 0.13, 0.06); },
+  die:     function(){ melody([523.25, 440.00, 349.23, 261.63], 0.14, 0.34, 'triangle', 0.15); },
+  manhole: function(){ sweep(420, 130, 0.55, 'sine', 0.16); beep(740, 0.09, 'triangle', 0.10, 0.30); },
+  cube:    function(){ beep(660,0.06,'square',0.09); beep(880,0.06,'square',0.09,0.10); beep(1174,0.10,'square',0.09,0.20); },
+  shop:    function(){ beep(1318.5, 0.16, 'triangle', 0.15); beep(1760, 0.30, 'triangle', 0.12, 0.13); },
+  music:   function(){ melody([1046.5, 1318.5, 1568.0, 2093.0, 1568.0, 2093.0], 0.17, 0.32, 'triangle', 0.13); }
+};
+
+/* ============================================================
+   画布 / 自适应
+   ============================================================ */
+var stage = document.getElementById('stage');
+var cv = document.getElementById('cv');
+var ctx = cv.getContext('2d');
+var DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function fit(){
+  var s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  s = Math.min(s, 1.25);
+  stage.style.transform = 'scale(' + s + ')';
+  stage.style.transformOrigin = 'center center';
+  var q = DPR * clamp(s * 1.15, 0.75, 1.8);
+  cv.width  = Math.round(W * q);
+  cv.height = Math.round(H * q);
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+}
+window.addEventListener('resize', fit);
+
+/* ============================================================
+   等轴测投影
+     世界: x 向右前, y 向左前, z 向上（所有方块顶面 z = 0）
+     proj: X = (x - y) * cos30 ;  Y = -(x + y) * 0.5 - z
+   ============================================================ */
+var ANCHOR_Y = H * 0.60;
+
+function proj(x, y, z){
+  return { X: (x - y) * COS30, Y: -(x + y) * 0.5 - z };
+}
+// 世界 -> 屏幕（含相机）
+function P(x, y, z){
+  return {
+    x: (x - y) * COS30 - G.cam.X + G.anchorX,
+    y: -(x + y) * 0.5 - z - G.cam.Y + ANCHOR_Y
+  };
+}
+
+/* ============================================================
+   常量
+   ============================================================ */
+var MAXP     = 1.45;   // 蓄满所需秒数
+var MIN_D    = 110;    // 最小跳跃距离
+var MAX_D    = 580;    // 最大跳跃距离
+var CENTER_R = 15;     // 正中判定半径
+
+var COLORS = [
+  '#f5c842','#f0973f','#ef6d68','#e95f8c','#b06ae6',
+  '#6d8bf0','#49b6e8','#3ec4b4','#7ad07a','#c9a26d'
+];
+
+// 特殊方块
+var SPECIAL = {
+  manhole: { bonus: 5,  wait: 2.0, name: '井盖',   color: '#98a2ac' },
+  cube:    { bonus: 10, wait: 2.0, name: '魔方',   color: '#f2f0eb' },
+  shop:    { bonus: 15, wait: 1.6, name: '士多',   color: '#e9e3d8' },
+  music:   { bonus: 30, wait: 2.6, name: '音乐盒', color: '#d9b98a' }
+};
+
+/* ============================================================
+   游戏状态
+   ============================================================ */
+var G = {
+  state: 'start',      // start | idle | charging | jumping | falling | over
+  blocks: [],
+  idx: 0,
+  piece: { x:0, y:0, z:0, flip:0, tilt:0, sx:1, sy:1 },
+  cam: { X:0, Y:0 },
+  anchorX: W * 0.38,
+  power: 0,
+  score: 0,
+  combo: 0,
+  best: parseInt(localStorage.getItem('tty_best') || '0', 10) || 0,
+  texts: [],
+  dust: [],
+  jump: null,
+  fall: null,
+  dwell: 0,
+  time: 0,
+  hint: 1,
+  shake: 0
+};
+
+function log(t){ return Math.log(t) / Math.LN10; }
+
+/* ============================================================
+   方块
+   ============================================================ */
+function paint(b){
+  b.cTop   = lighten(b.color, 0.16);
+  b.cLeft  = darken(b.color, 0.09);
+  b.cRight = darken(b.color, 0.27);
+}
+
+function makeBlock(x, y){
+  var diff = clamp(G.score / 480, 0, 1);
+  var b = { x:x, y:y, z:0, press:0, dwell:0, given:false, hopT:-1, spin:0, disc:0, door:0, glow:0 };
+
+  // 是否特殊方块（前三块不出）
+  var r = Math.random();
+  var kind = null;
+  if(G.blocks.length >= 3){
+    if(r < 0.050) kind = 'manhole';
+    else if(r < 0.078) kind = 'cube';
+    else if(r < 0.100) kind = 'shop';
+    else if(r < 0.120) kind = 'music';
+  }
+
+  if(kind){
+    b.type = kind;
+    b.special = SPECIAL[kind];
+    b.color = SPECIAL[kind].color;
+    var s = lerp(96, 76, diff) * rand(0.94, 1.06);
+    b.w = s; b.d = s;
+    b.depth = (kind === 'manhole') ? 54 : rand(190, 250);
+    if(kind === 'cube') b.depth = b.w;      // 魔方是正方体
+    if(kind === 'music') b.disc = Math.random() * PI2;
+  } else if(Math.random() < 0.14){
+    // 圆柱（普通圆墩）
+    b.type = 'cylinder';
+    b.color = COLORS[(Math.random() * COLORS.length) | 0];
+    b.w = b.d = lerp(100, 66, diff) * rand(0.9, 1.1);
+    b.depth = rand(150, 240);
+  } else {
+    b.type = 'box';
+    b.color = COLORS[(Math.random() * COLORS.length) | 0];
+    var base = lerp(104, 62, diff);
+    b.w = base * rand(0.86, 1.14);
+    b.d = base * rand(0.86, 1.14);
+    if(Math.random() < 0.30){                 // 有时做成扁长条
+      if(Math.random() < 0.5) b.w *= 0.72; else b.d *= 0.72;
+    }
+    b.depth = rand(200, 300);
+  }
+  paint(b);
+  return b;
+}
+
+function genNext(){
+  var last = G.blocks[G.blocks.length - 1];
+  var diff = clamp(G.score / 480, 0, 1);
+  var dir = Math.random() < 0.5 ? 'x' : 'y';
+  var minGap = lerp(185, 215, diff);
+  var maxGap = lerp(320, 400, diff);
+  // 偶尔强制转向，避免老是同一条直线
+  if(last.cameVia && Math.random() < 0.22) dir = (last.cameVia === 'x') ? 'y' : 'x';
+
+  var gap = rand(minGap, maxGap);
+  var nb = makeBlock(dir === 'x' ? last.x + gap : last.x,
+                     dir === 'y' ? last.y + gap : last.y);
+  // 保证不与上一块重叠
+  var need = (dir === 'x') ? (last.w + nb.w) / 2 + 55 : (last.d + nb.d) / 2 + 55;
+  if(gap < need){
+    gap = need;
+    if(dir === 'x') nb.x = last.x + gap; else nb.y = last.y + gap;
+  }
+  nb.cameVia = dir;
+  G.blocks.push(nb);
+}
+
+function reset(){
+  G.blocks = [];
+  G.idx = 0;
+  G.score = 0;
+  G.combo = 0;
+  G.power = 0;
+  G.texts = [];
+  G.dust = [];
+  G.jump = null;
+  G.fall = null;
+  G.dwell = 0;
+  G.hint = 1;
+  G.shake = 0;
+  G.time = 0;
+
+  var b0 = { x:0, y:0, z:0, type:'box', color:'#f5c842', w:112, d:112, depth:300,
+             press:0, dwell:0, given:false, hopT:-1, spin:0, disc:0, door:0, glow:0 };
+  paint(b0);
+  G.blocks.push(b0);
+  for(var i = 0; i < 5; i++) genNext();
+
+  G.piece.x = 0; G.piece.y = 0; G.piece.z = 0;
+  G.piece.flip = 0; G.piece.tilt = 0; G.piece.sx = 1; G.piece.sy = 1;
+
+  G.anchorX = W * 0.38;
+  var p = proj(0, 0, 0);
+  G.cam.X = p.X; G.cam.Y = p.Y;
+}
+
+function curBlock(){ return G.blocks[G.idx]; }
+function nextBlock(){ return G.blocks[G.idx + 1]; }
+
+/* ============================================================
+   操作
+   ============================================================ */
+function startCharge(){
+  if(G.state !== 'idle') return;
+  G.state = 'charging';
+  G.power = 0;
+  lastNote = -1;
+  ac();
+}
+function release(){
+  if(G.state !== 'charging') return;
+  var b = curBlock(), nb = nextBlock();
+  if(!nb){ G.state = 'idle'; return; }
+
+  var dist = MIN_D + G.power * (MAX_D - MIN_D);
+  var dx = nb.x - G.piece.x, dy = nb.y - G.piece.y;
+  var len = Math.hypot(dx, dy) || 1;
+  var ux = dx / len, uy = dy / len;
+
+  G.jump = {
+    p: 0,
+    dur: 0.30 + dist * 0.00148,
+    from: { x: G.piece.x, y: G.piece.y, z: b.z },
+    to:   { x: G.piece.x + ux * dist, y: G.piece.y + uy * dist, z: nb.z },
+    ux: ux, uy: uy,
+    dist: dist,
+    arc: 68 + dist * 0.24
+  };
+  G.state = 'jumping';
+  G.power = 0;
+  G.hint = 0;
+  b.press = 0;
+  beep(300 + dist * 0.35, 0.07, 'triangle', 0.10);
+}
+
+function land(){
+  var j = G.jump;
+  var nb = nextBlock();
+  var ex = j.to.x, ey = j.to.y;
+  var ok = false;
+  if(nb.type === 'cylinder' || nb.type === 'manhole'){
+    ok = Math.hypot(ex - nb.x, ey - nb.y) <= nb.w / 2;
+  } else {
+    ok = Math.abs(ex - nb.x) <= nb.w / 2 && Math.abs(ey - nb.y) <= nb.d / 2;
+  }
+
+  if(!ok){ startFall(); return; }
+
+  G.idx++;
+  G.piece.x = ex; G.piece.y = ey; G.piece.z = nb.z;
+  G.piece.flip = 0;
+  G.state = 'idle';
+  G.jump = null;
+  G.dwell = 0;
+
+  var off = Math.hypot(ex - nb.x, ey - nb.y);
+  G.score += 1;
+  SFX.land();
+
+  nb.press = 0.55 + 0.2 * clamp(off / 40, 0, 1);
+  G.piece.sy = 0.70; G.piece.sx = 1.24;
+  spawnDust(P(ex, ey, nb.z));
+
+  if(off <= CENTER_R){
+    G.combo++;
+    var bonus = Math.min(2 * G.combo, 32);
+    G.score += bonus;
+    SFX.center();
+    popText(P(nb.x, nb.y, nb.z), '+' + bonus, '#f0813c', 30);
+    if(G.combo >= 2) popText(P(nb.x, nb.y, nb.z), '连击 ' + G.combo, '#f0a03c', 16, -34);
+    nb.hopT = 0;
+  } else {
+    G.combo = 0;
+    // 边缘落点会晃动
+    var edge = clamp(off / (Math.min(nb.w, nb.d) / 2), 0, 1);
+    G.piece.tilt = (Math.random() < 0.5 ? -1 : 1) * edge * 0.20;
+  }
+
+  while(G.blocks.length < G.idx + 6) genNext();
+}
+
+function startFall(){
+  var j = G.jump;
+  var extra = j.dist - Math.hypot(nextBlock().x - j.from.x, nextBlock().y - j.from.y);
+  var sp = clamp(extra, -160, 160) * 0.42;
+  G.fall = { vx: j.ux * sp, vy: j.uy * sp, vz: 40, rot: 0,
+             vrot: (Math.random() < 0.5 ? -1 : 1) * rand(4, 8), t: 0 };
+  G.piece.x = j.to.x; G.piece.y = j.to.y; G.piece.z = j.to.z;
+  G.state = 'falling';
+  G.jump = null;
+  G.shake = 1;
+}
+
+function gameOver(){
+  G.state = 'over';
+  if(G.score > G.best){
+    G.best = G.score;
+    localStorage.setItem('tty_best', String(G.best));
+  }
+  document.getElementById('finalScore').textContent = G.score;
+  document.getElementById('bestScore').textContent = G.best;
+  document.getElementById('over').classList.remove('hide');
+  SFX.die();
+}
+
+/* ============================================================
+   特效
+   ============================================================ */
+function popText(s, str, color, size, dy){
+  G.texts.push({ x:s.x, y:s.y + (dy || -6), text:str, color:color, size:size, t:0, life:1.1 });
+}
+function spawnDust(s){
+  for(var i = 0; i < 9; i++){
+    var a = rand(0, PI2), sp = rand(28, 92);
+    G.dust.push({
+      x: s.x, y: s.y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.42 - rand(10, 46),
+      r: rand(1.6, 4.2), t: 0, life: rand(0.34, 0.68)
+    });
+  }
+}
+
+/* ============================================================
+   更新
+   ============================================================ */
+function update(dt){
+  G.time += dt;
+  var b = curBlock();
+
+  // —— 蓄力 ——
+  if(G.state === 'charging'){
+    G.power = Math.min(1, G.power + dt / MAXP);
+    var n = Math.min(SCALE.length - 1, Math.floor(G.power * SCALE.length));
+    if(n !== lastNote){ lastNote = n; beep(SCALE[n], 0.30, 'triangle', 0.13); }
+    b.press = G.power;
+    G.piece.sy = 1 - 0.30 * G.power;
+    G.piece.sx = 1 + 0.24 * G.power;
+  }
+
+  // —— 飞行 ——
+  if(G.state === 'jumping'){
+    var j = G.jump;
+    j.p += dt / j.dur;
+    if(j.p >= 1){
+      j.p = 1;
+      G.piece.x = j.to.x; G.piece.y = j.to.y; G.piece.z = j.to.z;
+      land();
+    } else {
+      var p = j.p;
+      G.piece.x = lerp(j.from.x, j.to.x, p);
+      G.piece.y = lerp(j.from.y, j.to.y, p);
+      G.piece.z = j.from.z + (j.to.z - j.from.z) * p + j.arc * 4 * p * (1 - p);
+      G.piece.flip = easeInOutSine(p) * PI2;
+      G.piece.sy = lerp(1.16, 0.94, p);
+      G.piece.sx = lerp(0.90, 1.06, p);
+    }
+  }
+
+  // —— 坠落 ——
+  if(G.state === 'falling'){
+    var f = G.fall;
+    f.t += dt;
+    f.vz -= 2400 * dt;
+    G.piece.x += f.vx * dt;
+    G.piece.y += f.vy * dt;
+    G.piece.z += f.vz * dt;
+    G.piece.flip += f.vrot * dt;
+    G.piece.sx = lerp(G.piece.sx, 1, 1 - Math.exp(-6 * dt));
+    G.piece.sy = lerp(G.piece.sy, 1, 1 - Math.exp(-6 * dt));
+    if(f.t > 1.15) gameOver();
+  }
+
+  // —— 站着时的回弹 / 晃动 ——
+  if(G.state === 'idle'){
+    var k = 1 - Math.exp(-13 * dt);
+    G.piece.sx = lerp(G.piece.sx, 1, k);
+    G.piece.sy = lerp(G.piece.sy, 1, k);
+    G.piece.tilt *= Math.exp(-7 * dt);
+    b.press = lerp(b.press, 0, 1 - Math.exp(-11 * dt));
+  }
+
+  // —— 特殊方块停留加分 ——
+  if(G.state === 'idle' && b.special && !b.given){
+    G.dwell += dt;
+    if(b.type === 'cube') b.spin += dt * 1.2;
+    if(G.dwell >= b.special.wait){
+      b.given = true;
+      b.hopT = 0;
+      G.score += b.special.bonus;
+      popText(P(b.x, b.y, b.z), '+' + b.special.bonus, '#e0574f', 30);
+      popText(P(b.x, b.y, b.z), b.special.name, '#8d877e', 14, -34);
+      if(SFX[b.type]) SFX[b.type]();
+      if(b.type === 'shop') b.door = 0.0001;
+    }
+  }
+
+  // 方块动画
+  for(var i = Math.max(0, G.idx - 2); i < G.blocks.length; i++){
+    var bl = G.blocks[i];
+    if(bl.hopT >= 0){
+      bl.hopT += dt;
+      if(bl.hopT > 1.2) bl.hopT = -1;
+    }
+    if(bl.given && bl.type === 'shop') bl.door = Math.min(1, bl.door + dt * 3.2);
+    if(bl.type === 'music') bl.disc += dt * (bl.given ? 2.4 : 0.85);
+  }
+
+  // —— 相机 ——
+  var fx, fy, fz;
+  if(G.state === 'jumping' || G.state === 'falling'){
+    fx = G.piece.x; fy = G.piece.y; fz = G.piece.z;
+  } else {
+    fx = b.x; fy = b.y; fz = b.z;
+  }
+  var fp = proj(fx, fy, fz);
+  var cs = 1 - Math.exp(-9 * dt);
+  G.cam.X = lerp(G.cam.X, fp.X, cs);
+  G.cam.Y = lerp(G.cam.Y, fp.Y, cs);
+
+  var nb = nextBlock();
+  if(nb){
+    var ax = (nb.x > b.x + 1) ? W * 0.36 : W * 0.64;
+    G.anchorX = lerp(G.anchorX, ax, 1 - Math.exp(-5 * dt));
+  }
+
+  G.shake = Math.max(0, G.shake - dt * 3);
+
+  // —— 飘字 / 灰尘 ——
+  for(var t = G.texts.length - 1; t >= 0; t--){
+    var tx = G.texts[t];
+    tx.t += dt;
+    if(tx.t > tx.life) G.texts.splice(t, 1);
+  }
+  for(var d = G.dust.length - 1; d >= 0; d--){
+    var du = G.dust[d];
+    du.t += dt;
+    du.x += du.vx * dt; du.y += du.vy * dt;
+    du.vy += 260 * dt; du.vx *= 0.94;
+    if(du.t > du.life) G.dust.splice(d, 1);
+  }
+}
+
+/* ============================================================
+   绘制：背景
+   ============================================================ */
+function drawBg(){
+  var g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#f6f4ef');
+  g.addColorStop(0.55, '#eeebe4');
+  g.addColorStop(1, '#e2ded4');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  var r = ctx.createRadialGradient(W * 0.5, H * 0.34, 40, W * 0.5, H * 0.34, H * 0.62);
+  r.addColorStop(0, 'rgba(255,255,255,0.55)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = r;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ============================================================
+   绘制：方块
+   ============================================================ */
+function polyPath(pts){
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for(var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+}
+function fillPoly(pts, color){
+  polyPath(pts);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+// 面参数化：u,v ∈ [0,1]
+function facePt(b, face, u, v, zt){
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+  if(face === 'top')   return P(lerp(x0, x1, u), lerp(y0, y1, v), zt);
+  if(face === 'left')  return P(x0, lerp(y0, y1, u), lerp(zb, zt, v));
+  return P(lerp(x0, x1, u), y0, lerp(zb, zt, v));   // right
+}
+function faceQuad(b, face, u0, v0, u1, v1, zt, color){
+  fillPoly([facePt(b, face, u0, v0, zt), facePt(b, face, u1, v0, zt),
+            facePt(b, face, u1, v1, zt), facePt(b, face, u0, v1, zt)], color);
+}
+
+function blockTopZ(b){
+  var z = b.z - b.press * 20;
+  if(b.hopT >= 0) z += Math.abs(Math.sin(b.hopT * 13)) * Math.exp(-b.hopT * 3.4) * 11;
+  return z;
+}
+
+// 柱体底部渐隐，避免生硬截断
+function fadeTail(path, botY, h){
+  ctx.save();
+  ctx.clip(path);
+  var gr = ctx.createLinearGradient(0, botY - h, 0, botY + 8);
+  gr.addColorStop(0, 'rgba(227,223,213,0)');
+  gr.addColorStop(0.55, 'rgba(227,223,213,0.50)');
+  gr.addColorStop(1, 'rgba(227,223,213,0.95)');
+  ctx.fillStyle = gr;
+  ctx.fillRect(-400, botY - h - 20, W + 800, h + 40);
+  ctx.restore();
+}
+
+function boxSilhouette(b, zt){
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+  var pts = [P(x0, y0, zb), P(x1, y0, zb), P(x1, y0, zt),
+             P(x1, y1, zt), P(x0, y1, zt), P(x0, y1, zb)];
+  var p = new Path2D();
+  p.moveTo(pts[0].x, pts[0].y);
+  for(var i = 1; i < pts.length; i++) p.lineTo(pts[i].x, pts[i].y);
+  p.closePath();
+  return p;
+}
+function boxFade(b, zt){
+  fadeTail(boxSilhouette(b, zt),
+           P(b.x - b.w / 2, b.y - b.d / 2, b.z - b.depth).y,
+           clamp(b.depth * 0.5, 40, 150));
+}
+
+function drawBox(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+
+  // 右面 (y = y0)
+  fillPoly([P(x0, y0, zb), P(x1, y0, zb), P(x1, y0, zt), P(x0, y0, zt)], b.cRight);
+  // 左面 (x = x0)
+  fillPoly([P(x0, y0, zb), P(x0, y1, zb), P(x0, y1, zt), P(x0, y0, zt)], b.cLeft);
+  // 顶面
+  fillPoly([P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt)], b.cTop);
+  // 顶面高光描边
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = 1;
+  polyPath([P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt)]);
+  ctx.stroke();
+
+  boxFade(b, zt);
+}
+
+function cylBody(ct, cb, rx, ry){
+  var p = new Path2D();
+  p.moveTo(ct.x - rx, ct.y);
+  p.lineTo(cb.x - rx, cb.y);
+  p.ellipse(cb.x, cb.y, rx, ry, 0, Math.PI, 0, true);
+  p.lineTo(ct.x + rx, ct.y);
+  p.ellipse(ct.x, ct.y, rx, ry, 0, 0, Math.PI, false);
+  p.closePath();
+  return p;
+}
+
+function drawCylinder(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var r = b.w / 2;
+  var rx = r * Math.SQRT2 * COS30;
+  var ry = r * Math.SQRT2 * 0.5;
+  var ct = P(b.x, b.y, zt), cb = P(b.x, b.y, zb);
+
+  // 侧壁
+  var body = cylBody(ct, cb, rx, ry);
+  var g = ctx.createLinearGradient(ct.x - rx, 0, ct.x + rx, 0);
+  g.addColorStop(0, darken(b.color, 0.06));
+  g.addColorStop(0.34, lighten(b.color, 0.03));
+  g.addColorStop(1, darken(b.color, 0.32));
+  ctx.fillStyle = g;
+  ctx.fill(body);
+  fadeTail(body, cb.y + ry, clamp(b.depth * 0.5, 30, 150));
+
+  // 顶盖
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.fillStyle = b.cTop;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawManhole(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var r = b.w / 2;
+  var rx = r * Math.SQRT2 * COS30;
+  var ry = r * Math.SQRT2 * 0.5;
+  var ct = P(b.x, b.y, zt), cb = P(b.x, b.y, zb);
+
+  var body = cylBody(ct, cb, rx, ry);
+  var g = ctx.createLinearGradient(ct.x - rx, 0, ct.x + rx, 0);
+  g.addColorStop(0, '#7e8791');
+  g.addColorStop(0.35, '#9aa3ad');
+  g.addColorStop(1, '#6d757e');
+  ctx.fillStyle = g;
+  ctx.fill(body);
+  fadeTail(body, cb.y + ry, clamp(b.depth * 0.5, 30, 150));
+
+  // 盖面
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.fillStyle = '#a8b0b8';
+  ctx.fill();
+
+  // 纹路
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(90,98,106,0.55)';
+  ctx.lineWidth = 1.4;
+  for(var i = 1; i <= 2; i++){
+    ctx.beginPath();
+    ctx.ellipse(ct.x, ct.y, rx * (1 - i * 0.22), ry * (1 - i * 0.22), 0, 0, PI2);
+    ctx.stroke();
+  }
+  // 放射凹槽
+  ctx.lineWidth = 2.2;
+  for(var k = 0; k < 8; k++){
+    var a = k * Math.PI / 4 + 0.2;
+    ctx.beginPath();
+    ctx.moveTo(ct.x + Math.cos(a) * rx * 0.42, ct.y + Math.sin(a) * ry * 0.42);
+    ctx.lineTo(ct.x + Math.cos(a) * rx * 0.74, ct.y + Math.sin(a) * ry * 0.74);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.strokeStyle = 'rgba(60,66,72,0.35)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+}
+
+function drawCube(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+
+  fillPoly([P(x0, y0, zb), P(x1, y0, zb), P(x1, y0, zt), P(x0, y0, zt)], '#cfcbc2');
+  fillPoly([P(x0, y0, zb), P(x0, y1, zb), P(x0, y1, zt), P(x0, y0, zt)], '#dedad1');
+
+  // 顶面九宫格
+  var spin = Math.floor(b.spin) % 6;
+  var cols = ['#e8524f','#f5a623','#f2f0eb','#4a90d9','#37b26b','#f2f0eb'];
+  for(var i = 0; i < 3; i++){
+    for(var j = 0; j < 3; j++){
+      var c = cols[(i * 3 + j + spin + 6) % 6];
+      faceQuad(b, 'top', i / 3 + 0.035, j / 3 + 0.035,
+                         (i + 1) / 3 - 0.035, (j + 1) / 3 - 0.035, zt, c);
+    }
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+  ctx.lineWidth = 1;
+  polyPath([P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt)]);
+  ctx.stroke();
+
+  boxFade(b, zt);
+}
+
+function drawShop(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+
+  // 墙体
+  fillPoly([P(x0, y0, zb), P(x1, y0, zb), P(x1, y0, zt), P(x0, y0, zt)], '#d8d2c6');
+  fillPoly([P(x0, y0, zb), P(x0, y1, zb), P(x0, y1, zt), P(x0, y0, zt)], '#e6e0d4');
+
+  // 屋檐（顶面外圈）
+  fillPoly([P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt)], '#c0453f');
+  // 屋顶内侧
+  faceQuad(b, 'top', 0.16, 0.16, 0.84, 0.84, zt, '#d1554d');
+  // 屋脊
+  var a = P(lerp(x0, x1, 0.5), y0, zt), c2 = P(lerp(x0, x1, 0.5), y1, zt);
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c2.x, c2.y); ctx.stroke();
+
+  // 招牌（右面）
+  faceQuad(b, 'right', 0.16, 0.70, 0.84, 0.88, zt, '#f7f4ee');
+  faceQuad(b, 'right', 0.22, 0.76, 0.78, 0.83, zt, '#c0453f');
+
+  // 门（右面）
+  faceQuad(b, 'right', 0.34, 0.14, 0.66, 0.60, zt, '#4e4a44');
+  if(b.door > 0){
+    var d0 = clamp(b.door, 0, 1);
+    faceQuad(b, 'right', 0.38, 0.16, 0.62, 0.16 + 0.42 * d0, zt, 'rgba(255,214,140,' + (0.85 * d0) + ')');
+  }
+
+  // 窗（左面）
+  faceQuad(b, 'left', 0.24, 0.56, 0.72, 0.80, zt, '#8fc4d8');
+
+  boxFade(b, zt);
+
+  if(b.given){
+    var sp = P(b.x, b.y, zt);
+    var gl = ctx.createRadialGradient(sp.x, sp.y - 4, 2, sp.x, sp.y - 4, 70);
+    gl.addColorStop(0, 'rgba(255,206,120,0.34)');
+    gl.addColorStop(1, 'rgba(255,206,120,0)');
+    ctx.fillStyle = gl;
+    ctx.fillRect(sp.x - 80, sp.y - 80, 160, 160);
+  }
+}
+
+function drawMusic(b){
+  var zt = blockTopZ(b);
+  var zb = b.z - b.depth;
+  var x0 = b.x - b.w / 2, x1 = b.x + b.w / 2;
+  var y0 = b.y - b.d / 2, y1 = b.y + b.d / 2;
+
+  fillPoly([P(x0, y0, zb), P(x1, y0, zb), P(x1, y0, zt), P(x0, y0, zt)], '#b8946a');
+  fillPoly([P(x0, y0, zb), P(x0, y1, zb), P(x0, y1, zt), P(x0, y0, zt)], '#cba87e');
+  fillPoly([P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt)], '#e0c193');
+
+  // 唱片
+  var ct = P(b.x, b.y, zt);
+  var rr = b.w * 0.36;
+  var rx = rr * Math.SQRT2 * COS30, ry = rr * Math.SQRT2 * 0.5;
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.fillStyle = '#2e2b28';
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx, ry, 0, 0, PI2);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  for(var i = 1; i <= 3; i++){
+    ctx.beginPath();
+    ctx.ellipse(ct.x, ct.y, rx * i / 4, ry * i / 4, 0, 0, PI2);
+    ctx.stroke();
+  }
+  // 转臂 + 标签
+  ctx.strokeStyle = 'rgba(255,255,255,0.42)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(ct.x, ct.y);
+  ctx.lineTo(ct.x + Math.cos(b.disc) * rx * 0.9, ct.y + Math.sin(b.disc) * ry * 0.9);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx * 0.30, ry * 0.30, 0, 0, PI2);
+  ctx.fillStyle = '#e8604f';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(ct.x, ct.y, rx * 0.07, ry * 0.07, 0, 0, PI2);
+  ctx.fillStyle = '#f6f2ea';
+  ctx.fill();
+
+  boxFade(b, zt);
+
+  // 音符
+  if(b.given){
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    var off = (G.time * 26) % 34;
+    ctx.fillText('♪', ct.x + 16, ct.y - 18 - off);
+    ctx.globalAlpha = 0.6;
+    ctx.fillText('♫', ct.x - 18, ct.y - 10 - off * 0.7);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawBlock(b){
+  switch(b.type){
+    case 'cylinder': drawCylinder(b); break;
+    case 'manhole':  drawManhole(b);  break;
+    case 'cube':     drawCube(b);     break;
+    case 'shop':     drawShop(b);     break;
+    case 'music':    drawMusic(b);    break;
+    default:         drawBox(b);
+  }
+}
+
+// 下一个方块中心的白色圆圈提示
+function drawAimRing(b){
+  var zt = blockTopZ(b) + 0.6;
+  var s = P(b.x, b.y, zt);
+  var rx = CENTER_R * Math.SQRT2 * COS30;
+  var ry = CENTER_R * Math.SQRT2 * 0.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(s.x, s.y, rx, ry, 0, 0, PI2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(s.x, s.y, rx * 0.30, ry * 0.30, 0, 0, PI2);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ============================================================
+   绘制：棋子
+   ============================================================ */
+function pawnPath(){
+  var p = new Path2D();
+  p.moveTo(-11, -4);
+  p.bezierCurveTo(-11.6, -14, -10.2, -22, -7.2, -27);
+  p.bezierCurveTo(-5.6, -30, -6.3, -32.4, -6.5, -35);
+  p.arc(0, -35, 6.5, Math.PI, PI2, false);
+  p.bezierCurveTo(6.3, -32.4, 5.6, -30, 7.2, -27);
+  p.bezierCurveTo(10.2, -22, 11.6, -14, 11, -4);
+  p.bezierCurveTo(11, -0.5, 6, 1.8, 0, 1.8);
+  p.bezierCurveTo(-6, 1.8, -11, -0.5, -11, -4);
+  p.closePath();
+  return p;
+}
+var PAWN = pawnPath();
+
+function drawPawn(){
+  var g = ctx.createLinearGradient(-12, 0, 12, 0);
+  g.addColorStop(0, '#464d6b');
+  g.addColorStop(0.30, '#292e46');
+  g.addColorStop(0.75, '#1b1f33');
+  g.addColorStop(1, '#14172a');
+  ctx.fillStyle = g;
+  ctx.fill(PAWN);
+
+  ctx.save();
+  ctx.clip(PAWN);
+  // 高光
+  var hg = ctx.createRadialGradient(-4.2, -37, 0.5, -3.6, -34, 15);
+  hg.addColorStop(0, 'rgba(255,255,255,0.38)');
+  hg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hg;
+  ctx.fillRect(-13, -48, 16, 26);
+  // 底部反光
+  var bg = ctx.createLinearGradient(0, 1.8, 0, -14);
+  bg.addColorStop(0, 'rgba(255,255,255,0.10)');
+  bg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(-13, -14, 26, 16);
+  ctx.restore();
+
+  // 轮廓
+  ctx.strokeStyle = 'rgba(10,12,22,0.55)';
+  ctx.lineWidth = 1;
+  ctx.stroke(PAWN);
+}
+
+function blockUnder(x, y){
+  for(var i = G.blocks.length - 1; i >= 0; i--){
+    var b = G.blocks[i];
+    if(b.type === 'cylinder' || b.type === 'manhole'){
+      if(Math.hypot(x - b.x, y - b.y) <= b.w / 2) return b;
+    } else {
+      if(Math.abs(x - b.x) <= b.w / 2 && Math.abs(y - b.y) <= b.d / 2) return b;
+    }
+  }
+  return null;
+}
+
+function drawPiece(){
+  var pc = G.piece;
+
+  // 影子
+  var gb = blockUnder(pc.x, pc.y);
+  if(gb){
+    var h = pc.z - gb.z;
+    var t = clamp(h / 230, 0, 1);
+    var s = P(pc.x, pc.y, gb.z + 0.4);
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, 13 * (1 - t * 0.42), 5.4 * (1 - t * 0.42), 0, 0, PI2);
+    ctx.fillStyle = 'rgba(70,64,80,' + (0.24 * (1 - t * 0.62)).toFixed(3) + ')';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  var sp = P(pc.x, pc.y, pc.z);
+  ctx.save();
+  ctx.translate(sp.x, sp.y);
+  ctx.rotate(pc.tilt);
+  ctx.translate(0, -22);
+  ctx.rotate(pc.flip);
+  ctx.translate(0, 22);
+  ctx.scale(pc.sx, pc.sy);
+  ctx.translate(0, -1.8);
+  drawPawn();
+  ctx.restore();
+}
+
+/* ============================================================
+   绘制：UI
+   ============================================================ */
+function drawScore(){
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(74,68,60,0.30)';
+  ctx.font = '600 62px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText(String(G.score), W / 2, 112);
+  ctx.restore();
+}
+
+function drawHint(){
+  if(G.hint <= 0) return;
+  var a = clamp(G.hint, 0, 1) * (0.55 + 0.45 * Math.sin(G.time * 2.6));
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(120,113,104,' + (0.5 * a).toFixed(3) + ')';
+  ctx.font = '14px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('按住蓄力，松手起跳', W / 2, H - 92);
+  ctx.restore();
+}
+
+function drawTexts(){
+  ctx.save();
+  ctx.textAlign = 'center';
+  for(var i = 0; i < G.texts.length; i++){
+    var t = G.texts[i];
+    var k = t.t / t.life;
+    var a = k < 0.15 ? (k / 0.15) : (1 - (k - 0.15) / 0.85);
+    var rise = easeOutCubic(Math.min(1, k * 1.7)) * 46;
+    var pop = k < 0.18 ? 1 + (1 - k / 0.18) * 0.35 : 1;
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.fillStyle = t.color;
+    ctx.font = '700 ' + (t.size * pop).toFixed(1) + 'px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillText(t.text, t.x, t.y - rise);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+function drawDust(){
+  ctx.save();
+  for(var i = 0; i < G.dust.length; i++){
+    var d = G.dust[i];
+    var a = 1 - d.t / d.life;
+    ctx.globalAlpha = a * 0.5;
+    ctx.fillStyle = '#9c958a';
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r * (0.4 + a * 0.6), 0, PI2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/* ============================================================
+   主渲染
+   ============================================================ */
+function render(){
+  ctx.save();
+  if(G.shake > 0){
+    var m = G.shake * G.shake * 5;
+    ctx.translate(rand(-m, m), rand(-m, m));
+  }
+
+  drawBg();
+
+  // 远 -> 近
+  var list = G.blocks.slice().sort(function(a, c){ return (c.x + c.y) - (a.x + a.y); });
+  for(var i = 0; i < list.length; i++){
+    var b = list[i];
+    var s = P(b.x, b.y, b.z);
+    if(s.y < -220 || s.y > H + 340 || s.x < -260 || s.x > W + 260) continue;
+    drawBlock(b);
+  }
+
+  // 目标方块中心白圈
+  var nb = nextBlock();
+  if(nb && (G.state === 'idle' || G.state === 'charging')) drawAimRing(nb);
+
+  drawDust();
+  drawPiece();
+  drawTexts();
+
+  ctx.restore();
+
+  drawScore();
+  drawHint();
+}
+
+/* ============================================================
+   主循环
+   ============================================================ */
+var last = 0;
+function frame(ts){
+  if(!last) last = ts;
+  var dt = Math.min(0.05, (ts - last) / 1000);
+  last = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   事件
+   ============================================================ */
+function beginGame(){
+  document.getElementById('start').classList.add('hide');
+  document.getElementById('over').classList.add('hide');
+  reset();
+  G.state = 'idle';
+  lastNote = -1;
+  ac();
+}
+document.getElementById('btnStart').addEventListener('click', function(e){
+  e.stopPropagation(); beginGame();
+});
+document.getElementById('btnRetry').addEventListener('click', function(e){
+  e.stopPropagation(); beginGame();
+});
+
+var soundBtn = document.getElementById('sound');
+soundBtn.addEventListener('click', function(e){
+  e.stopPropagation();
+  muted = !muted;
+  soundBtn.textContent = muted ? '🔇' : '🔊';
+  soundBtn.style.opacity = muted ? '0.55' : '1';
+  if(!muted) ac();
+});
+
+stage.addEventListener('pointerdown', function(e){
+  e.preventDefault();
+  ac();
+  startCharge();
+});
+window.addEventListener('pointerup', function(){ release(); });
+window.addEventListener('pointercancel', function(){ release(); });
+window.addEventListener('blur', function(){ release(); });
+
+window.addEventListener('keydown', function(e){
+  if(e.code === 'Space'){
+    e.preventDefault();
+    if(G.state === 'start' || G.state === 'over') beginGame();
+    else if(!e.repeat) startCharge();
+  }
+});
+window.addEventListener('keyup', function(e){
+  if(e.code === 'Space'){ e.preventDefault(); release(); }
+});
+window.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+/* ============================================================
+   启动
+   ============================================================ */
+fit();
+reset();
+G.state = 'start';
+requestAnimationFrame(frame);
+
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a593dcca47655a',t:'MTc4OTI4NjAwMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

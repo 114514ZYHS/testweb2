@@ -1,0 +1,2196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="./">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>APFSDS 侵彻 可动有限元仿真 (2D)</title>
+<style>
+:root{
+  --bg:#0b0e14; --bg2:#121722; --bg3:#182031; --line:#243047;
+  --fg:#dfe6f2; --dim:#8fa0bb; --acc:#5aa9ff; --acc2:#ffd666; --ok:#5ad19a; --bad:#ff7b7b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
+#app{display:grid;grid-template-columns:302px 1fr;grid-template-rows:52px 1fr;height:100vh}
+#top{grid-column:1/3;display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;background:linear-gradient(180deg,#141b28,#0d1119);border-bottom:1px solid var(--line)}
+.brand b{font-size:15px;letter-spacing:.4px}
+.brand .sub{color:var(--dim);font-size:11.5px;margin-left:10px}
+.runbar{display:flex;gap:7px;align-items:center}
+button{background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+  padding:6px 11px;cursor:pointer;font-size:12.5px;transition:.15s}
+button:hover{background:#222d44;border-color:#39507a}
+button.primary{background:#1c4f8a;border-color:#2d6cb8}
+button.primary:hover{background:#245fa6}
+.pill{background:#1b2436;border:1px solid var(--line);border-radius:20px;padding:3px 12px;
+  font-size:11.5px;color:var(--acc)}
+#panel{overflow-y:auto;background:var(--bg2);border-right:1px solid var(--line);padding:10px 11px 40px}
+#panel::-webkit-scrollbar{width:9px}
+#panel::-webkit-scrollbar-thumb{background:#28344c;border-radius:5px}
+.grp{margin-bottom:14px;background:#0f1420;border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.grp h3{margin:0 0 8px;font-size:12.5px;color:var(--acc);font-weight:600;letter-spacing:.3px}
+label{display:block;margin:7px 0;font-size:12px;color:var(--dim)}
+label b{color:var(--fg);font-weight:600}
+select,input[type=number],input[type=text]{width:100%;margin-top:3px;background:#0b0f18;color:var(--fg);
+  border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:12px}
+input[type=range]{width:100%;margin-top:4px;accent-color:var(--acc);height:16px}
+label.ck{display:flex;align-items:center;gap:7px;color:var(--fg)}
+label.ck input{accent-color:var(--acc);width:14px;height:14px}
+.note{color:#7f90ab;font-size:11px;margin:5px 0 2px;line-height:1.45}
+.row{display:flex;gap:6px;margin-top:7px}
+.row button{flex:1;padding:5px}
+.row2{display:flex;gap:7px}.row2 label{flex:1}
+.layer{display:grid;grid-template-columns:1fr 70px 26px;gap:5px;align-items:center;margin:5px 0;
+  background:#0b0f18;border:1px solid var(--line);border-radius:5px;padding:5px}
+.layer select,.layer input{margin:0;font-size:11.5px;padding:3px 4px}
+.layer .del{background:#2a1b21;border-color:#4a2a33;color:#ff9c9c;padding:3px;border-radius:4px;cursor:pointer;
+  font-size:11px;line-height:1;border-width:1px;border-style:solid}
+#main{display:grid;grid-template-rows:1fr 186px;min-width:0;min-height:0}
+#view{position:relative;min-height:0;background:#0e1118}
+#gl,#ov{position:absolute;inset:0;width:100%;height:100%;display:block}
+#ov{pointer-events:none}
+#hud{position:absolute;left:12px;top:10px;font:11.5px/1.65 ui-monospace,Consolas,monospace;
+  color:#cfe0f7;background:rgba(10,14,22,.72);border:1px solid var(--line);border-radius:7px;
+  padding:7px 11px;pointer-events:none;white-space:pre}
+#probe{position:absolute;right:12px;top:10px;font:11.5px/1.6 ui-monospace,Consolas,monospace;
+  color:#cfe0f7;background:rgba(10,14,22,.72);border:1px solid var(--line);border-radius:7px;
+  padding:6px 10px;pointer-events:none;white-space:pre;display:none}
+#bottom{display:grid;grid-template-columns:1fr 1fr 320px;gap:8px;padding:8px;
+  background:var(--bg2);border-top:1px solid var(--line);min-height:0}
+.chartbox{background:#0f1420;border:1px solid var(--line);border-radius:7px;position:relative;min-width:0}
+.chartbox canvas{width:100%;height:100%;display:block}
+#result{background:#0f1420;border:1px solid var(--line);border-radius:7px;padding:8px 11px;
+  overflow-y:auto;font-size:11.8px;line-height:1.7}
+#result h4{margin:0 0 5px;font-size:12px;color:var(--acc)}
+#result table{width:100%;border-collapse:collapse}
+#result td{padding:1px 0}
+#result td:first-child{color:var(--dim)}
+#result td:last-child{text-align:right;font-family:ui-monospace,Consolas,monospace}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--acc2)}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand">
+      <b>APFSDS 侵彻 · 可动有限元仿真</b>
+      <span class="sub">2D 拉格朗日显式 FEM｜Johnson-Cook + Mie-Grüneisen｜单元侵蚀 + 侵蚀型接触</span>
+    </div>
+    <div class="runbar">
+      <button id="btnRun" class="primary">▶ 开始</button>
+      <button id="btnStep">⏭ 单步×20</button>
+      <button id="btnReset">↺ 重置</button>
+      <button id="btnFit">⤢ 适配视图</button>
+      <button id="btnShot">⇩ 存图</button>
+      <span id="mode" class="pill">—</span>
+    </div>
+  </header>
+
+  <aside id="panel">
+    <section class="grp">
+      <h3>① 预设工况</h3>
+      <label>弹种<select id="selProj"></select></label>
+      <div id="projNote" class="note"></div>
+      <label>装甲<select id="selTgt"></select></label>
+      <label>精度 / 流畅度<select id="selQual"></select></label>
+      <div id="qualNote" class="note"></div>
+    </section>
+
+    <section class="grp">
+      <h3>② 弹芯参数</h3>
+      <label>弹芯材料<select id="selPMat"></select></label>
+      <label>撞击速度 <b><span id="vVal">1650</span> m/s</b>
+        <input id="rngV" type="range" min="800" max="2000" step="10"></label>
+      <label>杆长 <b><span id="lVal">640</span> mm</b>
+        <input id="rngL" type="range" min="200" max="900" step="10"></label>
+      <label>直径 <b><span id="dVal">22</span> mm</b>
+        <input id="rngD" type="range" min="12" max="40" step="1"></label>
+      <label>头部形状<select id="selNose">
+        <option value="cone">尖锥</option><option value="ogive">卵形</option>
+        <option value="hemi">半球</option><option value="blunt">平头</option></select></label>
+      <label>偏航角 (仅平面应变) <b><span id="yVal">0</span>°</b>
+        <input id="rngYaw" type="range" min="-10" max="10" step="0.5"></label>
+      <div id="projInfo" class="note"></div>
+    </section>
+
+    <section class="grp">
+      <h3>③ 装甲结构</h3>
+      <label>倾角 (法线角) <b><span id="obVal">0</span>°</b>
+        <input id="rngOb" type="range" min="0" max="70" step="1"></label>
+      <div id="layers"></div>
+      <div class="row">
+        <button id="btnAddPlate">+ 装甲层</button>
+        <button id="btnAddGap">+ 空气间隙</button>
+      </div>
+      <label>边界支撑<select id="selSup">
+        <option value="lateral">侧向固支(默认)</option>
+        <option value="full">侧向+背面固支</option></select></label>
+      <div id="tgtInfo" class="note"></div>
+    </section>
+
+    <section class="grp">
+      <h3>④ 求解设置</h3>
+      <label>计算模式<select id="selMode">
+        <option value="auto">自动 (0°轴对称 / 有倾角平面应变)</option>
+        <option value="axi">强制轴对称 r-z</option>
+        <option value="ps">强制平面应变</option></select></label>
+      <div class="note">轴对称最接近真实长杆的三维锥腔约束, 但只能用于 0° 正撞; 有倾角必须用平面应变。</div>
+      <div class="note"><b>为什么只做 2D?</b> 同样的空间分辨率下 3D 单元数是 2D 的 O(N) 倍
+      (本例约 3千万单元)、时间步相同, 显式求解需 ~10⁴ 倍算力; 浏览器 JS 单线程约 3×10⁷ 单元·步/秒,
+      3D 一个算例要数十小时, 而 2D 截面在同一台机器上是秒级到分钟级, 且长杆侵彻的核心物理
+      (蘑菇头、坑壁流动、侵蚀速率、背板崩落) 在轴对称/平面应变截面上是完备的。</div>
+      <label>仿真时长上限 <b><span id="tmVal">400</span> µs</b>
+        <input id="rngTmax" type="range" min="50" max="1600" step="25"></label>
+      <label>接触摩擦系数 <b><span id="muVal">0.10</span></b>
+        <input id="rngMu" type="range" min="0" max="0.5" step="0.01"></label>
+      <label>沙漏控制系数 <b><span id="hgVal">0.10</span></b>
+        <input id="rngHg" type="range" min="0.02" max="0.25" step="0.01"></label>
+      <label class="ck"><input id="ckErode" type="checkbox" checked> 启用单元侵蚀</label>
+      <label class="ck"><input id="ckAbsorb" type="checkbox" checked> 吸收边界(抑制反射波)</label>
+    </section>
+
+    <section class="grp">
+      <h3>⑤ 显示</h3>
+      <label>云图场量<select id="selField"></select></label>
+      <label>色标<select id="selCmap">
+        <option value="0">Turbo</option><option value="1">Viridis</option><option value="2">冷暖</option></select></label>
+      <label class="ck"><input id="ckAuto" type="checkbox" checked> 自动量程</label>
+      <div class="row2">
+        <label>下限<input id="inLo" type="number" step="any"></label>
+        <label>上限<input id="inHi" type="number" step="any"></label>
+      </div>
+      <label class="ck"><input id="ckWire" type="checkbox"> 显示网格线</label>
+      <label class="ck"><input id="ckDeb" type="checkbox" checked> 显示侵蚀碎片</label>
+      <label class="ck"><input id="ckMir" type="checkbox" checked> 轴对称镜像显示</label>
+    </section>
+  </aside>
+
+  <main id="main">
+    <div id="view">
+      <canvas id="gl"></canvas>
+      <canvas id="ov"></canvas>
+      <div id="hud"></div>
+      <div id="probe"></div>
+    </div>
+    <div id="bottom">
+      <div class="chartbox"><canvas id="ch1"></canvas></div>
+      <div class="chartbox"><canvas id="ch2"></canvas></div>
+      <div id="result"></div>
+    </div>
+  </main>
+</div>
+<script>
+/* ==== 01_materials.js ==== */
+/* =====================================================================
+ * 01_materials.js  —  材料库 / 预设库
+ * 本构: Johnson-Cook 强度 + Johnson-Cook 损伤
+ * 状态方程: Mie-Grüneisen (线性 Us-Up 冲击 Hugoniot)
+ * 单位制: SI  (m, kg, s, Pa, K)
+ * 参数为公开文献中的工程近似值, 用于教学/趋势性仿真, 不作弹道鉴定依据
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+  var MPa = 1e6, GPa = 1e9;
+
+  /* ---------------------------------------------------------------
+   * 材料卡片字段说明
+   *  rho0  初始密度 kg/m^3          G     剪切模量 Pa
+   *  A,B,n,C,m                      JC 强度: sy=(A+B*ep^n)(1+C ln ed*)(1-Th^m)
+   *  Tm,Tr,cp,chi                   熔点/参考温度/比热/塑功热转换系数
+   *  c0,S1,gamma0                   MG-EOS: Us = c0 + S1*Up, Grüneisen 系数
+   *  D1..D5                         JC 损伤: ef=(D1+D2 e^(D3 s*))(1+D4 ln ed*)(1+D5 Th)
+   *  epsMax                         等效塑性应变侵蚀阈值 (几何/数值上限)
+   *  pSpall                         层裂(拉伸截断)强度 Pa
+   *  asb                            是否启用绝热剪切(自锐)增强失效
+   * --------------------------------------------------------------- */
+  var MATERIALS = {
+    WHA: {
+      id: 'WHA', name: '钨合金 93W-Ni-Fe', short: 'WHA',
+      kind: 'penetrator', color: [0.62, 0.66, 0.72],
+      rho0: 17600, G: 160 * GPa,
+      A: 1506 * MPa, B: 177 * MPa, n: 0.12, C: 0.016, m: 1.00,
+      Tm: 1723, Tr: 293, cp: 134, chi: 0.9, edot0: 1.0,
+      c0: 4029, S1: 1.237, gamma0: 1.54,
+      D1: 0.0, D2: 0.33, D3: -1.50, D4: 0.0, D5: 0.0,
+      epsMax: 2.0, pSpall: 3.0 * GPa, asb: false, eroDamage: false,
+      note: 'DM53/3BM60 类长杆弹芯; 高密度、高强度、以塑性流动方式蘑菇状消耗'
+    },
+    DU: {
+      id: 'DU', name: '贫铀合金 U-0.75Ti', short: 'DU',
+      kind: 'penetrator', color: [0.45, 0.50, 0.40],
+      rho0: 18600, G: 70 * GPa,
+      A: 1079 * MPa, B: 1120 * MPa, n: 0.25, C: 0.007, m: 1.00,
+      Tm: 1473, Tr: 293, cp: 117, chi: 0.9, edot0: 1.0,
+      c0: 2487, S1: 2.20, gamma0: 2.03,
+      D1: 0.0, D2: 0.28, D3: -1.60, D4: 0.0, D5: 0.0,
+      epsMax: 2.60, pSpall: 1.5 * GPa, asb: true, eroDamage: false,
+      note: 'M829A3 弹芯; 绝热剪切局部化导致"自锐", 头部保持尖锐, 侵彻效率高于同密度钨'
+    },
+    STEEL_HC: {
+      id: 'STEEL_HC', name: '高硬度弹芯钢 4340 (HRC50)', short: '弹芯钢',
+      kind: 'penetrator', color: [0.55, 0.52, 0.48],
+      rho0: 7830, G: 77 * GPa,
+      A: 1500 * MPa, B: 569 * MPa, n: 0.22, C: 0.003, m: 0.90,
+      Tm: 1793, Tr: 293, cp: 477, chi: 0.9, edot0: 1.0,
+      c0: 4569, S1: 1.49, gamma0: 2.17,
+      D1: 0.05, D2: 3.44, D3: -2.12, D4: 0.002, D5: 0.61,
+      epsMax: 0.90, pSpall: 2.0 * GPa, asb: false, eroDamage: false,
+      note: '早期钢芯 APFSDS / 复合弹芯外套'
+    },
+    RHA: {
+      id: 'RHA', name: '均质轧制装甲钢 RHA (300BHN)', short: 'RHA',
+      kind: 'armor', color: [0.36, 0.42, 0.50],
+      rho0: 7850, G: 77 * GPa,
+      A: 1000 * MPa, B: 650 * MPa, n: 0.30, C: 0.014, m: 1.03,
+      Tm: 1793, Tr: 293, cp: 477, chi: 0.9, edot0: 1.0,
+      c0: 4569, S1: 1.49, gamma0: 2.17,
+      D1: 0.05, D2: 3.44, D3: -2.12, D4: 0.002, D5: 0.61,
+      epsMax: 1.50, pSpall: 1.8 * GPa, asb: false, eroDamage: true,
+      note: 'MIL-A-12560 基准装甲, 一切穿深折算的参考材料'
+    },
+    HHA: {
+      id: 'HHA', name: '高硬度装甲钢 HHA (500BHN)', short: 'HHA',
+      kind: 'armor', color: [0.30, 0.34, 0.44],
+      rho0: 7850, G: 77 * GPa,
+      A: 1350 * MPa, B: 600 * MPa, n: 0.24, C: 0.012, m: 1.00,
+      Tm: 1793, Tr: 293, cp: 477, chi: 0.9, edot0: 1.0,
+      c0: 4569, S1: 1.49, gamma0: 2.17,
+      D1: 0.04, D2: 2.20, D3: -2.30, D4: 0.002, D5: 0.61,
+      epsMax: 0.80, pSpall: 2.2 * GPa, asb: false, eroDamage: true,
+      note: '高硬度面板, 抗侵彻强但韧性低, 易生成崩落/冲塞'
+    },
+    UHA: {
+      id: 'UHA', name: '超高硬度钢 UHA (600BHN)', short: 'UHA',
+      kind: 'armor', color: [0.26, 0.28, 0.38],
+      rho0: 7850, G: 78 * GPa,
+      A: 1750 * MPa, B: 520 * MPa, n: 0.20, C: 0.010, m: 0.95,
+      Tm: 1793, Tr: 293, cp: 477, chi: 0.9, edot0: 1.0,
+      c0: 4569, S1: 1.49, gamma0: 2.17,
+      D1: 0.03, D2: 1.60, D3: -2.40, D4: 0.002, D5: 0.61,
+      epsMax: 0.55, pSpall: 2.4 * GPa, asb: false, eroDamage: true,
+      note: '薄面板/扰动板常用; 脆性失效明显'
+    },
+    AL7039: {
+      id: 'AL7039', name: '铝合金 7039 背板', short: 'Al7039',
+      kind: 'armor', color: [0.68, 0.70, 0.74],
+      rho0: 2770, G: 27 * GPa,
+      A: 337 * MPa, B: 343 * MPa, n: 0.41, C: 0.010, m: 1.00,
+      Tm: 877, Tr: 293, cp: 875, chi: 0.9, edot0: 1.0,
+      c0: 5328, S1: 1.338, gamma0: 2.00,
+      D1: 0.112, D2: 0.123, D3: 1.50, D4: 0.007, D5: 0.0,
+      epsMax: 1.20, pSpall: 1.0 * GPa, asb: false, eroDamage: true,
+      note: '轻质结构背板/间隔层, 面密度低'
+    }
+  };
+
+  /* 派生量: 体积模量、初始声速 */
+  Object.keys(MATERIALS).forEach(function (k) {
+    var M = MATERIALS[k];
+    M.K = M.rho0 * M.c0 * M.c0;              // 初始体积模量
+    M.c = Math.sqrt((M.K + 4 / 3 * M.G) / M.rho0); // 单轴应变波速
+    M.E = 9 * M.K * M.G / (3 * M.K + M.G);   // 杨氏模量(参考)
+    M.nu = (3 * M.K - 2 * M.G) / (2 * (3 * M.K + M.G));
+  });
+
+  /* ---------------------- 弹种预设 (3 型 + 自定义) ---------------------- */
+  /* 长度/直径为"侵彻体(长杆芯)"尺寸, 不含弹托与尾翼; 速度为典型 2000m 存速区间的炮口初速 */
+  var PROJECTILES = [
+    {
+      id: 'DM53', name: 'DM53 (120mm, 德)', mat: 'WHA',
+      length: 0.640, diameter: 0.0220, noseType: 'cone', noseLen: 2.0, tipFrac: 0.30,
+      v0: 1650, note: 'Rh120 L/55 发射; 钨合金长杆, L/D≈29'
+    },
+    {
+      id: '3BM60', name: '3BM60 «铅-2» (125mm, 俄)', mat: 'WHA',
+      length: 0.650, diameter: 0.0240, noseType: 'cone', noseLen: 1.8, tipFrac: 0.32,
+      v0: 1660, note: '2A46M-5 发射; 整体钨合金杆, 分离式弹托'
+    },
+    {
+      id: 'M829A3', name: 'M829A3 (120mm, 美)', mat: 'DU',
+      length: 0.800, diameter: 0.0280, noseType: 'cone', noseLen: 2.2, tipFrac: 0.28,
+      v0: 1555, note: 'DU 弹芯, 长径比≈29, 具备绝热剪切自锐效应'
+    },
+    {
+      id: 'CUSTOM', name: '自定义弹芯', mat: 'WHA',
+      length: 0.600, diameter: 0.0240, noseType: 'cone', noseLen: 2.0, tipFrac: 0.30,
+      v0: 1600, note: '手动设定几何与材料'
+    }
+  ];
+
+  /* ---------------------- 靶板预设 ----------------------
+   * layers: {type:'plate', mat, t} 或 {type:'gap', t}
+   * -------------------------------------------------------- */
+  var TARGETS = [
+    { id: 'RHA300', name: '均质钢 300mm @0°', obliquity: 0, layers: [{ type: 'plate', mat: 'RHA', t: 0.300 }] },
+    { id: 'RHA150_60', name: '均质钢 150mm @60° (LOS 300)', obliquity: 60, layers: [{ type: 'plate', mat: 'RHA', t: 0.150 }] },
+    { id: 'RHA220_30', name: '均质钢 220mm @30°', obliquity: 30, layers: [{ type: 'plate', mat: 'RHA', t: 0.220 }] },
+    {
+      id: 'SPACED', name: '间隔靶 HHA40 + 空气120 + RHA200 @0°', obliquity: 0,
+      layers: [{ type: 'plate', mat: 'HHA', t: 0.040 }, { type: 'gap', t: 0.120 }, { type: 'plate', mat: 'RHA', t: 0.200 }]
+    },
+    {
+      id: 'LAYERED', name: '多层钢 60+60+60+60 @55°', obliquity: 55,
+      layers: [{ type: 'plate', mat: 'HHA', t: 0.060 }, { type: 'gap', t: 0.030 },
+      { type: 'plate', mat: 'RHA', t: 0.060 }, { type: 'gap', t: 0.030 },
+      { type: 'plate', mat: 'RHA', t: 0.060 }, { type: 'gap', t: 0.030 },
+      { type: 'plate', mat: 'RHA', t: 0.060 }]
+    },
+    { id: 'THIN', name: '薄靶 40mm @0° (穿透/剩余速度)', obliquity: 0, layers: [{ type: 'plate', mat: 'RHA', t: 0.040 }] },
+    { id: 'SEMI', name: '半无限均质钢 900mm @0° (测穿深上限)', obliquity: 0, layers: [{ type: 'plate', mat: 'RHA', t: 0.900 }] },
+    { id: 'CUSTOM', name: '自定义结构', obliquity: 0, layers: [{ type: 'plate', mat: 'RHA', t: 0.200 }] }
+  ];
+
+  /* ---------------------- 精度(流畅度)档位 ----------------------
+   * h            冲击核心区目标单元边长 (m)
+   * nAcross      弹芯直径方向最少单元数
+   * fineFactor   靶板细化带半宽 = fineFactor * 弹径
+   * growth       过渡区网格几何增长率      hmaxFactor 最大单元 = hmaxFactor*h
+   * budget       单元数上限(超出自动粗化)  tssf 时间步安全系数
+   * contactEvery 接触面重建间隔(步)        substepBudgetMs 每帧计算时间预算
+   * -------------------------------------------------------------- */
+  var QUALITY = [
+    {
+      id: 'fast', name: '流畅 (默认)', h: 0.0030, nAcross: 7, fineFactor: 2.6,
+      growth: 1.16, hmaxFactor: 8, budget: 14000, tssf: 0.55,
+      contactEvery: 3, substepBudgetMs: 11, hourglass: 0.10,
+      desc: '≈0.6~1.4万单元, 4070S/9600X 上接近实时, 趋势与穿深量级正确'
+    },
+    {
+      id: 'balanced', name: '平衡', h: 0.0020, nAcross: 9, fineFactor: 3.0,
+      growth: 1.14, hmaxFactor: 8, budget: 34000, tssf: 0.55,
+      contactEvery: 2, substepBudgetMs: 13, hourglass: 0.10,
+      desc: '≈2~3.4万单元, 蘑菇头与坑壁流动形态清晰'
+    },
+    {
+      id: 'fine', name: '精细', h: 0.0014, nAcross: 12, fineFactor: 3.4,
+      growth: 1.12, hmaxFactor: 9, budget: 60000, tssf: 0.52,
+      contactEvery: 2, substepBudgetMs: 15, hourglass: 0.09,
+      desc: '≈3~6万单元, 可分辨绝热剪切带与背板崩落, 单次算例约 1~2 分钟'
+    },
+    {
+      id: 'extreme', name: '极限 (慢, 出图用)', h: 0.0010, nAcross: 16, fineFactor: 3.8,
+      growth: 1.10, hmaxFactor: 10, budget: 110000, tssf: 0.50,
+      contactEvery: 1, substepBudgetMs: 18, hourglass: 0.08,
+      desc: '≈8~11万单元, 仅用于出图/细节分析, 单次算例约 5~10 分钟'
+    }
+  ];
+
+  APP.MATERIALS = MATERIALS;
+  APP.PROJECTILES = PROJECTILES;
+  APP.TARGETS = TARGETS;
+  APP.QUALITY = QUALITY;
+
+  APP.matList = function (kind) {
+    return Object.keys(MATERIALS).filter(function (k) {
+      return !kind || MATERIALS[k].kind === kind;
+    });
+  };
+
+  /* 长杆弹芯质量 (含锥头体积折减, 圆截面等效) */
+  APP.rodMass = function (p) {
+    var M = MATERIALS[p.mat];
+    var R = p.diameter / 2, Ln = p.noseLen * p.diameter, rt = p.tipFrac * R;
+    var Vcyl = Math.PI * R * R * (p.length - Ln);
+    var Vcone = Math.PI * Ln / 3 * (R * R + R * rt + rt * rt); // 圆台
+    return M.rho0 * (Vcyl + Vcone);
+  };
+})(APP);
+
+/* ==== 02_mesh.js ==== */
+/* =====================================================================
+ * 02_mesh.js  —  可动(拉格朗日)网格生成
+ *
+ * 网格策略:
+ *  [弹体]  结构化四边形; 径向 >= nAcross 个单元保证蘑菇头分辨率;
+ *          轴向头部 4D 范围用细网格, 向尾部几何增长(尾部只提供惯性/质量)
+ *          锥形头部用"截面半径缩放"实现, 保留结构化拓扑, 无退化单元
+ *  [靶板]  沿厚度均匀细化(整层都要参与侵彻), 横向在弹道带内均匀, 向外几何增长
+ *          倾斜时采用"剪切跟随网格": 局部横坐标 eta = eta_grid - xi*tan(theta_eff)
+ *          使细网格带沿着弹道方向延伸, 而不是沿板法向 —— 同样精度下单元数下降 3~8 倍
+ *          剪切量上限 tan(50°), 超出部分用加宽细网格带补偿, 避免单元角度过小
+ *  [边界]  横向外边界固支 + 外侧 15% 区域粘性吸收带, 抑制反射波
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+
+  /* 生成一维分级坐标: [lo,hi] 内均匀 h, 向外按 growth 增长直到 extLo/extHi */
+  function gradedAxis(lo, hi, h, growth, hmax, extLo, extHi) {
+    var core = [], nc = Math.max(1, Math.round((hi - lo) / h)), i;
+    for (i = 0; i <= nc; i++) core.push(lo + (hi - lo) * i / nc);
+    var left = [], s = h, p = lo, guard = 0;
+    while (p > extLo + 1e-9 && guard++ < 4000) {
+      s = Math.min(s * growth, hmax);
+      p -= s;
+      if (p < extLo) p = extLo;
+      left.push(p);
+    }
+    var right = [], q = hi; s = h; guard = 0;
+    while (q < extHi - 1e-9 && guard++ < 4000) {
+      s = Math.min(s * growth, hmax);
+      q += s;
+      if (q > extHi) q = extHi;
+      right.push(q);
+    }
+    left.reverse();
+    return left.concat(core, right);
+  }
+
+  function uniformAxis(lo, hi, n) {
+    var a = [], i; for (i = 0; i <= n; i++) a.push(lo + (hi - lo) * i / n); return a;
+  }
+
+  /* 头部半径缩放剖面, x 为距尖端的负向距离(尖端 x=0) */
+  function noseProfile(type, xRel, Ln, tipFrac) {
+    if (xRel <= -Ln) return 1.0;
+    var t = (-xRel) / Ln;                 // 0(尖) -> 1(根)
+    switch (type) {
+      case 'blunt': return 1.0;
+      case 'hemi': return Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t))) * (1 - tipFrac) + tipFrac;
+      case 'ogive': return tipFrac + (1 - tipFrac) * Math.sqrt(t);
+      default: return tipFrac + (1 - tipFrac) * t;   // cone
+    }
+  }
+
+  /* --------------------------------------------------------------- */
+  APP.buildScene = function (cfg) {
+    var Q = cfg.quality, P = cfg.proj, T = cfg.target;
+    var MAT = APP.MATERIALS;
+    var axi = !!T.axisym;
+    if (axi) { T = Object.assign({}, T, { obliquityDeg: 0 }); }
+    var theta = T.obliquityDeg * Math.PI / 180;
+    var ct = Math.cos(theta), st = Math.sin(theta), tt = Math.tan(theta);
+
+    /* ---------- 靶板厚度统计 ---------- */
+    var totalT = 0, plateT = 0, k;
+    for (k = 0; k < T.layers.length; k++) {
+      totalT += T.layers[k].t;
+      if (T.layers[k].type === 'plate') plateT += T.layers[k].t;
+    }
+
+    var h = Q.h, attempt, scene = null;
+    for (attempt = 0; attempt < 8; attempt++) {
+      scene = tryBuild(h);
+      if (scene.ne <= Q.budget || attempt === 7) break;
+      h *= Math.sqrt(scene.ne / Q.budget) * 1.02;   // 超预算 -> 自动粗化
+    }
+    scene.meta.hUsed = h;
+    scene.meta.autoCoarsened = h > Q.h * 1.001;
+    return scene;
+
+    /* --------------------------------------------------------------- */
+    function tryBuild(h) {
+      var D = P.diameter, R = D / 2, L = P.length;
+      var X = [], Y = [], VX = [], VY = [], FIX = [], NB = [];
+      var E0 = [], E1 = [], E2 = [], E3 = [], EM = [], EB = [], EL = [];
+      var mats = [], matIndex = {};
+      function midx(id) {
+        if (!(id in matIndex)) { matIndex[id] = mats.length; mats.push(id); }
+        return matIndex[id];
+      }
+      var bodies = [];
+
+      /* =============== 1. 弹芯 =============== */
+      var hRod = Math.min(h, D / Q.nAcross);
+      var nAcross = Math.max(Q.nAcross, 2 * Math.round(D / hRod / 2));
+      if (nAcross % 2) nAcross++;
+      hRod = D / nAcross;
+      var Ln = P.noseLen * D;
+      var Lfine = Math.min(L, Math.max(4 * D, Ln * 1.6));
+      var hmaxRod = Math.min(Q.hmaxFactor * hRod, 6 * hRod);
+      var rx = gradedAxis(-Lfine, 0, hRod, Q.growth, hmaxRod, -L, 0);
+      var ry = axi ? uniformAxis(0, R, Math.max(3, Math.round(nAcross / 2))) : uniformAxis(-R, R, nAcross);
+      var nrx = rx.length, nry = ry.length;
+
+      var yawR = (axi ? 0 : (P.yawDeg || 0)) * Math.PI / 180, cy = Math.cos(yawR), sy = Math.sin(yawR);
+      var standoff = Math.abs(R * tt) + 2.5 * h + 0.002;
+      var pmat = midx(P.mat);
+      var nBase = X.length;
+      for (var i = 0; i < nrx; i++) {
+        var f = noseProfile(P.noseType, rx[i], Ln, P.tipFrac);
+        for (var j = 0; j < nry; j++) {
+          var lx = rx[i], ly = ry[j] * f;
+          var gx = lx * cy - ly * sy - standoff;   // 绕尖端偏航
+          var gy = lx * sy + ly * cy;
+          X.push(gx); Y.push(gy);
+          VX.push(P.v0); VY.push(0);
+          FIX.push(axi && j === 0 ? 2 : 0); NB.push(0);   // 轴对称: 对称轴上 vr=0
+        }
+      }
+      for (var i2 = 0; i2 < nrx - 1; i2++)
+        for (var j2 = 0; j2 < nry - 1; j2++) {
+          var a = nBase + i2 * nry + j2;
+          E0.push(a); E1.push(a + nry); E2.push(a + nry + 1); E3.push(a + 1);
+          EM.push(pmat); EB.push(0); EL.push(-1);
+        }
+      bodies.push({ id: 0, name: '弹芯', kind: 'projectile', mat: P.mat });
+
+      /* =============== 2. 靶板 =============== */
+      /* 剪切跟随: 上限 tan(50°) */
+      var shear = 0, shearCap = Math.tan(50 * Math.PI / 180);
+      if (T.shearFollow !== false && !axi) shear = Math.max(-shearCap, Math.min(shearCap, tt));
+      var residual = Math.abs(tt - shear) * totalT;          // 未被剪切覆盖的横向漂移
+      var wFine = Q.fineFactor * D + 0.5 * residual + 0.04 * totalT;
+      var halfW = wFine + Math.max(0.12, 0.85 * plateT) * (cfg.widthScale || 1);
+      var hmaxT = Q.hmaxFactor * h;
+      var ys = axi ? gradedAxis(0, wFine, h, Q.growth, hmaxT, 0, halfW)
+        : gradedAxis(-wFine, wFine, h, Q.growth, hmaxT, -halfW, halfW);
+      var nyT = ys.length;
+
+      /* 按 gap 切分成若干"块"(块内节点共享 => 层间冶金结合; gap 两侧独立 => 接触) */
+      var blocks = [], cur = null, depth = 0;
+      for (k = 0; k < T.layers.length; k++) {
+        var Ly = T.layers[k];
+        if (Ly.type === 'gap') { cur = null; depth += Ly.t; continue; }
+        if (!cur) { cur = { xi0: depth, layers: [] }; blocks.push(cur); }
+        cur.layers.push({ mat: Ly.mat, t: Ly.t, xi0: depth, idx: k });
+        depth += Ly.t;
+        cur.xi1 = depth;
+      }
+
+      for (var b = 0; b < blocks.length; b++) {
+        var blk = blocks[b], bid = bodies.push({
+          id: bodies.length, name: '靶板块' + (b + 1), kind: 'target',
+          mat: blk.layers[0].mat, xi0: blk.xi0, xi1: blk.xi1
+        }) - 1;
+        /* 厚度方向坐标 */
+        var xs = [blk.xi0], lm = [];
+        for (var q2 = 0; q2 < blk.layers.length; q2++) {
+          var Lq = blk.layers[q2], nz = Math.max(1, Math.round(Lq.t / h));
+          for (var z = 1; z <= nz; z++) xs.push(Lq.xi0 + Lq.t * z / nz);
+          for (var z2 = 0; z2 < nz; z2++) lm.push({ mat: Lq.mat, idx: Lq.idx });
+        }
+        var nxT = xs.length, base = X.length;
+        for (var ii = 0; ii < nxT; ii++) {
+          var xi = xs[ii];
+          for (var jj = 0; jj < nyT; jj++) {
+            var eta = ys[jj] - xi * shear;
+            X.push(xi * ct - eta * st);
+            Y.push(xi * st + eta * ct);
+            VX.push(0); VY.push(0); NB.push(bid);
+            var fx = 0;
+            if (axi) { if (jj === 0) fx = 2; else if (jj === nyT - 1) fx = 3; }
+            else if (jj === 0 || jj === nyT - 1) fx = 3;                  // 横向外边界固支
+            if (T.support === 'full' && ii === nxT - 1 && b === blocks.length - 1) fx = 3;
+            FIX.push(fx);
+          }
+        }
+        for (var ii2 = 0; ii2 < nxT - 1; ii2++) {
+          var mi = midx(lm[ii2].mat);
+          for (var jj2 = 0; jj2 < nyT - 1; jj2++) {
+            var a2 = base + ii2 * nyT + jj2;
+            E0.push(a2); E1.push(a2 + nyT); E2.push(a2 + nyT + 1); E3.push(a2 + 1);
+            EM.push(mi); EB.push(bid); EL.push(lm[ii2].idx);
+          }
+        }
+      }
+
+      /* =============== 3. 打包 =============== */
+      var n = X.length, ne = E0.length;
+      var sc = {
+        n: n, ne: ne,
+        x: Float64Array.from(X), y: Float64Array.from(Y),
+        vx: Float64Array.from(VX), vy: Float64Array.from(VY),
+        fix: Uint8Array.from(FIX), nbody: Int32Array.from(NB),
+        e0: Int32Array.from(E0), e1: Int32Array.from(E1),
+        e2: Int32Array.from(E2), e3: Int32Array.from(E3),
+        emat: Int32Array.from(EM), ebody: Int32Array.from(EB), elayer: Int32Array.from(EL),
+        mats: mats, bodies: bodies,
+        meta: {
+          axi: axi, theta: theta, obliquityDeg: T.obliquityDeg, shear: shear,
+          totalT: totalT, plateT: plateT, losT: plateT / Math.max(1e-6, ct),
+          halfW: halfW, wFine: wFine, hRod: hRod, hTarget: h,
+          standoff: standoff, nAcross: nAcross,
+          rodMass: APP.rodMass(P), v0: P.v0,
+          layers: T.layers.slice()
+        }
+      };
+      /* 吸收带标记(横向外侧 15%) */
+      var damp = new Float32Array(n);
+      if (T.absorb !== false) {
+        for (var t2 = 0; t2 < n; t2++) {
+          if (sc.nbody[t2] === 0) continue;
+          var xi2 = sc.x[t2] * ct + sc.y[t2] * st;
+          var eta2 = -sc.x[t2] * st + sc.y[t2] * ct + xi2 * shear;
+          var r2 = Math.abs(eta2) / halfW;
+          damp[t2] = r2 > 0.85 ? Math.min(1, (r2 - 0.85) / 0.15) : 0;
+        }
+      }
+      sc.absorb = damp;
+      return sc;
+    }
+  };
+})(APP);
+
+/* ==== 03_solver.js ==== */
+/* =====================================================================
+ * 03_solver.js  —  二维平面应变 显式拉格朗日有限元求解器
+ *
+ * 单元:   4 节点四边形, 单点(缩减)积分 + Flanagan-Belytschko 粘性沙漏控制
+ * 应力:   偏应力 Jaumann 客观率 + 径向返回(Johnson-Cook 屈服面)
+ * 压强:   Mie-Grüneisen 状态方程(线性 Us-Up) + 内能更新 + 层裂截断
+ * 粘性:   von Neumann-Richtmyer 人工体积粘性(线性+二次)
+ * 失效:   Johnson-Cook 损伤 / 等效塑性应变 / 几何畸变 -> 单元侵蚀(删除)
+ *         节点质量守恒保留 => 被侵蚀材料仍以"碎片节点"参与接触与动量交换
+ * 接触:   侵蚀型 节点-面段 罚函数接触 + 库仑摩擦, 均匀空间哈希加速
+ * 时间:   中心差分, 逐步自适应 dt = TSSF * min(Lc / c_eff)
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+
+  var Q1 = 1.5, Q2 = 0.06;         // 人工粘性系数
+  var TINY = 1e-30;
+
+  /* ================= 创建求解器状态 ================= */
+  APP.createSim = function (scene, opts) {
+    opts = opts || {};
+    var S = {};
+    var n = scene.n, ne = scene.ne, i, e;
+
+    S.scene = scene; S.n = n; S.ne = ne; S.axi = !!scene.meta.axi;
+    S.opt = {
+      tssf: opts.tssf || 0.55,
+      hourglass: opts.hourglass !== undefined ? opts.hourglass : 0.10,
+      mu: opts.mu !== undefined ? opts.mu : 0.10,          // 接触摩擦
+      contactBeta: opts.contactBeta !== undefined ? opts.contactBeta : 0.5,
+      penRelax: opts.penRelax !== undefined ? opts.penRelax : 20,
+      contactEvery: opts.contactEvery || 2,
+      absorbCoef: opts.absorbCoef !== undefined ? opts.absorbCoef : 0.03,
+      tMax: opts.tMax || 500e-6,
+      erosion: opts.erosion !== false,
+      selfContact: !!opts.selfContact,
+      dtFloorRatio: 0.20
+    };
+
+    /* ---- 节点 ---- */
+    S.x = Float64Array.from(scene.x); S.y = Float64Array.from(scene.y);
+    S.x0 = Float64Array.from(scene.x); S.y0 = Float64Array.from(scene.y);
+    S.vx = Float64Array.from(scene.vx); S.vy = Float64Array.from(scene.vy);
+    S.fx = new Float64Array(n); S.fy = new Float64Array(n);
+    S.mass = new Float64Array(n); S.invm = new Float64Array(n);
+    S.fix = Uint8Array.from(scene.fix); S.nbody = Int32Array.from(scene.nbody);
+    S.absorb = scene.absorb || new Float32Array(n);
+    S.nact = new Int16Array(n);        // 节点上活跃单元数
+    S.nalive = new Uint8Array(n); S.nalive.fill(1);
+    /* ghost: 所属单元全部被侵蚀后脱离的"碎片节点"。保留质量/动量并按弹道飞行(用于可视化与动量守恒),
+       但不再参与接触 —— 否则无弹性约束的孤立节点会被罚力持续单向加速, 成为数值能量泵。 */
+    S.ghost = new Uint8Array(n);
+
+    /* ---- 单元 ---- */
+    S.e0 = scene.e0; S.e1 = scene.e1; S.e2 = scene.e2; S.e3 = scene.e3;
+    S.emat = scene.emat; S.ebody = scene.ebody;
+    S.stat = new Uint8Array(ne); S.stat.fill(1);
+    S.sxx = new Float64Array(ne); S.syy = new Float64Array(ne); S.sxy = new Float64Array(ne);
+    S.pr = new Float64Array(ne); S.qv = new Float64Array(ne);
+    S.vol = new Float64Array(ne); S.vol0 = new Float64Array(ne);
+    S.emass = new Float64Array(ne); S.rho = new Float64Array(ne);
+    S.epsp = new Float64Array(ne); S.erate = new Float64Array(ne);
+    S.temp = new Float64Array(ne); S.dmg = new Float64Array(ne);
+    S.ie = new Float64Array(ne); S.lc0 = new Float64Array(ne);
+    S.svm = new Float64Array(ne);
+    S.hgx = new Float64Array(ne); S.hgy = new Float64Array(ne);   // 沙漏广义位移
+    S.cs = new Float64Array(ne);                                   // 单元当前声速(滞后一步供 dt 使用)
+
+    /* ---- 材料参数展平 (热点循环避免对象属性访问) ---- */
+    var nm = scene.mats.length, M;
+    var P = {};
+    ['rho0', 'G', 'A', 'B', 'nn', 'C', 'mm', 'Tm', 'Tr', 'cp', 'chi', 'edot0',
+      'c0', 'S1', 'gamma0', 'D1', 'D2', 'D3', 'D4', 'D5', 'epsMax', 'pSpall', 'K', 'asb', 'eroD']
+      .forEach(function (k) { P[k] = new Float64Array(nm); });
+    for (i = 0; i < nm; i++) {
+      M = APP.MATERIALS[scene.mats[i]];
+      P.rho0[i] = M.rho0; P.G[i] = M.G; P.A[i] = M.A; P.B[i] = M.B; P.nn[i] = M.n;
+      P.C[i] = M.C; P.mm[i] = M.m; P.Tm[i] = M.Tm; P.Tr[i] = M.Tr; P.cp[i] = M.cp;
+      P.chi[i] = M.chi; P.edot0[i] = M.edot0; P.c0[i] = M.c0; P.S1[i] = M.S1;
+      P.gamma0[i] = M.gamma0; P.D1[i] = M.D1; P.D2[i] = M.D2; P.D3[i] = M.D3;
+      P.D4[i] = M.D4; P.D5[i] = M.D5; P.epsMax[i] = M.epsMax; P.pSpall[i] = M.pSpall;
+      P.K[i] = M.K; P.asb[i] = M.asb ? 1 : 0; P.eroD[i] = M.eroDamage ? 1 : 0;
+    }
+    S.P = P;
+
+    /* ---- 初始几何/质量 ---- */
+    var totMass = 0;
+    for (e = 0; e < ne; e++) {
+      var a = S.e0[e], b = S.e1[e], c = S.e2[e], d = S.e3[e];
+      var A2 = 0.5 * ((S.x[c] - S.x[a]) * (S.y[d] - S.y[b]) - (S.x[d] - S.x[b]) * (S.y[c] - S.y[a]));
+      if (!(A2 > 0)) A2 = Math.abs(A2) + 1e-12;
+      var wt0 = 1;
+      if (S.axi) {
+        var rb0 = 0.25 * (S.y[a] + S.y[b] + S.y[c] + S.y[d]);
+        var rm0 = 0.05 * Math.sqrt(A2); if (rb0 < rm0) rb0 = rm0;
+        wt0 = 6.2831853 * rb0;
+      }
+      S.vol0[e] = A2 * wt0; S.vol[e] = A2 * wt0;
+      var mi = S.emat[e];
+      S.rho[e] = P.rho0[mi];
+      S.emass[e] = P.rho0[mi] * A2 * wt0;
+      S.temp[e] = P.Tr[mi];
+      var d1 = Math.hypot(S.x[c] - S.x[a], S.y[c] - S.y[a]);
+      var d2 = Math.hypot(S.x[d] - S.x[b], S.y[d] - S.y[b]);
+      S.lc0[e] = A2 / Math.max(d1, d2, 1e-9);
+      S.cs[e] = Math.sqrt((P.K[mi] + 1.3333333 * P.G[mi]) / P.rho0[mi]);
+      var q = 0.25 * S.emass[e];
+      S.mass[a] += q; S.mass[b] += q; S.mass[c] += q; S.mass[d] += q;
+      S.nact[a]++; S.nact[b]++; S.nact[c]++; S.nact[d]++;
+      totMass += S.emass[e];
+    }
+    for (i = 0; i < n; i++) S.invm[i] = S.mass[i] > 0 ? 1 / S.mass[i] : 0;
+    S.totMass = totMass;
+
+    buildEdges(S);
+    allocContact(S);
+
+    S.t = 0; S.step = 0; S.dt = 1e-9; S.eroded = 0;
+    S.eroProj = 0; S.eroTgt = 0; S.ieEroded = 0; S.wDiss = 0;
+    S.eCause = new Int32Array(5);   // 0:压缩塌缩 1:拉伸膨胀 2:塑性应变 3:损伤 4:特征长度
+    S.wContact = 0; S.wHourglass = 0;
+    S.hist = { t: [], dop: [], vres: [], rlen: [], ke: [], ie: [] };
+    S.diag = {};
+    S.done = false; S.reason = '';
+    computeDt(S);
+    S.dt0 = S.dt;
+    APP.diagnose(S);
+    return S;
+  };
+
+  /* ================= 边(面段)拓扑, 一次性建立 ================= */
+  function buildEdges(S) {
+    var ne = S.ne, map = new Map(), N = S.n;
+    var ea = [], eb = [], eo = [], en = [];
+    var EN = [S.e0, S.e1, S.e2, S.e3];
+    for (var e = 0; e < ne; e++) {
+      for (var k = 0; k < 4; k++) {
+        var a = EN[k][e], b = EN[(k + 1) & 3][e];
+        var key = a < b ? a * N + b : b * N + a;
+        var id = map.get(key);
+        if (id === undefined) { map.set(key, ea.length); ea.push(a); eb.push(b); eo.push(e); en.push(-1); }
+        else en[id] = e;
+      }
+    }
+    S.ea = Int32Array.from(ea); S.eb = Int32Array.from(eb);
+    S.eown = Int32Array.from(eo); S.enb = Int32Array.from(en);
+    S.nedge = ea.length;
+  }
+
+  function allocContact(S) {
+    var cap = S.nedge;
+    S.sA = new Int32Array(cap); S.sB = new Int32Array(cap); S.sBody = new Int32Array(cap);
+    S.sK = new Float64Array(cap); S.sH = new Float64Array(cap); S.sC = new Float64Array(cap);
+    S.nseg = 0;
+    S.cnode = new Int32Array(S.n); S.ncnode = 0;
+    S.onSurf = new Uint8Array(S.n);
+    S.cellItem = new Int32Array(cap * 4);
+    S.segVisit = new Int32Array(cap); S.segVisit.fill(-1); S.qid = 0;
+    S.pen0 = new Float64Array(S.n);     // 每节点"被宽恕"的初始穿透参考量
+    S.tableSize = 1; while (S.tableSize < cap * 2) S.tableSize <<= 1;
+    S.tableSize = Math.max(1024, S.tableSize);
+    S.cellStart = new Int32Array(S.tableSize + 1);
+    S.cellCount = new Int32Array(S.tableSize + 1);
+    var hf = Math.min(S.scene.meta.hRod, S.scene.meta.hTarget);
+    S.cellSize = 2.0 * hf;
+    S.contactAge = 1e9;
+  }
+
+  /* ================= 自适应时间步 ================= */
+  function computeDt(S) {
+    var ne = S.ne, P = S.P, dtm = 1e30;
+    for (var e = 0; e < ne; e++) {
+      if (!S.stat[e]) continue;
+      var a = S.e0[e], b = S.e1[e], c = S.e2[e], d = S.e3[e];
+      var A = 0.5 * ((S.x[c] - S.x[a]) * (S.y[d] - S.y[b]) - (S.x[d] - S.x[b]) * (S.y[c] - S.y[a]));
+      if (A <= 0) continue;
+      var d1 = Math.hypot(S.x[c] - S.x[a], S.y[c] - S.y[a]);
+      var d2 = Math.hypot(S.x[d] - S.x[b], S.y[d] - S.y[b]);
+      var lc = A / Math.max(d1, d2, 1e-9);
+      var dte = lc / (S.cs[e] * 1.15);
+      if (dte < dtm) dtm = dte;
+    }
+    if (!(dtm < 1e30)) dtm = S.dt;
+    var dt = S.opt.tssf * dtm;
+    if (S.dt0 && dt < S.dt0 * S.opt.dtFloorRatio) dt = S.dt0 * S.opt.dtFloorRatio; // 地板值, 防止个别病态单元拖死
+    if (S.step > 0 && dt > S.dt * 1.05) dt = S.dt * 1.05;   // 限制 dt 增长速率, 避免刚度/惯性突变
+    S.dt = dt;
+  }
+
+  /* ================= 单元循环: 本构 + 内力 ================= */
+  function elementLoop(S) {
+    var ne = S.ne, dt = S.dt, P = S.P;
+    var x = S.x, y = S.y, vx = S.vx, vy = S.vy, fx = S.fx, fy = S.fy;
+    var Qhg = S.opt.hourglass, doErode = S.opt.erosion, axi = S.axi;
+    var eroNow = 0, hgW = 0;
+
+    for (var e = 0; e < ne; e++) {
+      if (!S.stat[e]) continue;
+      var a = S.e0[e], b = S.e1[e], c = S.e2[e], d = S.e3[e];
+      var xa = x[a], xb = x[b], xc = x[c], xd = x[d];
+      var ya = y[a], yb = y[b], yc = y[c], yd = y[d];
+
+      var A = 0.5 * ((xc - xa) * (yd - yb) - (xd - xb) * (yc - ya));
+      var mi = S.emat[e];
+      /* 轴对称: 单元体积 = 2*pi*r_bar*A, 环向应变率 = v_r / r_bar */
+      var wt = 1, rbar = 0;
+      if (axi) {
+        rbar = 0.25 * (ya + yb + yc + yd);
+        var rmin = 0.05 * Math.sqrt(A > 0 ? A : 1e-12);
+        if (rbar < rmin) rbar = rmin;
+        wt = 6.2831853 * rbar;
+      }
+      var vnew = A * wt;
+      var Jr = vnew / S.vol0[e];
+
+      /* --- 几何失效 --- */
+      if (doErode && (A <= 0 || Jr < 0.20 || Jr > 5.0)) { S.eCause[Jr > 5 ? 1 : 0]++; erode(S, e); eroNow++; continue; }
+      if (A <= 0) { S.eCause[0]++; erode(S, e); eroNow++; continue; }
+
+      var inv2A = 0.5 / A;
+      var bx0 = (yb - yd) * inv2A, bx1 = (yc - ya) * inv2A, bx2 = (yd - yb) * inv2A, bx3 = (ya - yc) * inv2A;
+      var by0 = (xd - xb) * inv2A, by1 = (xa - xc) * inv2A, by2 = (xb - xd) * inv2A, by3 = (xc - xa) * inv2A;
+
+      var va = vx[a], vb = vx[b], vc = vx[c], vd = vx[d];
+      var wa = vy[a], wb = vy[b], wc = vy[c], wd = vy[d];
+      var Lxx = bx0 * va + bx1 * vb + bx2 * vc + bx3 * vd;
+      var Lxy = by0 * va + by1 * vb + by2 * vc + by3 * vd;
+      var Lyx = bx0 * wa + bx1 * wb + bx2 * wc + bx3 * wd;
+      var Lyy = by0 * wa + by1 * wb + by2 * wc + by3 * wd;
+
+      var dxx = Lxx, dyy = Lyy, dxy = 0.5 * (Lxy + Lyx), wz = 0.5 * (Lxy - Lyx);
+      var dzz = axi ? 0.25 * (wa + wb + wc + wd) / rbar : 0;
+      var trD = dxx + dyy + dzz, t3 = trD / 3;
+
+      /* --- 密度/几何 --- */
+      var volOld = S.vol[e];
+      S.vol[e] = vnew;
+      var rho = S.emass[e] / vnew; S.rho[e] = rho;
+      var rho0 = P.rho0[mi], G = P.G[mi];
+      var lc = A / Math.max(Math.hypot(xc - xa, yc - ya), Math.hypot(xd - xb, yd - yb), 1e-9);
+
+      /* --- 偏应力: Jaumann 率 + 弹性预测 --- */
+      var sxx = S.sxx[e], syy = S.syy[e], sxy = S.sxy[e];
+      var sxxO = sxx, syyO = syy, sxyO = sxy, szzO = -(sxx + syy);
+      var G2 = 2 * G;
+      var nsxx = sxx + dt * (G2 * (dxx - t3) + 2 * wz * sxy);
+      var nsyy = syy + dt * (G2 * (dyy - t3) - 2 * wz * sxy);
+      var nsxy = sxy + dt * (G2 * dxy + wz * (syy - sxx));
+      sxx = nsxx; syy = nsyy; sxy = nsxy;
+      var szz = -(sxx + syy);
+      var J2 = 0.5 * (sxx * sxx + syy * syy + szz * szz) + sxy * sxy;
+      var svm = Math.sqrt(3 * J2);
+
+      /* --- 等效应变率 / 温度 --- */
+      var ddx = dxx - t3, ddy = dyy - t3, ddz = dzz - t3;
+      var eeq = Math.sqrt(0.6666667 * (ddx * ddx + ddy * ddy + ddz * ddz + 2 * dxy * dxy));
+      S.erate[e] = eeq;
+      var Th = (S.temp[e] - P.Tr[mi]) / (P.Tm[mi] - P.Tr[mi]);
+      if (Th < 0) Th = 0; if (Th > 1) Th = 1;
+      var rateF = 1 + P.C[mi] * Math.log(eeq > P.edot0[mi] ? eeq / P.edot0[mi] : 1);
+      var thermF = 1 - Math.pow(Th, P.mm[mi]);
+      if (thermF < 0.02) thermF = 0.02;
+
+      /* --- 径向返回 --- */
+      var epsp = S.epsp[e], dep = 0;
+      var Ay = P.A[mi], By = P.B[mi], ny = P.nn[mi];
+      var Y = (Ay + By * Math.pow(epsp, ny)) * rateF * thermF;
+      if (svm > Y) {
+        dep = (svm - Y) / (3 * G);
+        for (var it = 0; it < 2; it++) {
+          var ep2 = epsp + dep;
+          var H = By * ny * Math.pow(ep2 > 1e-8 ? ep2 : 1e-8, ny - 1) * rateF * thermF;
+          var Yc = (Ay + By * Math.pow(ep2, ny)) * rateF * thermF;
+          var f = svm - 3 * G * dep - Yc;
+          dep += f / (3 * G + H);
+          if (dep < 0) dep = 0;
+        }
+        epsp += dep;
+        var Yn = (Ay + By * Math.pow(epsp, ny)) * rateF * thermF;
+        var sc = Yn / svm;
+        sxx *= sc; syy *= sc; sxy *= sc; szz = -(sxx + syy);
+        svm = Yn;
+        S.epsp[e] = epsp;
+        S.temp[e] += P.chi[mi] * Yn * dep / (rho * P.cp[mi]);
+      }
+      S.svm[e] = svm;
+      S.sxx[e] = sxx; S.syy[e] = syy; S.sxy[e] = sxy;
+
+      /* --- 人工体积粘性(先算, 保证与内力/能量使用同一时刻的值) --- */
+      var qNew = 0, csPrev = S.cs[e];
+      if (trD < 0) qNew = rho * lc * (Q1 * lc * trD * trD - Q2 * csPrev * trD);
+      var qAvg = 0.5 * (S.qv[e] + qNew);
+      S.qv[e] = qNew;
+
+      /* --- 压强: Mie-Grüneisen + 内能(全部按时间中点梯形积分, 保证能量守恒) --- */
+      var mu = rho / rho0 - 1;
+      var ie = S.ie[e], c0 = P.c0[mi], S1 = P.S1[mi], g0 = P.gamma0[mi];
+      var pOld = S.pr[e];
+      var devW = 0.5 * ((sxxO + sxx) * dxx + (syyO + syy) * dyy + (szzO + szz) * dzz
+        + 2 * (sxyO + sxy) * dxy) * dt * vnew / S.vol0[e];
+      var dV = (vnew - volOld) / S.vol0[e];
+      var ieTr = ie + devW - (pOld + qAvg) * dV;
+      var p = eosP(rho0, c0, S1, g0, mu, ieTr);
+      ie = ie + devW - (0.5 * (pOld + p) + qAvg) * dV;
+      p = eosP(rho0, c0, S1, g0, mu, ie);
+
+      /* 拉伸截断(层裂): 压力被截断在层裂强度, 并按"拉伸体应变累积"演化损伤
+       * (原按步数累加会让一列拉伸波在 3 步内切断整根弹杆 —— 典型的率相关伪失效) */
+      var expo = mu < 0 ? -mu : 0;
+      var tfac = 1 - expo / 0.05; if (tfac < 0) tfac = 0;   // 体积膨胀 >5% 后拉伸强度归零(孔洞长大/断裂)
+      var pmin = -P.pSpall[mi] * tfac * (1 - 0.9 * S.dmg[e]);
+      if (p < pmin) {
+        p = pmin;
+        if (trD > 0 && P.eroD[mi] > 0) { S.dmg[e] += trD * dt / 0.03; if (S.dmg[e] > 1) S.dmg[e] = 1; }
+      }
+      S.pr[e] = p; S.ie[e] = ie;
+
+      /* --- 声速: 由 EOS 切线模量数值求导, 保证强压缩下 dt 仍安全 --- */
+      var dpdmu = (eosP(rho0, c0, S1, g0, mu + 1e-3, ie) - p) * 1e3;
+      if (dpdmu < P.K[mi]) dpdmu = P.K[mi];
+      var cs = Math.sqrt(dpdmu / rho0 + 1.3333333 * G / rho);
+      S.cs[e] = cs;
+      var qv = qNew;
+
+      /* --- Johnson-Cook 损伤 --- */
+      if (dep > 0 && P.D2[mi] > 0) {
+        var sStar = -p / (svm > 1e5 ? svm : 1e5);
+        if (sStar < -3) sStar = -3; if (sStar > 1.5) sStar = 1.5;
+        var ef = (P.D1[mi] + P.D2[mi] * Math.exp(P.D3[mi] * sStar))
+          * (1 + P.D4[mi] * Math.log(eeq > 1 ? eeq : 1)) * (1 + P.D5[mi] * Th);
+        if (ef < 0.02) ef = 0.02; if (ef > 20) ef = 20;
+        S.dmg[e] += dep / ef;
+      }
+
+      /* --- 侵蚀判据 --- */
+      if (doErode) {
+        var epsLim = P.epsMax[mi];
+        if (P.asb[mi] > 0 && Th > 0.30) epsLim *= (1 - 0.25 * Math.min(1, (Th - 0.30) / 0.7)); // 绝热剪切自锐
+        var dFail = P.eroD[mi] > 0 && S.dmg[e] >= 1;   // 侵彻体不因拉伸损伤删单元(见 README 建模说明)
+        if (S.epsp[e] > epsLim || dFail || lc < 0.25 * S.lc0[e]) {
+          S.eCause[S.epsp[e] > epsLim ? 2 : (dFail ? 3 : 4)]++;
+          erode(S, e); eroNow++; continue;
+        }
+      }
+
+      /* --- 内力 --- */
+      var sgx = sxx - (p + qv), sgy = syy - (p + qv), sgxy = sxy;
+      fx[a] -= (sgx * bx0 + sgxy * by0) * vnew; fy[a] -= (sgxy * bx0 + sgy * by0) * vnew;
+      fx[b] -= (sgx * bx1 + sgxy * by1) * vnew; fy[b] -= (sgxy * bx1 + sgy * by1) * vnew;
+      fx[c] -= (sgx * bx2 + sgxy * by2) * vnew; fy[c] -= (sgxy * bx2 + sgy * by2) * vnew;
+      fx[d] -= (sgx * bx3 + sgxy * by3) * vnew; fy[d] -= (sgxy * bx3 + sgy * by3) * vnew;
+      if (axi) {   /* 环向应力对径向的贡献: (N_i/r)*sig_hoop*V, 其中 1/r 与 V 中的 r 抵消 */
+        var shoop = (szz - (p + qv)) * 1.5707963 * A;
+        fy[a] -= shoop; fy[b] -= shoop; fy[c] -= shoop; fy[d] -= shoop;
+      }
+
+      /* --- 沙漏控制 (Flanagan-Belytschko: 刚度型 + 粘性型)
+       *     纯粘性型在 >1km/s 冲击下不足以抑制沙漏模态增长(模态位移持续累积
+       *     -> 单元退化 -> 面积塌缩 -> 内力发散). 增加与剪切模量成比例的
+       *     回复刚度, 把沙漏位移约束在弹性范围内, 这是显式冲击计算的标准做法. --- */
+      if (Qhg > 0) {
+        var hx = xa - xb + xc - xd, hy = ya - yb + yc - yd;
+        var g0v = 0.25 * (1 - hx * bx0 - hy * by0);
+        var g1v = 0.25 * (-1 - hx * bx1 - hy * by1);
+        var g2v = 0.25 * (1 - hx * bx2 - hy * by2);
+        var g3v = 0.25 * (-1 - hx * bx3 - hy * by3);
+        var gvx = g0v * va + g1v * vb + g2v * vc + g3v * vd;
+        var gvy = g0v * wa + g1v * wb + g2v * wc + g3v * wd;
+        var hqx = S.hgx[e] + gvx * dt, hqy = S.hgy[e] + gvy * dt;
+        S.hgx[e] = hqx; S.hgy[e] = hqy;
+        var ks = Qhg * G * wt;                       // N/m
+        var cvv = 0.5 * Qhg * rho * cs * Math.sqrt(A) * wt;
+        var hfx = ks * hqx + cvv * gvx, hfy = ks * hqy + cvv * gvy;
+        fx[a] -= hfx * g0v; fy[a] -= hfy * g0v;
+        fx[b] -= hfx * g1v; fy[b] -= hfy * g1v;
+        fx[c] -= hfx * g2v; fy[c] -= hfy * g2v;
+        fx[d] -= hfx * g3v; fy[d] -= hfy * g3v;
+        hgW += (cvv * gvx * gvx + cvv * gvy * gvy) * dt;   // 仅粘性部分为耗散
+      }
+    }
+    S.eroded += eroNow;
+    S.wHourglass += hgW;
+    if (eroNow) S.contactAge = 1e9;
+  }
+
+  function eosP(rho0, c0, S1, g0, mu, ie) {
+    if (mu > 0) {
+      var den = 1 - (S1 - 1) * mu; if (den < 0.15) den = 0.15;
+      return rho0 * c0 * c0 * mu * (1 + (1 - g0 * 0.5) * mu) / (den * den) + g0 * ie;
+    }
+    return rho0 * c0 * c0 * mu + g0 * ie;
+  }
+
+  function erode(S, e) {
+    S.stat[e] = 0; S.hgx[e] = 0; S.hgy[e] = 0;
+    S.ieEroded += S.ie[e] * S.vol0[e];
+    if (S.ebody[e] === 0) S.eroProj++; else S.eroTgt++;
+    var nn = [S.e0[e], S.e1[e], S.e2[e], S.e3[e]];
+    for (var q = 0; q < 4; q++) { if (--S.nact[nn[q]] <= 0) S.ghost[nn[q]] = 1; }
+    S.sxx[e] = S.syy[e] = S.sxy[e] = S.pr[e] = S.qv[e] = S.svm[e] = 0;
+  }
+
+  /* ================= 接触面重建 ================= */
+  function rebuildSurface(S) {
+    var nseg = 0, ne = S.nedge;
+    var sA = S.sA, sB = S.sB, sBody = S.sBody;
+    S.onSurf.fill(0);
+    for (var k = 0; k < ne; k++) {
+      var o = S.eown[k], nb = S.enb[k];
+      var ao = S.stat[o], an = nb >= 0 ? S.stat[nb] : 0;
+      if (ao === an) continue;
+      var a, b, bd, own;
+      if (ao) { a = S.ea[k]; b = S.eb[k]; own = o; }
+      else { a = S.eb[k]; b = S.ea[k]; own = nb; }
+      if (S.vol[own] < 0.25 * S.vol0[own]) continue;   // 近塌缩单元的边法向不可靠, 不作为主面
+      bd = S.ebody[own];
+      var mi = S.emat[own];
+      sA[nseg] = a; sB[nseg] = b; sBody[nseg] = bd;
+      S.sK[nseg] = S.P.K[mi] + 1.3333333 * S.P.G[mi];
+      S.sH[nseg] = Math.sqrt(S.vol0[own]);
+      S.sC[nseg] = Math.sqrt(S.sK[nseg] / S.P.rho0[mi]);
+      nseg++;
+      S.onSurf[a] = 1; S.onSurf[b] = 1;
+    }
+    S.nseg = nseg;
+    /* 接触节点 = 表面节点 + 自由碎片节点 */
+    var cn = S.cnode, m = 0;
+    for (var i = 0; i < S.n; i++) {
+      if (!S.nalive[i]) continue;
+      if (S.onSurf[i] && !S.ghost[i]) cn[m++] = i;
+    }
+    S.ncnode = m;
+    S.contactAge = 0;
+  }
+
+  /* 均匀空间哈希装箱 */
+  function binSegments(S) {
+    var nseg = S.nseg, cs = S.cellSize, mask = S.tableSize - 1;
+    var cnt = S.cellCount, start = S.cellStart;
+    cnt.fill(0);
+    var i, k, total = 0;
+    var x = S.x, y = S.y;
+    for (i = 0; i < nseg; i++) {
+      var a = S.sA[i], b = S.sB[i];
+      var i0 = Math.floor(Math.min(x[a], x[b]) / cs), i1 = Math.floor(Math.max(x[a], x[b]) / cs);
+      var j0 = Math.floor(Math.min(y[a], y[b]) / cs), j1 = Math.floor(Math.max(y[a], y[b]) / cs);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 400) continue;
+      for (var ii = i0; ii <= i1; ii++) for (var jj = j0; jj <= j1; jj++) { cnt[hash(ii, jj) & mask]++; total++; }
+    }
+    if (S.cellItem.length < total) S.cellItem = new Int32Array(Math.ceil(total * 1.3) + 64);
+    var acc = 0;
+    for (k = 0; k <= mask; k++) { start[k] = acc; acc += cnt[k]; }
+    start[mask + 1] = acc;
+    var fill = S.cellCount; fill.fill(0);
+    var item = S.cellItem;
+    for (i = 0; i < nseg; i++) {
+      var a2 = S.sA[i], b2 = S.sB[i];
+      var i02 = Math.floor(Math.min(x[a2], x[b2]) / cs), i12 = Math.floor(Math.max(x[a2], x[b2]) / cs);
+      var j02 = Math.floor(Math.min(y[a2], y[b2]) / cs), j12 = Math.floor(Math.max(y[a2], y[b2]) / cs);
+      if ((i12 - i02 + 1) * (j12 - j02 + 1) > 400) continue;
+      for (var ii2 = i02; ii2 <= i12; ii2++) for (var jj2 = j02; jj2 <= j12; jj2++) {
+        var h2 = hash(ii2, jj2) & mask;
+        item[start[h2] + fill[h2]++] = i;
+      }
+    }
+  }
+  function hash(i, j) { return ((i * 73856093) ^ (j * 19349663)) >>> 0; }
+
+  /* ================= 接触力: 速度约束型 + 初始穿透宽恕 =================
+   * 设计要点(逐条都是为了"绝不凭空产能"):
+   *  1) 不用罚弹簧, 改为逐对施加冲量, 使法向相对速度不低于目标分离速度 vTar:
+   *        fn = m_eff * (vTar - vn) / dt      (仅当 vn < vTar 时施加)
+   *     -> 节点法向速度最多被推到 vTar, 不会像罚弹簧那样被"每步持续加速";
+   *     -> 逼近阶段 (vn<0) 为纯耗散的非弹性碰撞, 天然稳定, 与 dt 无关。
+   *  2) vTar = beta * peff / dt 提供位置修正, 稳态穿透量自洽收敛到
+   *        peff = F*dt^2/(m_eff*beta)   (典型 <0.05mm, 远优于罚弹簧的 ~0.3mm)
+   *  3) 初始穿透宽恕: 单元侵蚀会瞬间暴露新主面, 从动节点可能"已经"深埋其中。
+   *     若按几何穿透量弹出, 等于释放从未储存过的弹性能 —— 这是侵蚀型接触的
+   *     经典产能来源。这里为每个节点维护参考穿透 pen0, 超出 0.10*L 的部分
+   *     直接宽恕, 并以 20 m/s 的速度缓慢松弛, 只"阻止继续深入"而不"弹出"。
+   *  4) 极深穿透 (>0.5L) 判为已被吞没, vTar=0, 纯阻挡。
+   *  5) 轴对称下节点质量已含 2*pi*r 权重, 冲量式接触无需再做周长缩放。
+   * ================================================================ */
+  function contactForces(S) {
+    var dt = S.dt, cs = S.cellSize, mask = S.tableSize - 1, idt = 1 / dt;
+    var x = S.x, y = S.y, vx = S.vx, vy = S.vy, fx = S.fx, fy = S.fy;
+    var mu = S.opt.mu, self = S.opt.selfContact, beta = S.opt.contactBeta;
+    var relax = S.opt.penRelax;
+    var W = 0, Wd = 0, nc = 0, pmaxAll = 0;
+
+    for (var q = 0; q < S.ncnode; q++) {
+      var p = S.cnode[q];
+      if (!S.nalive[p] || S.ghost[p]) continue;
+      var mp = S.mass[p];
+      if (mp <= 0) continue;
+      var px = x[p], py = y[p], pb = S.nbody[p];
+      var ci = Math.floor(px / cs), cj = Math.floor(py / cs);
+      var qid = ++S.qid, visit = S.segVisit;
+      var pref0 = S.pen0[p] - relax * dt; if (pref0 < 0) pref0 = 0;
+      var prefNew = 0;
+
+      for (var di = -1; di <= 1; di++) for (var dj = -1; dj <= 1; dj++) {
+        var hh = hash(ci + di, cj + dj) & mask;
+        var s0 = S.cellStart[hh], s1 = S.cellStart[hh + 1];
+        for (var t = s0; t < s1; t++) {
+          var sg = S.cellItem[t];
+          if (visit[sg] === qid) continue;      // 去重: 长面段跨多格, 每步只能作用一次
+          visit[sg] = qid;
+          var a = S.sA[sg], b = S.sB[sg];
+          if (a === p || b === p) continue;
+          if (!self && S.sBody[sg] === pb) continue;
+          var ax = x[a], ay = y[a], bx = x[b], by = y[b];
+          /* 邻近性校验, 兼作哈希冲突过滤 */
+          if (px < (ax < bx ? ax : bx) - cs || px > (ax > bx ? ax : bx) + cs ||
+            py < (ay < by ? ay : by) - cs || py > (ay > by ? ay : by) + cs) continue;
+          var dxs = bx - ax, dys = by - ay;
+          var len2 = dxs * dxs + dys * dys;
+          if (len2 < TINY) continue;
+          var len = Math.sqrt(len2);
+          var nx = dys / len, ny = -dxs / len;          // 单元 CCW 外法线
+          var rx = px - ax, ry = py - ay;
+          var gn = rx * nx + ry * ny;
+          if (gn >= 0 || gn < -1.2 * len) continue;
+          var tt = (rx * dxs + ry * dys) / len2;
+          if (tt < -0.02 || tt > 1.02) continue;
+          if (tt < 0) tt = 0; else if (tt > 1) tt = 1;
+
+          var pen = -gn;
+          if (pen > pmaxAll) pmaxAll = pen;
+          var wa = 1 - tt, wb = tt;
+          var ma = S.mass[a], mb = S.mass[b];
+          var msg = 1 / (wa * wa / (ma > 0 ? ma : 1e-9) + wb * wb / (mb > 0 ? mb : 1e-9));
+          var meff = mp * msg / (mp + msg);
+
+          /* 初始穿透宽恕 */
+          var maxNew = 0.10 * len, pr = pref0;
+          if (pen > pr + maxNew) pr = pen - maxNew;
+          if (pr > prefNew) prefNew = pr;
+          var peff = pen - pr; if (peff < 0) peff = 0;
+
+          var vrx = vx[p] - (wa * vx[a] + wb * vx[b]);
+          var vry = vy[p] - (wa * vy[a] + wb * vy[b]);
+          var vn = vrx * nx + vry * ny;
+
+          var vTar;
+          if (pen > 0.5 * len) vTar = 0;                 // 已被吞没: 只阻挡, 不弹出
+          else {
+            vTar = beta * peff * idt;
+            var vmax = 0.25 * S.sC[sg];
+            if (vTar > vmax) vTar = vmax;
+          }
+          if (vn >= vTar) continue;
+          var fn = meff * (vTar - vn) * idt;
+          if (fn <= 0) continue;
+
+          var fxn = fn * nx, fyn = fn * ny;
+          /* 库仑摩擦(正则化, 纯耗散) */
+          var vtx = vrx - vn * nx, vty = vry - vn * ny;
+          var vt = Math.sqrt(vtx * vtx + vty * vty);
+          if (mu > 0 && vt > 1e-6) {
+            var ft = mu * fn * (vt < 2 ? vt * 0.5 : 1);
+            var ftm = meff * vt * idt * 0.9;            // 摩擦冲量不得反转切向相对运动
+            if (ft > ftm) ft = ftm;
+            fxn -= ft * vtx / vt; fyn -= ft * vty / vt;
+            Wd += ft * vt * dt;
+          }
+          fx[p] += fxn; fy[p] += fyn;
+          fx[a] -= wa * fxn; fy[a] -= wa * fyn;
+          fx[b] -= wb * fxn; fy[b] -= wb * fyn;
+          W += fn * peff * 0.5;
+          Wd += 0.5 * meff * (vn * vn - vTar * vTar);    // 冲量前后相对动能之差(精确耗散/注入量)
+          nc++;
+        }
+      }
+      S.pen0[p] = prefNew;
+    }
+    S.wContact = W; S.wDiss += Wd; S.ncontact = nc; S.maxPen = pmaxAll;
+  }
+
+  /* ================= 节点积分 ================= */
+  function nodalUpdate(S) {
+    var dt = S.dt, n = S.n, ab = S.opt.absorbCoef;
+    var x = S.x, y = S.y, vx = S.vx, vy = S.vy, fx = S.fx, fy = S.fy, wAbs = 0;
+    for (var i = 0; i < n; i++) {
+      if (!S.nalive[i]) continue;
+      if (S.ghost[i]) { x[i] += vx[i] * dt; y[i] += vy[i] * dt; fx[i] = 0; fy[i] = 0; continue; }
+      var im = S.invm[i];
+      if (im === 0) { fx[i] = 0; fy[i] = 0; continue; }
+      var nvx = vx[i] + fx[i] * im * dt;
+      var nvy = vy[i] + fy[i] * im * dt;
+      var ad = S.absorb[i];
+      if (ad > 0) {
+        var f = 1 - ab * ad;
+        wAbs += 0.5 * S.mass[i] * (1 - f * f) * (nvx * nvx + nvy * nvy);
+        nvx *= f; nvy *= f;
+      }
+      var fl = S.fix[i];
+      if (fl & 1) nvx = 0;
+      if (fl & 2) nvy = 0;
+      vx[i] = nvx; vy[i] = nvy;
+      x[i] += nvx * dt; y[i] += nvy * dt;
+      fx[i] = 0; fy[i] = 0;
+    }
+    S.wAbsorb = (S.wAbsorb || 0) + wAbs;
+  }
+
+  /* ================= 单步推进 ================= */
+  APP.simStep = function (S) {
+    if (S.done) return false;
+    computeDt(S);
+    if (S.contactAge >= S.opt.contactEvery) rebuildSurface(S);
+    else S.contactAge++;
+    elementLoop(S);
+    if (S.nseg > 0) { binSegments(S); contactForces(S); }
+    nodalUpdate(S);
+    S.t += S.dt; S.step++;
+    if (S.t >= S.opt.tMax) { S.done = true; S.reason = '达到设定仿真时长'; }
+    return true;
+  };
+
+  /* 在时间预算内推进若干步 */
+  APP.simRun = function (S, budgetMs, maxSteps) {
+    var t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    var k = 0;
+    maxSteps = maxSteps || 100000;
+    while (!S.done && k < maxSteps) {
+      APP.simStep(S); k++;
+      if ((k & 3) === 0) {
+        var el = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+        if (el > budgetMs) break;
+      }
+      if (S.t >= S.opt.tMax) { S.done = true; S.reason = '达到设定仿真时长'; }
+    }
+    if (k > 0) APP.diagnose(S);
+    return k;
+  };
+})(APP);
+
+/* ==== 04_diag_tate.js ==== */
+/* =====================================================================
+ * 04_diag_tate.js  —  结果诊断 + Alekseevskii-Tate 一维解析模型(对照)
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+
+  /* ---------------- 实时诊断 ---------------- */
+  APP.diagnose = function (S) {
+    var m = S.scene.meta, ct = Math.cos(m.theta), st = Math.sin(m.theta);
+    var n = S.n, ne = S.ne, i, e;
+    var noseXi = -1e9, tailXi = 1e9, mProj = 0, pxv = 0, mAlive = 0;
+    var keTot = 0, keProj = 0, minEtaC = 1e9, maxEtaC = -1e9;
+    var xMin = 1e9, xMax = -1e9;
+
+    for (i = 0; i < n; i++) {
+      if (!S.nalive[i]) continue;
+      var mi = S.mass[i];
+      var v2 = S.vx[i] * S.vx[i] + S.vy[i] * S.vy[i];
+      keTot += 0.5 * mi * v2;
+      if (S.nbody[i] !== 0) continue;
+      var xi = S.x[i] * ct + S.y[i] * st;
+      keProj += 0.5 * mi * v2;
+      if (S.nact[i] > 0) {
+        if (xi > noseXi) noseXi = xi;      // 仅统计仍连续的弹体材料, 排除飞散碎片
+        mAlive += mi; pxv += mi * S.vx[i];
+        if (xi < tailXi) tailXi = xi;
+        if (S.x[i] < xMin) xMin = S.x[i];
+        if (S.x[i] > xMax) xMax = S.x[i];
+      }
+    }
+    var ieTot = 0, nEroTgt = 0, craterXi = 0, nActProj = 0;
+    for (e = 0; e < ne; e++) {
+      if (S.stat[e]) {
+        ieTot += S.ie[e] * S.vol0[e];
+        if (S.ebody[e] === 0) nActProj++;
+      } else if (S.ebody[e] !== 0) {
+        nEroTgt++;
+        var a = S.e0[e], c = S.e2[e];
+        var cx = 0.5 * (S.x0[a] + S.x0[c]), cy = 0.5 * (S.y0[a] + S.y0[c]);   // 物质(未变形)坐标度量弹坑
+        var xi2 = cx * ct + cy * st, eta2 = -cx * st + cy * ct;
+        if (xi2 > craterXi) craterXi = xi2;
+        if (xi2 < 0.02) { if (eta2 < minEtaC) minEtaC = eta2; if (eta2 > maxEtaC) maxEtaC = eta2; }
+      }
+    }
+
+    var d = S.diag;
+    d.t = S.t; d.step = S.step; d.dt = S.dt;
+    d.crater = craterXi;
+    d.noseXi = noseXi > -1e8 ? noseXi : 0;
+    d.dop = Math.max(0, d.noseXi, craterXi);
+    d.rodLen = mAlive > 0 ? Math.max(0, xMax - xMin) : 0;
+    d.rodMassFrac = mProjTotal(S) > 0 ? mAlive / mProjTotal(S) : 0;
+    d.vres = mAlive > 1e-12 ? pxv / mAlive : 0;
+    d.keTot = keTot; d.keProj = keProj; d.ieTot = ieTot;
+    d.eroded = S.eroded; d.nActProj = nActProj; d.eroProj = S.eroProj; d.eroTgt = S.eroTgt;
+    d.craterW = (maxEtaC > minEtaC) ? (maxEtaC - minEtaC) * (m.axi ? 2 : 1) : 0;
+    d.perforated = d.dop >= m.totalT - 1.2 * m.hUsed;
+    d.ke0 = S.ke0 !== undefined ? S.ke0 : (S.ke0 = keTot);
+    d.ieAll = ieTot + S.ieEroded;
+    d.energyErr = (keTot + d.ieAll + S.wContact + S.wDiss + S.wHourglass - d.ke0) / Math.max(1, d.ke0);
+
+    /* 终止判据 */
+    if (!S.done) {
+      if (nActProj === 0) { S.done = true; S.reason = '弹芯已完全消耗'; }
+      else if (d.dop > m.totalT + 0.06 && d.vres > 50) { S.done = true; S.reason = '完全穿透并飞离靶后'; }
+      else if (S.t > 40e-6 && d.vres < 60 && !d.perforated && nActProj > 0) {
+        S.stallCnt = (S.stallCnt || 0) + 1;
+        if (S.stallCnt > 25) { S.done = true; S.reason = '侵彻停止(未穿透)'; }
+      } else S.stallCnt = 0;
+    }
+
+    /* 历史曲线 */
+    var H = S.hist;
+    if (H.t.length === 0 || S.t - H.t[H.t.length - 1] > 1.0e-6) {
+      H.t.push(S.t); H.dop.push(d.dop); H.vres.push(d.vres);
+      H.rlen.push(d.rodLen); H.ke.push(keTot); H.ie.push(ieTot);
+      if (H.t.length > 4000) { ['t', 'dop', 'vres', 'rlen', 'ke', 'ie'].forEach(function (k) { H[k].shift(); }); }
+    }
+    return d;
+  };
+
+  function mProjTotal(S) {
+    if (S._mp0 !== undefined) return S._mp0;
+    var s = 0;
+    for (var i = 0; i < S.n; i++) if (S.nbody[i] === 0) s += S.mass[i];
+    S._mp0 = s; return s;
+  }
+
+  /* ---------------- Alekseevskii-Tate 一维模型 ----------------
+   *  0.5*rp*(v-u)^2 + Yp = 0.5*rt*u^2 + Rt
+   *  dv/dt = -Yp/(rp*L),  dL/dt = -(v-u),  dP/dt = u
+   *  用于给 FEM 结果一个独立的量级校核(不含倾角/结构效应)
+   * ------------------------------------------------------------ */
+  APP.tatePredict = function (projMatId, tgtMatId, L0, v0, losThick) {
+    var MP = APP.MATERIALS[projMatId], MT = APP.MATERIALS[tgtMatId];
+    var flowP = MP.A + MP.B * Math.pow(0.5, MP.n);
+    var flowT = MT.A + MT.B * Math.pow(0.5, MT.n);
+    var Yp = 1.30 * flowP;          // 侵彻体动态强度
+    var Rt = 3.00 * flowT;          // 靶板侵彻阻力
+    var rp = MP.rho0, rt = MT.rho0;
+    var v = v0, L = L0, Pd = 0, t = 0, dt = 2e-8, guard = 0;
+    while (v > 20 && L > 1e-4 && guard++ < 200000) {
+      var u = solveU(rp, rt, v, Yp, Rt);
+      if (u <= 0) {                                  // 压力不足以继续侵彻 -> 刚体减速/停止
+        if (0.5 * rp * v * v + Yp < Rt) break;
+        u = 0;
+      }
+      var dv = -Yp / (rp * L) * dt;
+      var dL = -(v - u) * dt;
+      Pd += u * dt; v += dv; L += dL; t += dt;
+      if (losThick && Pd > losThick * 1.6) break;
+    }
+    return { dop: Pd, resL: Math.max(0, L), resV: Math.max(0, v), Yp: Yp, Rt: Rt, time: t };
+  };
+
+  function solveU(rp, rt, v, Yp, Rt) {
+    var a = 0.5 * (rp - rt), b = -rp * v, c = 0.5 * rp * v * v + Yp - Rt;
+    if (Math.abs(a) < 1e-6) { return c / (rp * v); }
+    var disc = b * b - 4 * a * c;
+    if (disc < 0) return 0;
+    var sq = Math.sqrt(disc);
+    var u1 = (-b + sq) / (2 * a), u2 = (-b - sq) / (2 * a);
+    var cand = [u1, u2].filter(function (u) { return u > 0 && u < v; });
+    if (!cand.length) return 0;
+    return Math.min.apply(null, cand);
+  }
+})(APP);
+
+/* ==== 05_render.js ==== */
+/* =====================================================================
+ * 05_render.js  —  WebGL2 云图渲染 + 2D 叠加层(色标/标尺/HUD/标注)
+ *  · 每帧把活跃单元展开成两个三角形, 顶点携带标量, 由片元着色器做色标映射
+ *  · 轴对称模式下自动镜像绘制, 得到完整的对称截面视图
+ *  · WebGL2 不可用时自动回退到 Canvas2D(功能一致, 速度较低)
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+
+  var VS = [
+    '#version 300 es',
+    'in vec2 a_pos; in float a_val;',
+    'uniform vec2 u_scale; uniform vec2 u_off;',
+    'out float v_val;',
+    'void main(){ v_val=a_val; gl_Position=vec4((a_pos+u_off)*u_scale, 0.0, 1.0); }'
+  ].join('\n');
+
+  var FS = [
+    '#version 300 es',
+    'precision highp float;',
+    'in float v_val; out vec4 o;',
+    'uniform int u_cmap; uniform vec3 u_matc[10]; uniform float u_alpha;',
+    'vec3 turbo(float t){',
+    ' const vec3 c0=vec3(0.11408901,0.06288341,0.22483372);',
+    ' const vec3 c1=vec3(6.7164195,3.18228675,7.57158159);',
+    ' const vec3 c2=vec3(-66.0940236,-4.9279827,-10.09439368);',
+    ' const vec3 c3=vec3(228.76607915,25.049867,-91.5410533);',
+    ' const vec3 c4=vec3(-334.83515658,-69.31749713,288.58588506);',
+    ' const vec3 c5=vec3(218.76372184,67.52150568,-305.20457722);',
+    ' const vec3 c6=vec3(-52.88903478,-21.54527365,110.51746477);',
+    ' return c0+t*(c1+t*(c2+t*(c3+t*(c4+t*(c5+t*c6)))));}',
+    'vec3 viridis(float t){',
+    ' const vec3 c0=vec3(0.27772733,0.00540734,0.33409981);',
+    ' const vec3 c1=vec3(0.10509304,1.40461353,1.38459016);',
+    ' const vec3 c2=vec3(-0.33086183,0.21484756,0.09509516);',
+    ' const vec3 c3=vec3(-4.6342305,-5.79910097,-19.33244096);',
+    ' const vec3 c4=vec3(6.22826994,14.17993337,56.6905526);',
+    ' const vec3 c5=vec3(4.776385,-13.74514538,-65.35303263);',
+    ' const vec3 c6=vec3(-5.43545586,4.64585261,26.31243525);',
+    ' return c0+t*(c1+t*(c2+t*(c3+t*(c4+t*(c5+t*c6)))));}',
+    'vec3 coolwarm(float t){ return mix(vec3(0.23,0.30,0.75), vec3(0.71,0.02,0.15), t)+vec3(0.5,0.55,0.5)*exp(-12.0*(t-0.5)*(t-0.5))*0.75; }',
+    'void main(){',
+    ' vec3 c;',
+    ' if(u_cmap==3){ int i=int(clamp(v_val,0.0,9.0)+0.5); c=u_matc[i]; }',
+    ' else { float t=clamp(v_val,0.0,1.0);',
+    '  if(u_cmap==0) c=turbo(t); else if(u_cmap==1) c=viridis(t); else c=coolwarm(t); }',
+    ' o=vec4(clamp(c,0.0,1.0), u_alpha);}'
+  ].join('\n');
+
+  var LVS = ['#version 300 es', 'in vec2 a_pos;', 'uniform vec2 u_scale; uniform vec2 u_off;',
+    'void main(){ gl_Position=vec4((a_pos+u_off)*u_scale,0.0,1.0); gl_PointSize=2.5; }'].join('\n');
+  var LFS = ['#version 300 es', 'precision highp float;', 'out vec4 o; uniform vec4 u_col;',
+    'void main(){ o=u_col; }'].join('\n');
+
+  function compile(gl, vs, fs) {
+    function sh(t, s) {
+      var o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+      return o;
+    }
+    var p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  /* ---------------- 场量定义 ---------------- */
+  APP.FIELDS = [
+    { id: 'vm', name: 'von Mises 等效应力', unit: 'GPa', scale: 1e-9, get: function (S, e) { return S.svm[e]; }, lo: 0, hi: 2.5 },
+    { id: 'p', name: '压强 (Mie-Grüneisen)', unit: 'GPa', scale: 1e-9, get: function (S, e) { return S.pr[e]; }, lo: -2, hi: 30, div: true },
+    { id: 'epsp', name: '等效塑性应变', unit: '', scale: 1, get: function (S, e) { return S.epsp[e]; }, lo: 0, hi: 2 },
+    { id: 'dmg', name: '损伤度 D', unit: '', scale: 1, get: function (S, e) { return S.dmg[e]; }, lo: 0, hi: 1 },
+    { id: 'temp', name: '温度', unit: 'K', scale: 1, get: function (S, e) { return S.temp[e]; }, lo: 293, hi: 1500 },
+    { id: 'rate', name: '等效应变率', unit: '1/s', scale: 1, get: function (S, e) { return S.erate[e]; }, lo: 0, hi: 3e5 },
+    { id: 'rho', name: '相对密度 ρ/ρ0', unit: '', scale: 1, get: function (S, e) { return S.rho[e] / S.P.rho0[S.emat[e]]; }, lo: 0.9, hi: 1.25 },
+    { id: 'vel', name: '速度大小', unit: 'm/s', scale: 1, get: null, lo: 0, hi: 1800 },
+    { id: 'sxx', name: '轴向应力 σxx', unit: 'GPa', scale: 1e-9, get: function (S, e) { return S.sxx[e] - S.pr[e] - S.qv[e]; }, lo: -30, hi: 5, div: true },
+    { id: 'mat', name: '材料分区', unit: '', scale: 1, get: null, lo: 0, hi: 9 }
+  ];
+
+  /* ---------------- 渲染器 ---------------- */
+  APP.createRenderer = function (glCanvas, uiCanvas) {
+    var R = {
+      cam: { x: 0, y: 0, z: 1 }, wire: false, debris: true, mirror: true,
+      cmap: 0, field: 'vm', auto: true, lo: 0, hi: 1, gamma: 1, alpha: 1.0
+    };
+    var gl = null;
+    try { gl = glCanvas.getContext('webgl2', { antialias: true, alpha: false }); } catch (e) { gl = null; }
+    R.gl = gl;
+    var ctx = uiCanvas.getContext('2d');
+    R.ctx = ctx; R.canvas = glCanvas; R.ui = uiCanvas;
+
+    if (gl) {
+      R.prog = compile(gl, VS, FS);
+      R.lprog = compile(gl, LVS, LFS);
+      R.vbo = gl.createBuffer(); R.lbo = gl.createBuffer();
+      R.vao = gl.createVertexArray();
+      gl.bindVertexArray(R.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, R.vbo);
+      var la = gl.getAttribLocation(R.prog, 'a_pos'), lv = gl.getAttribLocation(R.prog, 'a_val');
+      gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la, 2, gl.FLOAT, false, 12, 0);
+      gl.enableVertexAttribArray(lv); gl.vertexAttribPointer(lv, 1, gl.FLOAT, false, 12, 8);
+      R.lvao = gl.createVertexArray();
+      gl.bindVertexArray(R.lvao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, R.lbo);
+      var lb = gl.getAttribLocation(R.lprog, 'a_pos');
+      gl.enableVertexAttribArray(lb); gl.vertexAttribPointer(lb, 2, gl.FLOAT, false, 8, 0);
+      gl.bindVertexArray(null);
+    }
+    R.tri = new Float32Array(0); R.lin = new Float32Array(0); R.pts = new Float32Array(0);
+
+    /* 世界坐标 -> 屏幕 */
+    R.toScreen = function (wx, wy) {
+      var w = R.ui.width, h = R.ui.height, s = R.cam.z * Math.min(w, h) * 0.5;
+      return [w * 0.5 + (wx - R.cam.x) * s, h * 0.5 - (wy - R.cam.y) * s];
+    };
+    R.toWorld = function (sx, sy) {
+      var w = R.ui.width, h = R.ui.height, s = R.cam.z * Math.min(w, h) * 0.5;
+      return [(sx - w * 0.5) / s + R.cam.x, -(sy - h * 0.5) / s + R.cam.y];
+    };
+    /* 视图适配: 场景在弹道方向上很长, 按画布宽度适配 */
+    R.fit = function (S) {
+      var m = S.scene.meta, T = m.totalT;
+      var back = Math.max(0.30 * Math.max(T, 0.15), 0.10) + m.standoff;
+      var x0 = -back, x1 = T + 0.15 * Math.max(T, 0.15);
+      var span = Math.max(x1 - x0, 0.10) * 1.05;
+      var cx = 0.5 * (x0 + x1);
+      R.cam.x = cx * Math.cos(m.theta);
+      R.cam.y = cx * Math.sin(m.theta);
+      var w = R.ui.width || 800, h = R.ui.height || 600, mn = Math.min(w, h);
+      R.cam.z = 1.84 * w / (span * mn);
+    };
+
+    /* ---------- 场量 -> [0,1] ---------- */
+    function fieldValues(S, F) {
+      var ne = S.ne, out = R._fv && R._fv.length === ne ? R._fv : (R._fv = new Float32Array(ne));
+      var i;
+      if (F.id === 'vel') {
+        for (i = 0; i < ne; i++) {
+          if (!S.stat[i]) { out[i] = 0; continue; }
+          var a = S.e0[i], b = S.e1[i], c = S.e2[i], d = S.e3[i];
+          var vx = 0.25 * (S.vx[a] + S.vx[b] + S.vx[c] + S.vx[d]);
+          var vy = 0.25 * (S.vy[a] + S.vy[b] + S.vy[c] + S.vy[d]);
+          out[i] = Math.sqrt(vx * vx + vy * vy);
+        }
+      } else if (F.id === 'mat') {
+        for (i = 0; i < ne; i++) out[i] = S.emat[i];
+      } else {
+        for (i = 0; i < ne; i++) out[i] = S.stat[i] ? F.get(S, i) : 0;
+      }
+      return out;
+    }
+
+    R.autoRange = function (S, F, vals) {
+      if (F.id === 'mat') { R.lo = 0; R.hi = 9; return; }
+      var lo = 1e30, hi = -1e30, n = 0;
+      for (var i = 0; i < S.ne; i++) {
+        if (!S.stat[i]) continue;
+        var v = vals[i]; if (v < lo) lo = v; if (v > hi) hi = v; n++;
+      }
+      if (!n) { lo = F.lo; hi = F.hi; }
+      if (F.div) { var a = Math.max(Math.abs(lo), Math.abs(hi)); lo = -0.15 * a; hi = a; }
+      if (hi - lo < 1e-12) hi = lo + 1;
+      R.lo = R.lo === undefined ? lo : R.lo * 0.75 + lo * 0.25;   // 时间平滑, 避免色标闪烁
+      R.hi = R.hi === undefined ? hi : R.hi * 0.75 + hi * 0.25;
+    };
+
+    /* ---------- 主绘制 ---------- */
+    R.draw = function (S) {
+      var F = APP.FIELDS.filter(function (f) { return f.id === R.field; })[0] || APP.FIELDS[0];
+      var vals = fieldValues(S, F);
+      if (R.auto) R.autoRange(S, F, vals); 
+      var lo = R.lo, hi = R.hi, inv = 1 / (hi - lo);
+      var ne = S.ne, mir = (S.axi && R.mirror) ? 2 : 1;
+
+      /* --- 顶点装配 --- */
+      var need = ne * 6 * 3 * mir;
+      if (R.tri.length < need) R.tri = new Float32Array(Math.ceil(need * 1.2));
+      var T = R.tri, k = 0, x = S.x, y = S.y;
+      for (var pass = 0; pass < mir; pass++) {
+        var sgn = pass === 0 ? 1 : -1;
+        for (var e = 0; e < ne; e++) {
+          if (!S.stat[e]) continue;
+          var v = (vals[e] - lo) * inv;
+          if (F.id === 'mat') v = S.emat[e];
+          var a = S.e0[e], b = S.e1[e], c = S.e2[e], d = S.e3[e];
+          var xa = x[a], ya = y[a] * sgn, xb = x[b], yb = y[b] * sgn;
+          var xc = x[c], yc = y[c] * sgn, xd = x[d], yd = y[d] * sgn;
+          T[k] = xa; T[k + 1] = ya; T[k + 2] = v;
+          T[k + 3] = xb; T[k + 4] = yb; T[k + 5] = v;
+          T[k + 6] = xc; T[k + 7] = yc; T[k + 8] = v;
+          T[k + 9] = xa; T[k + 10] = ya; T[k + 11] = v;
+          T[k + 12] = xc; T[k + 13] = yc; T[k + 14] = v;
+          T[k + 15] = xd; T[k + 16] = yd; T[k + 17] = v;
+          k += 18;
+        }
+      }
+      R.nv = k / 3;
+
+      if (gl) drawGL(S, k, F, mir); else drawC2D(S, vals, lo, hi, F, mir);
+      drawOverlay(S, F, lo, hi);
+    };
+
+    function drawGL(S, k, F, mir) {
+      var w = R.canvas.width, h = R.canvas.height;
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0.055, 0.066, 0.094, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+      var sx = R.cam.z * Math.min(w, h) / w, sy = R.cam.z * Math.min(w, h) / h;
+      gl.useProgram(R.prog);
+      gl.uniform2f(gl.getUniformLocation(R.prog, 'u_scale'), sx, sy);
+      gl.uniform2f(gl.getUniformLocation(R.prog, 'u_off'), -R.cam.x, -R.cam.y);
+      gl.uniform1i(gl.getUniformLocation(R.prog, 'u_cmap'), F.id === 'mat' ? 3 : R.cmap);
+      gl.uniform1f(gl.getUniformLocation(R.prog, 'u_alpha'), 1.0);
+      var cols = new Float32Array(30);
+      for (var i = 0; i < S.scene.mats.length && i < 10; i++) {
+        var mc = APP.MATERIALS[S.scene.mats[i]].color;
+        cols[i * 3] = mc[0]; cols[i * 3 + 1] = mc[1]; cols[i * 3 + 2] = mc[2];
+      }
+      gl.uniform3fv(gl.getUniformLocation(R.prog, 'u_matc'), cols);
+      gl.bindVertexArray(R.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, R.vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, R.tri.subarray(0, k), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, k / 3);
+
+      /* 网格线 / 碎片 */
+      var lineN = 0, ptN = 0;
+      if (R.wire && S.ne <= 60000) {
+        var need = S.ne * 16 * mir;
+        if (R.lin.length < need) R.lin = new Float32Array(Math.ceil(need * 1.2));
+        var L = R.lin, m = 0;
+        for (var pass = 0; pass < mir; pass++) {
+          var sgn = pass === 0 ? 1 : -1;
+          for (var e2 = 0; e2 < S.ne; e2++) {
+            if (!S.stat[e2]) continue;
+            var q = [S.e0[e2], S.e1[e2], S.e2[e2], S.e3[e2]];
+            for (var j = 0; j < 4; j++) {
+              var n0 = q[j], n1 = q[(j + 1) & 3];
+              L[m++] = S.x[n0]; L[m++] = S.y[n0] * sgn;
+              L[m++] = S.x[n1]; L[m++] = S.y[n1] * sgn;
+            }
+          }
+        }
+        lineN = m / 2;
+      }
+      if (R.debris) {
+        var cnt = 0, i2;
+        for (i2 = 0; i2 < S.n; i2++) if (S.ghost[i2]) cnt++;
+        if (R.pts.length < cnt * 2 * mir) R.pts = new Float32Array(Math.ceil(cnt * 2 * mir * 1.3) + 32);
+        var Pp = R.pts, mm = 0;
+        for (var pass2 = 0; pass2 < mir; pass2++) {
+          var sg2 = pass2 === 0 ? 1 : -1;
+          for (i2 = 0; i2 < S.n; i2++) if (S.ghost[i2]) { Pp[mm++] = S.x[i2]; Pp[mm++] = S.y[i2] * sg2; }
+        }
+        ptN = mm / 2;
+      }
+      if (lineN || ptN) {
+        gl.useProgram(R.lprog);
+        gl.uniform2f(gl.getUniformLocation(R.lprog, 'u_scale'), sx, sy);
+        gl.uniform2f(gl.getUniformLocation(R.lprog, 'u_off'), -R.cam.x, -R.cam.y);
+        gl.bindVertexArray(R.lvao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, R.lbo);
+        if (lineN) {
+          gl.uniform4f(gl.getUniformLocation(R.lprog, 'u_col'), 0, 0, 0, 0.28);
+          gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bufferData(gl.ARRAY_BUFFER, R.lin.subarray(0, lineN * 2), gl.DYNAMIC_DRAW);
+          gl.drawArrays(gl.LINES, 0, lineN);
+          gl.disable(gl.BLEND);
+        }
+        if (ptN) {
+          gl.uniform4f(gl.getUniformLocation(R.lprog, 'u_col'), 1.0, 0.72, 0.25, 1.0);
+          gl.bufferData(gl.ARRAY_BUFFER, R.pts.subarray(0, ptN * 2), gl.DYNAMIC_DRAW);
+          gl.drawArrays(gl.POINTS, 0, ptN);
+        }
+      }
+      gl.bindVertexArray(null);
+    }
+
+    /* Canvas2D 回退 */
+    function drawC2D(S, vals, lo, hi, F, mir) {
+      var c = R.canvas.getContext('2d'), w = R.canvas.width, h = R.canvas.height;
+      c.fillStyle = '#0e1118'; c.fillRect(0, 0, w, h);
+      var inv = 1 / (hi - lo);
+      for (var pass = 0; pass < mir; pass++) {
+        var sgn = pass === 0 ? 1 : -1;
+        for (var e = 0; e < S.ne; e++) {
+          if (!S.stat[e]) continue;
+          var t = (vals[e] - lo) * inv;
+          c.fillStyle = F.id === 'mat' ? matCss(S, S.emat[e]) : APP.cmapCss(R.cmap, t);
+          var q = [S.e0[e], S.e1[e], S.e2[e], S.e3[e]];
+          c.beginPath();
+          for (var j = 0; j < 4; j++) {
+            var p = R.toScreen(S.x[q[j]], S.y[q[j]] * sgn);
+            if (j === 0) c.moveTo(p[0], p[1]); else c.lineTo(p[0], p[1]);
+          }
+          c.closePath(); c.fill();
+        }
+      }
+    }
+    function matCss(S, mi) {
+      var cc = APP.MATERIALS[S.scene.mats[mi]].color;
+      return 'rgb(' + (cc[0] * 255 | 0) + ',' + (cc[1] * 255 | 0) + ',' + (cc[2] * 255 | 0) + ')';
+    }
+
+    /* ---------- 2D 叠加层 ---------- */
+    function drawOverlay(S, F, lo, hi) {
+      var w = R.ui.width, h = R.ui.height;
+      ctx.clearRect(0, 0, w, h);
+      var m = S.scene.meta, dpr = R.dpr || 1;
+      ctx.save();
+      ctx.lineWidth = 1 * dpr;
+      ctx.font = (11 * dpr) + 'px ui-monospace,Consolas,monospace';
+
+      /* 靶板前/后表面参考线 + 弹道线 */
+      var ct = Math.cos(m.theta), st = Math.sin(m.theta);
+      function localLine(xi, col, dash) {
+        var half = m.halfW * 1.05;
+        var p1 = R.toScreen(xi * ct - (-half - xi * m.shear) * st, xi * st + (-half - xi * m.shear) * ct);
+        var p2 = R.toScreen(xi * ct - (half - xi * m.shear) * st, xi * st + (half - xi * m.shear) * ct);
+        ctx.strokeStyle = col; ctx.setLineDash(dash || []);
+        ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      localLine(0, 'rgba(120,200,255,0.45)', [6 * dpr, 4 * dpr]);
+      localLine(m.totalT, 'rgba(255,140,140,0.45)', [6 * dpr, 4 * dpr]);
+      var a1 = R.toScreen(-1, 0), a2 = R.toScreen(2, 0);
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.beginPath(); ctx.moveTo(a1[0], a1[1]); ctx.lineTo(a2[0], a2[1]); ctx.stroke();
+
+      /* 侵彻深度标记 */
+      var d = S.diag;
+      if (d && d.dop > 0) {
+        var xi = Math.min(d.dop, m.totalT);
+        localLine(xi, 'rgba(255,214,102,0.85)');
+        var pm = R.toScreen(xi * ct + 0.02 * st, xi * st - 0.02 * ct);
+        ctx.fillStyle = '#ffd666';
+        ctx.fillText('DOP ' + (d.dop * 1000).toFixed(0) + ' mm', pm[0] + 6 * dpr, pm[1]);
+      }
+      APP.drawColorbar(ctx, R, F, lo, hi, w, h, dpr);
+      APP.drawScalebar(ctx, R, w, h, dpr);
+      ctx.restore();
+    }
+    return R;
+  };
+
+  /* ---------- 色标(2D) ---------- */
+  APP.cmapCss = function (cmap, t) {
+    t = Math.max(0, Math.min(1, t));
+    var c;
+    if (cmap === 1) c = polyC(t, VIR); else if (cmap === 2) c = cwarm(t); else c = polyC(t, TURBO);
+    return 'rgb(' + (c[0] * 255 | 0) + ',' + (c[1] * 255 | 0) + ',' + (c[2] * 255 | 0) + ')';
+  };
+  var TURBO = [[0.11408901, 0.06288341, 0.22483372], [6.7164195, 3.18228675, 7.57158159],
+  [-66.0940236, -4.9279827, -10.09439368], [228.76607915, 25.049867, -91.5410533],
+  [-334.83515658, -69.31749713, 288.58588506], [218.76372184, 67.52150568, -305.20457722],
+  [-52.88903478, -21.54527365, 110.51746477]];
+  var VIR = [[0.27772733, 0.00540734, 0.33409981], [0.10509304, 1.40461353, 1.38459016],
+  [-0.33086183, 0.21484756, 0.09509516], [-4.6342305, -5.79910097, -19.33244096],
+  [6.22826994, 14.17993337, 56.6905526], [4.776385, -13.74514538, -65.35303263],
+  [-5.43545586, 4.64585261, 26.31243525]];
+  function polyC(t, C) {
+    var r = 0, g = 0, b = 0, p = 1;
+    for (var i = 0; i < C.length; i++) { r += C[i][0] * p; g += C[i][1] * p; b += C[i][2] * p; p *= t; }
+    return [Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b))];
+  }
+  function cwarm(t) {
+    var k = Math.exp(-12 * (t - 0.5) * (t - 0.5)) * 0.75;
+    return [Math.min(1, 0.23 + (0.71 - 0.23) * t + 0.5 * k),
+    Math.min(1, 0.30 + (0.02 - 0.30) * t + 0.55 * k),
+    Math.min(1, 0.75 + (0.15 - 0.75) * t + 0.5 * k)];
+  }
+
+  APP.drawColorbar = function (ctx, R, F, lo, hi, w, h, dpr) {
+    var bw = 16 * dpr, bh = Math.min(230 * dpr, h * 0.45), x0 = w - 78 * dpr, y0 = h * 0.5 - bh / 2;
+    if (F.id === 'mat') return;
+    for (var i = 0; i < bh; i++) {
+      ctx.fillStyle = APP.cmapCss(R.cmap, 1 - i / bh);
+      ctx.fillRect(x0, y0 + i, bw, 1.2);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.strokeRect(x0, y0, bw, bh);
+    ctx.fillStyle = '#dfe6f2'; ctx.textAlign = 'left';
+    ctx.font = (10.5 * dpr) + 'px ui-monospace,Consolas,monospace';
+    for (var k = 0; k <= 4; k++) {
+      var v = (hi - (hi - lo) * k / 4) * F.scale;
+      ctx.fillText(fmt(v), x0 + bw + 5 * dpr, y0 + bh * k / 4 + 3.5 * dpr);
+    }
+    ctx.save();
+    ctx.translate(x0 - 8 * dpr, y0 + bh / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#9fb0c9';
+    ctx.fillText(F.name + (F.unit ? ' [' + F.unit + ']' : ''), 0, 0);
+    ctx.restore();
+  };
+  function fmt(v) {
+    var a = Math.abs(v);
+    if (a >= 1e4 || (a < 1e-2 && a > 0)) return v.toExponential(1);
+    return a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(1) : v.toFixed(2);
+  }
+
+  APP.drawScalebar = function (ctx, R, w, h, dpr) {
+    var s = R.cam.z * Math.min(w, h) * 0.5;
+    var target = 120 * dpr / s, nice = Math.pow(10, Math.floor(Math.log10(target)));
+    var mult = [1, 2, 5, 10], pick = nice;
+    for (var i = 0; i < 4; i++) if (nice * mult[i] <= target * 1.3) pick = nice * mult[i];
+    var px = pick * s, x0 = 16 * dpr, y0 = h - 20 * dpr;
+    ctx.strokeStyle = '#dfe6f2'; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + px, y0);
+    ctx.moveTo(x0, y0 - 4 * dpr); ctx.lineTo(x0, y0 + 4 * dpr);
+    ctx.moveTo(x0 + px, y0 - 4 * dpr); ctx.lineTo(x0 + px, y0 + 4 * dpr); ctx.stroke();
+    ctx.fillStyle = '#dfe6f2'; ctx.textAlign = 'left';
+    ctx.font = (11 * dpr) + 'px ui-monospace,Consolas,monospace';
+    ctx.fillText(pick >= 1 ? pick.toFixed(2) + ' m' : (pick * 1000).toFixed(0) + ' mm', x0, y0 - 8 * dpr);
+  };
+})(APP);
+
+/* ==== 06_ui.js ==== */
+/* =====================================================================
+ * 06_ui.js  —  控制面板、运行循环、曲线与结果面板
+ * ===================================================================== */
+var APP = APP || {};
+(function (APP) {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var sim = null, scene = null, R = null, running = false, raf = 0;
+  var cfg = {
+    proj: null, target: null, quality: null, mode: 'auto',
+    tMax: 400e-6, mu: 0.10, hourglass: 0.10, erosion: true, absorb: true, support: 'lateral'
+  };
+  var perf = { fps: 0, sps: 0, last: 0, acc: 0, nacc: 0, steps: 0 };
+
+  /* ---------------- 初始化 ---------------- */
+  function init() {
+    cfg.proj = JSON.parse(JSON.stringify(APP.PROJECTILES[0]));
+    cfg.proj.yawDeg = 0;
+    var t0 = APP.TARGETS[0];
+    cfg.target = { obliquityDeg: t0.obliquity, layers: JSON.parse(JSON.stringify(t0.layers)) };
+    cfg.quality = APP.QUALITY[0];
+
+    fill('selProj', APP.PROJECTILES.map(function (p) { return [p.id, p.name]; }));
+    fill('selTgt', APP.TARGETS.map(function (t) { return [t.id, t.name]; }));
+    fill('selQual', APP.QUALITY.map(function (q) { return [q.id, q.name]; }));
+    fill('selPMat', APP.matList('penetrator').map(function (k) { return [k, APP.MATERIALS[k].name]; }));
+    fill('selField', APP.FIELDS.map(function (f) { return [f.id, f.name]; }));
+
+    R = APP.createRenderer($('gl'), $('ov'));
+    bind();
+    syncFromCfg();
+    rebuild();
+    window.addEventListener('resize', resize);
+    resize();
+    loop();
+  }
+
+  function fill(id, arr) {
+    var s = $(id); s.innerHTML = '';
+    arr.forEach(function (kv) {
+      var o = document.createElement('option'); o.value = kv[0]; o.textContent = kv[1]; s.appendChild(o);
+    });
+  }
+
+  /* ---------------- 事件绑定 ---------------- */
+  function bind() {
+    $('selProj').onchange = function () {
+      var p = APP.PROJECTILES.filter(function (x) { return x.id === this.value; }.bind(this))[0];
+      cfg.proj = JSON.parse(JSON.stringify(p)); cfg.proj.yawDeg = 0;
+      syncFromCfg(); rebuild();
+    };
+    $('selTgt').onchange = function () {
+      var t = APP.TARGETS.filter(function (x) { return x.id === this.value; }.bind(this))[0];
+      cfg.target = { obliquityDeg: t.obliquity, layers: JSON.parse(JSON.stringify(t.layers)) };
+      syncFromCfg(); rebuild();
+    };
+    $('selQual').onchange = function () {
+      cfg.quality = APP.QUALITY.filter(function (q) { return q.id === this.value; }.bind(this))[0];
+      $('qualNote').textContent = cfg.quality.desc; rebuild();
+    };
+    $('selPMat').onchange = function () { cfg.proj.mat = this.value; syncFromCfg(); rebuild(); };
+    $('selNose').onchange = function () { cfg.proj.noseType = this.value; rebuild(); };
+    $('selMode').onchange = function () { cfg.mode = this.value; rebuild(); };
+    $('selSup').onchange = function () { cfg.support = this.value; rebuild(); };
+
+    slider('rngV', 'vVal', function (v) { cfg.proj.v0 = v; }, 0, true);
+    slider('rngL', 'lVal', function (v) { cfg.proj.length = v / 1000; }, 0, true);
+    slider('rngD', 'dVal', function (v) { cfg.proj.diameter = v / 1000; }, 0, true);
+    slider('rngYaw', 'yVal', function (v) { cfg.proj.yawDeg = v; }, 1, true);
+    slider('rngOb', 'obVal', function (v) { cfg.target.obliquityDeg = v; }, 0, true);
+    slider('rngTmax', 'tmVal', function (v) { cfg.tMax = v * 1e-6; if (sim) sim.opt.tMax = cfg.tMax; }, 0, false);
+    slider('rngMu', 'muVal', function (v) { cfg.mu = v; if (sim) sim.opt.mu = v; }, 2, false);
+    slider('rngHg', 'hgVal', function (v) { cfg.hourglass = v; if (sim) sim.opt.hourglass = v; }, 2, false);
+
+    $('ckErode').onchange = function () { cfg.erosion = this.checked; if (sim) sim.opt.erosion = this.checked; };
+    $('ckAbsorb').onchange = function () { cfg.absorb = this.checked; rebuild(); };
+    $('ckWire').onchange = function () { R.wire = this.checked; };
+    $('ckDeb').onchange = function () { R.debris = this.checked; };
+    $('ckMir').onchange = function () { R.mirror = this.checked; };
+    $('ckAuto').onchange = function () { R.auto = this.checked; };
+    $('selField').onchange = function () { R.field = this.value; R.lo = undefined; R.hi = undefined; };
+    $('selCmap').onchange = function () { R.cmap = +this.value; };
+    $('inLo').onchange = function () { R.auto = false; $('ckAuto').checked = false; R.lo = +this.value / curField().scale; };
+    $('inHi').onchange = function () { R.auto = false; $('ckAuto').checked = false; R.hi = +this.value / curField().scale; };
+
+    $('btnRun').onclick = function () { running = !running; this.textContent = running ? '⏸ 暂停' : '▶ 开始'; this.classList.toggle('primary', !running); };
+    $('btnStep').onclick = function () { if (sim) { for (var i = 0; i < 20 && !sim.done; i++) APP.simStep(sim); APP.diagnose(sim); } };
+    $('btnReset').onclick = function () { rebuild(); };
+    $('btnFit').onclick = function () { if (sim) R.fit(sim); };
+    $('btnShot').onclick = shot;
+    $('btnAddPlate').onclick = function () { cfg.target.layers.push({ type: 'plate', mat: 'RHA', t: 0.05 }); renderLayers(); rebuild(); };
+    $('btnAddGap').onclick = function () { cfg.target.layers.push({ type: 'gap', t: 0.05 }); renderLayers(); rebuild(); };
+
+    var v = $('view'), drag = null;
+    v.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      var r = v.getBoundingClientRect(), dpr = R.dpr;
+      var w0 = R.toWorld((ev.clientX - r.left) * dpr, (ev.clientY - r.top) * dpr);
+      R.cam.z *= Math.exp(-ev.deltaY * 0.0012);
+      var w1 = R.toWorld((ev.clientX - r.left) * dpr, (ev.clientY - r.top) * dpr);
+      R.cam.x += w0[0] - w1[0]; R.cam.y += w0[1] - w1[1];
+    }, { passive: false });
+    v.addEventListener('mousedown', function (ev) { drag = { x: ev.clientX, y: ev.clientY, cx: R.cam.x, cy: R.cam.y }; });
+    window.addEventListener('mouseup', function () { drag = null; });
+    window.addEventListener('mousemove', function (ev) {
+      var r = v.getBoundingClientRect();
+      if (drag) {
+        var s = R.cam.z * Math.min(R.ui.width, R.ui.height) * 0.5 / R.dpr;
+        R.cam.x = drag.cx - (ev.clientX - drag.x) / s;
+        R.cam.y = drag.cy + (ev.clientY - drag.y) / s;
+      } else if (sim && ev.clientX > r.left && ev.clientX < r.right && ev.clientY > r.top && ev.clientY < r.bottom) {
+        probe((ev.clientX - r.left) * R.dpr, (ev.clientY - r.top) * R.dpr);
+      }
+    });
+    v.addEventListener('dblclick', function () { if (sim) R.fit(sim); });
+  }
+
+  function slider(rid, vid, set, dec, needRebuild) {
+    var el = $(rid);
+    el.oninput = function () {
+      var v = parseFloat(this.value);
+      $(vid).textContent = dec ? v.toFixed(dec) : v;
+      set(v);
+    };
+    el.onchange = function () { if (needRebuild) rebuild(); };
+  }
+
+  function curField() { return APP.FIELDS.filter(function (f) { return f.id === R.field; })[0] || APP.FIELDS[0]; }
+
+  /* ---------------- 面板 <-> 配置 ---------------- */
+  function syncFromCfg() {
+    var p = cfg.proj;
+    $('rngV').value = p.v0; $('vVal').textContent = p.v0;
+    $('rngL').value = Math.round(p.length * 1000); $('lVal').textContent = Math.round(p.length * 1000);
+    $('rngD').value = Math.round(p.diameter * 1000); $('dVal').textContent = Math.round(p.diameter * 1000);
+    $('rngYaw').value = p.yawDeg || 0; $('yVal').textContent = (p.yawDeg || 0).toFixed(1);
+    $('selPMat').value = p.mat; $('selNose').value = p.noseType;
+    $('rngOb').value = cfg.target.obliquityDeg; $('obVal').textContent = cfg.target.obliquityDeg;
+    $('rngTmax').value = Math.round(cfg.tMax * 1e6); $('tmVal').textContent = Math.round(cfg.tMax * 1e6);
+    $('rngMu').value = cfg.mu; $('muVal').textContent = cfg.mu.toFixed(2);
+    $('rngHg').value = cfg.hourglass; $('hgVal').textContent = cfg.hourglass.toFixed(2);
+    $('qualNote').textContent = cfg.quality.desc;
+    $('projNote').textContent = p.note || '';
+    renderLayers();
+  }
+
+  function renderLayers() {
+    var host = $('layers'); host.innerHTML = '';
+    var armor = APP.matList('armor');
+    cfg.target.layers.forEach(function (L, i) {
+      var d = document.createElement('div'); d.className = 'layer';
+      if (L.type === 'plate') {
+        var s = document.createElement('select');
+        armor.forEach(function (k) {
+          var o = document.createElement('option'); o.value = k; o.textContent = APP.MATERIALS[k].short; s.appendChild(o);
+        });
+        s.value = L.mat;
+        s.onchange = function () { L.mat = s.value; rebuild(); };
+        d.appendChild(s);
+      } else {
+        var g = document.createElement('div'); g.textContent = '空气间隙'; g.style.color = '#7f90ab'; d.appendChild(g);
+      }
+      var inp = document.createElement('input');
+      inp.type = 'number'; inp.value = Math.round(L.t * 1000); inp.min = 1; inp.step = 5;
+      inp.onchange = function () { L.t = Math.max(1, +inp.value) / 1000; rebuild(); };
+      d.appendChild(inp);
+      var b = document.createElement('div'); b.className = 'del'; b.textContent = '✕';
+      b.onclick = function () { cfg.target.layers.splice(i, 1); renderLayers(); rebuild(); };
+      d.appendChild(b);
+      host.appendChild(d);
+    });
+  }
+
+  /* ---------------- 建模 & 重置 ---------------- */
+  function rebuild() {
+    if (!cfg.target.layers.length) cfg.target.layers.push({ type: 'plate', mat: 'RHA', t: 0.1 });
+    var axi = cfg.mode === 'axi' || (cfg.mode === 'auto' && cfg.target.obliquityDeg === 0);
+    if (axi && cfg.target.obliquityDeg !== 0 && cfg.mode === 'axi') cfg.target.obliquityDeg = 0;
+    try {
+      scene = APP.buildScene({
+        proj: cfg.proj, quality: cfg.quality,
+        target: {
+          obliquityDeg: axi ? 0 : cfg.target.obliquityDeg, layers: cfg.target.layers,
+          support: cfg.support, absorb: cfg.absorb, shearFollow: true, axisym: axi
+        }
+      });
+      sim = APP.createSim(scene, {
+        tssf: cfg.quality.tssf, hourglass: cfg.hourglass, mu: cfg.mu,
+        contactEvery: cfg.quality.contactEvery, tMax: cfg.tMax, erosion: cfg.erosion
+      });
+    } catch (err) {
+      $('result').innerHTML = '<h4 class="bad">建模失败</h4><div>' + err.message + '</div>';
+      return;
+    }
+    R.lo = undefined; R.hi = undefined;
+    R.fit(sim);
+    perf.steps = 0;
+    $('mode').textContent = (axi ? '轴对称 r-z' : '平面应变') + ' · ' + sim.ne + ' 单元';
+    var m = scene.meta;
+    $('tgtInfo').textContent = '总厚 ' + (m.plateT * 1000).toFixed(0) + ' mm｜法线厚度(LOS) ' +
+      (m.losT * 1000).toFixed(0) + ' mm｜面密度 ' + arealDensity().toFixed(0) + ' kg/m²';
+    $('projInfo').textContent = '弹芯质量 ' + m.rodMass.toFixed(2) + ' kg｜长径比 L/D = ' +
+      (cfg.proj.length / cfg.proj.diameter).toFixed(1) + '｜动能 ' +
+      (0.5 * m.rodMass * cfg.proj.v0 * cfg.proj.v0 / 1e6).toFixed(2) + ' MJ';
+    if (m.autoCoarsened) $('qualNote').textContent = cfg.quality.desc +
+      '　⚠ 已自动粗化到 h=' + (m.hUsed * 1000).toFixed(2) + 'mm 以满足单元数预算';
+    else $('qualNote').textContent = cfg.quality.desc;
+    updateResult();
+  }
+
+  function arealDensity() {
+    var s = 0;
+    cfg.target.layers.forEach(function (L) { if (L.type === 'plate') s += APP.MATERIALS[L.mat].rho0 * L.t; });
+    return s;
+  }
+
+  /* ---------------- 主循环 ---------------- */
+  function loop() {
+    raf = requestAnimationFrame(loop);
+    var t0 = performance.now();
+    if (running && sim && !sim.done) {
+      var k = APP.simRun(sim, cfg.quality.substepBudgetMs, 100000);
+      perf.steps += k;
+      perf.acc += k; perf.nacc++;
+      if (sim.done) { running = false; $('btnRun').textContent = '▶ 开始'; $('btnRun').classList.add('primary'); }
+    }
+    if (sim) { R.draw(sim); hud(); }
+    var dt = performance.now() - perf.last;
+    if (dt > 500) {
+      perf.fps = 1000 / Math.max(1, (performance.now() - t0));
+      perf.sps = perf.acc / (dt / 1000); perf.acc = 0; perf.last = performance.now();
+      drawCharts(); updateResult();
+    }
+  }
+
+  function hud() {
+    var d = sim.diag, m = scene.meta;
+    $('hud').textContent =
+      't  = ' + (sim.t * 1e6).toFixed(1).padStart(7) + ' µs      步 ' + sim.step + '\n' +
+      'dt = ' + (sim.dt * 1e9).toFixed(1).padStart(7) + ' ns      ' + perf.sps.toFixed(0) + ' 步/秒\n' +
+      '单元 ' + (sim.ne - d.eroded) + '/' + sim.ne + '   已侵蚀 ' + d.eroded + '\n' +
+      '侵深 ' + (d.dop * 1000).toFixed(1).padStart(6) + ' mm  (板厚 ' + (m.totalT * 1000).toFixed(0) + ')\n' +
+      '弹速 ' + d.vres.toFixed(0).padStart(6) + ' m/s  余长 ' + (d.rodLen * 1000).toFixed(0) + ' mm';
+  }
+
+  function probe(sx, sy) {
+    var w = R.toWorld(sx, sy), best = -1, bd = 1e30;
+    var mir = sim.axi && R.mirror;
+    var wy = mir ? Math.abs(w[1]) : w[1];
+    for (var e = 0; e < sim.ne; e++) {
+      if (!sim.stat[e]) continue;
+      var a = sim.e0[e], c = sim.e2[e];
+      var cx = 0.5 * (sim.x[a] + sim.x[c]), cy = 0.5 * (sim.y[a] + sim.y[c]);
+      var d2 = (cx - w[0]) * (cx - w[0]) + (cy - wy) * (cy - wy);
+      if (d2 < bd) { bd = d2; best = e; }
+    }
+    var el = $('probe');
+    if (best < 0 || bd > 4e-4) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    var mat = APP.MATERIALS[scene.mats[sim.emat[best]]];
+    el.textContent = '材料  ' + mat.short + '\n' +
+      'σ_vm  ' + (sim.svm[best] / 1e9).toFixed(2) + ' GPa\n' +
+      '压强  ' + (sim.pr[best] / 1e9).toFixed(2) + ' GPa\n' +
+      'εp    ' + sim.epsp[best].toFixed(3) + '\n' +
+      '损伤  ' + sim.dmg[best].toFixed(3) + '\n' +
+      '温度  ' + sim.temp[best].toFixed(0) + ' K\n' +
+      'ρ/ρ0  ' + (sim.rho[best] / sim.P.rho0[sim.emat[best]]).toFixed(3);
+  }
+
+  /* ---------------- 曲线 ---------------- */
+  function drawCharts() {
+    if (!sim) return;
+    plot($('ch1'), sim.hist, [
+      { key: 'dop', col: '#ffd666', label: '侵深 mm', mul: 1000 },
+      { key: 'rlen', col: '#5aa9ff', label: '余长 mm', mul: 1000 }
+    ], '侵彻深度 / 剩余杆长  vs  时间(µs)');
+    plot($('ch2'), sim.hist, [
+      { key: 'vres', col: '#5ad19a', label: '弹速 m/s', mul: 1 },
+      { key: 'ke', col: '#ff9c6e', label: '动能 ×0.1MJ', mul: 1e-5 }
+    ], '弹体速度 / 系统动能  vs  时间(µs)');
+  }
+
+  function plot(cv, H, series, title) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.clientWidth * dpr, h = cv.clientHeight * dpr;
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    var c = cv.getContext('2d');
+    c.clearRect(0, 0, w, h);
+    c.font = (10.5 * dpr) + 'px ui-monospace,Consolas,monospace';
+    c.fillStyle = '#8fa0bb'; c.textAlign = 'left';
+    c.fillText(title, 8 * dpr, 13 * dpr);
+    var n = H.t.length; if (n < 2) return;
+    var L = 40 * dpr, Rr = 8 * dpr, Tp = 20 * dpr, B = 18 * dpr;
+    var tmax = H.t[n - 1] * 1e6 || 1, vmax = 1e-9;
+    series.forEach(function (s) { for (var i = 0; i < n; i++) { var v = H[s.key][i] * s.mul; if (v > vmax) vmax = v; } });
+    vmax *= 1.1;
+    c.strokeStyle = '#243047'; c.lineWidth = 1 * dpr;
+    c.strokeRect(L, Tp, w - L - Rr, h - Tp - B);
+    c.fillStyle = '#6d7d99';
+    for (var g = 0; g <= 2; g++) {
+      var yy = Tp + (h - Tp - B) * g / 2;
+      c.fillText((vmax * (1 - g / 2)).toFixed(0), 4 * dpr, yy + 4 * dpr);
+      if (g) { c.strokeStyle = '#1a2233'; c.beginPath(); c.moveTo(L, yy); c.lineTo(w - Rr, yy); c.stroke(); }
+    }
+    c.fillText(tmax.toFixed(0), w - Rr - 22 * dpr, h - 5 * dpr);
+    c.fillText('0', L, h - 5 * dpr);
+    series.forEach(function (s, si) {
+      c.strokeStyle = s.col; c.lineWidth = 1.6 * dpr; c.beginPath();
+      for (var i = 0; i < n; i++) {
+        var X = L + (w - L - Rr) * (H.t[i] * 1e6) / tmax;
+        var Y = Tp + (h - Tp - B) * (1 - (H[s.key][i] * s.mul) / vmax);
+        if (i === 0) c.moveTo(X, Y); else c.lineTo(X, Y);
+      }
+      c.stroke();
+      c.fillStyle = s.col; c.fillText(s.label, L + 6 * dpr + si * 92 * dpr, Tp + 12 * dpr);
+    });
+  }
+
+  /* ---------------- 结果面板 ---------------- */
+  function updateResult() {
+    if (!sim) return;
+    var d = sim.diag, m = scene.meta, p = cfg.proj;
+    var firstPlate = cfg.target.layers.filter(function (L) { return L.type === 'plate'; })[0];
+    var tate = APP.tatePredict(p.mat, firstPlate ? firstPlate.mat : 'RHA', p.length, p.v0, m.losT);
+    var perf2 = d.perforated;
+    var rows = [
+      ['状态', sim.done ? (sim.reason || '完成') : (running ? '计算中…' : '就绪')],
+      ['判定', perf2 ? '<span class="bad">已穿透</span>' : (sim.done ? '<span class="ok">未穿透</span>' : '—')],
+      ['侵彻深度 DOP', (d.dop * 1000).toFixed(1) + ' mm'],
+      ['靶板弹坑深度', (d.crater * 1000).toFixed(1) + ' mm'],
+      ['P / L₀', (d.dop / p.length).toFixed(2)],
+      ['弹坑直径', (d.craterW * 1000).toFixed(1) + ' mm  (' + (d.craterW / p.diameter).toFixed(2) + ' D)'],
+      ['剩余弹速', d.vres.toFixed(0) + ' m/s'],
+      ['剩余杆长', (d.rodLen * 1000).toFixed(0) + ' mm'],
+      ['剩余弹芯质量', (d.rodMassFrac * 100).toFixed(0) + ' %'],
+      ['侵蚀单元', d.eroded + '  (弹 ' + d.eroProj + ' / 靶 ' + d.eroTgt + ')'],
+      ['系统动能', (d.keTot / 1e6).toFixed(2) + ' MJ'],
+      ['内能(含侵蚀)', (d.ieAll / 1e6).toFixed(2) + ' MJ'],
+      ['接触/摩擦耗散', ((sim.wDiss || 0) / 1e6).toFixed(2) + ' MJ'],
+      ['沙漏能', (sim.wHourglass / 1e6).toFixed(3) + ' MJ'],
+      ['能量失衡', fmtErr(d.energyErr)],
+      ['—— Tate 一维解析 ——', ''],
+      ['预测 DOP', (tate.dop * 1000).toFixed(0) + ' mm'],
+      ['Yp / Rt', (tate.Yp / 1e9).toFixed(2) + ' / ' + (tate.Rt / 1e9).toFixed(2) + ' GPa']
+    ];
+    $('result').innerHTML = '<h4>结果与能量核算</h4><table>' +
+      rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') +
+      '</table>';
+  }
+  function fmtErr(e) {
+    var v = (e * 100), s = v.toFixed(1) + ' %';
+    return Math.abs(v) < 10 ? '<span class="ok">' + s + '</span>'
+      : Math.abs(v) < 40 ? '<span class="warn">' + s + '</span>' : '<span class="bad">' + s + '</span>';
+  }
+
+  /* ---------------- 视口 ---------------- */
+  function resize() {
+    var v = $('view'), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    R.dpr = dpr;
+    [$('gl'), $('ov')].forEach(function (c) { c.width = v.clientWidth * dpr; c.height = v.clientHeight * dpr; });
+    if (sim) R.fit(sim);
+  }
+
+  function shot() {
+    var a = document.createElement('canvas');
+    a.width = $('gl').width; a.height = $('gl').height;
+    var c = a.getContext('2d');
+    c.drawImage($('gl'), 0, 0); c.drawImage($('ov'), 0, 0);
+    var l = document.createElement('a');
+    l.download = 'apfsds_' + cfg.proj.id + '_' + Math.round(cfg.proj.v0) + 'ms_' +
+      cfg.target.obliquityDeg + 'deg_' + (sim.t * 1e6).toFixed(0) + 'us.png';
+    l.href = a.toDataURL('image/png'); l.click();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})(APP);
+
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a593eaaf8866da',t:'MTc4OTI4NjAwMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

@@ -1,0 +1,2395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="./">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>生命星球 · Living Planet</title>
+<style>
+  :root { --bg:#05070d; --panel:rgba(11,16,26,.86); --line:#1e2a3d; --text:#c7d4e6; --dim:#7b8ba3; --accent:#4ce0b3; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font:13px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; }
+  canvas#view { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; image-rendering:pixelated; }
+  .panel { position:absolute; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; backdrop-filter:blur(8px); }
+  #top { top:10px; left:10px; right:10px; height:46px; display:flex; align-items:center;
+    gap:18px; padding:0 14px; z-index:5; }
+  #top b { color:#fff; font-weight:600; letter-spacing:.06em; }
+  .stat { display:flex; gap:6px; align-items:baseline; white-space:nowrap; }
+  .stat i { color:var(--dim); font-style:normal; font-size:11px; }
+  .stat span { color:#e8f2ff; font-variant-numeric:tabular-nums; }
+  #left { top:66px; left:10px; width:132px; padding:8px; z-index:5; }
+  #right { top:66px; right:10px; bottom:96px; width:328px; padding:0; z-index:5;
+    display:flex; flex-direction:column; }
+  #bottom { left:10px; right:352px; bottom:10px; height:78px; padding:8px 12px; z-index:5;
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  button { background:#16202f; color:var(--text); border:1px solid var(--line); border-radius:6px;
+    padding:5px 9px; cursor:pointer; font:inherit; font-size:12px; }
+  button:hover { border-color:var(--accent); color:#fff; }
+  button.on { background:var(--accent); color:#04120d; border-color:var(--accent); font-weight:600; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .lab { color:var(--dim); font-size:11px; margin:6px 0 3px; }
+  input[type=range] { width:110px; accent-color:var(--accent); }
+  #tabs { display:flex; border-bottom:1px solid var(--line); }
+  #tabs button { flex:1; border:0; border-radius:0; background:transparent; padding:8px 0; }
+  #tabs button.on { background:#16202f; color:var(--accent); }
+  #panelBody { flex:1; overflow-y:auto; padding:10px; }
+  #panelBody::-webkit-scrollbar { width:6px; } #panelBody::-webkit-scrollbar-thumb { background:#243247; border-radius:3px; }
+  .gene { display:grid; grid-template-columns:52px 1fr 34px; gap:4px; align-items:center; font-size:11px; margin:1px 0; }
+  .bar { height:7px; background:#131c29; border-radius:3px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:linear-gradient(90deg,#2b7fff,#4ce0b3); }
+  .kv { display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px dotted #1a2433; font-size:12px; }
+  .kv b { color:#fff; font-weight:500; }
+  h4 { margin:10px 0 5px; font-size:12px; color:var(--accent); font-weight:600; }
+  .sp { display:grid; grid-template-columns:12px 1fr 46px 40px; gap:6px; align-items:center;
+    font-size:11px; padding:3px 0; cursor:pointer; border-bottom:1px solid #131c29; }
+  .sw { width:10px; height:10px; border-radius:2px; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:#05070d; z-index:99; flex-direction:column; gap:12px; color:var(--accent); }
+  .hint { color:var(--dim); font-size:11px; }
+  #legend { position:absolute; left:10px; bottom:96px; width:132px; padding:8px; z-index:5; font-size:11px; }
+  .lg { display:flex; align-items:center; gap:6px; margin:2px 0; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="loading"><div style="font-size:20px">生命星球</div><div class="hint" id="loadmsg">正在生成行星地形…</div></div>
+<div id="stage">
+  <canvas id="view"></canvas>
+
+  <div class="panel" id="top">
+    <b>生命星球</b>
+    <div class="stat"><i>纪元</i><span id="s-time">—</span></div>
+    <div class="stat"><i>生物</i><span id="s-pop">—</span></div>
+    <div class="stat"><i>物种</i><span id="s-spec">—</span></div>
+    <div class="stat"><i>生物量</i><span id="s-bio">—</span></div>
+    <div class="stat"><i>平均营养级</i><span id="s-tl">—</span></div>
+    <div class="stat"><i>最高营养级</i><span id="s-tlmax">—</span></div>
+    <div class="stat"><i>矿物余量</i><span id="s-min">—</span></div>
+    <div style="flex:1"></div>
+    <div class="stat"><i>帧率</i><span id="s-fps">—</span></div>
+    <div class="stat"><i>模拟速度</i><span id="s-tps">—</span></div>
+    <div class="row" id="speeds"></div>
+  </div>
+
+  <div class="panel" id="left">
+    <div class="lab">图层</div>
+    <div class="row" id="layers"></div>
+    <div class="lab">生物配色</div>
+    <div class="row" id="tints"></div>
+    <div class="lab">视角</div>
+    <div class="row"><button id="btn-fit">全球</button><button id="btn-follow">跟随选中</button><button id="btn-cinema">纪录片</button></div>
+  </div>
+
+  <div class="panel" id="legend"><div id="legendBody"></div></div>
+
+  <div class="panel" id="right">
+    <div id="tabs">
+      <button data-tab="ind" class="on">个体</button>
+      <button data-tab="spec">物种</button>
+      <button data-tab="tree">谱系</button>
+      <button data-tab="chart">生态</button>
+      <button data-tab="log">纪事</button>
+    </div>
+    <div id="panelBody"></div>
+  </div>
+
+  <div class="panel" id="ticker" style="left:152px; right:352px; bottom:96px; height:30px; display:flex; align-items:center; padding:0 12px; gap:10px; z-index:5; overflow:hidden">
+    <span style="color:var(--accent); font-size:11px; white-space:nowrap">星球纪事</span>
+    <span id="tickerText" style="font-size:12px; color:#9fb2c9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">观测开始…</span>
+  </div>
+
+  <div class="panel" id="bottom">
+    <div>
+      <div class="lab">工具（在星球上点击）</div>
+      <div class="row" id="tools"></div>
+    </div>
+    <div>
+      <div class="lab">全球气温 <span id="v-temp">0</span>°C</div>
+      <input type="range" id="cl-temp" min="-15" max="15" step="0.5" value="0" />
+    </div>
+    <div>
+      <div class="lab">降水 <span id="v-rain">1.0</span>×</div>
+      <input type="range" id="cl-rain" min="0.2" max="2" step="0.05" value="1" />
+    </div>
+    <div>
+      <div class="lab">日照 <span id="v-solar">1.0</span>×</div>
+      <input type="range" id="cl-solar" min="0.4" max="1.6" step="0.05" value="1" />
+    </div>
+    <div>
+      <div class="lab">灾害强度 <span id="v-power">1.0</span>×</div>
+      <input type="range" id="cl-power" min="0.2" max="3" step="0.1" value="1" />
+    </div>
+    <div>
+      <div class="lab">重启（新种子）</div>
+      <div class="row"><input id="seedIn" style="width:70px;background:#16202f;color:#c7d4e6;border:1px solid #1e2a3d;border-radius:6px;padding:4px" value="42" /><button id="btn-reset">重启星球</button></div>
+    </div>
+    <div class="hint">滚轮缩放 · 拖拽平移 · 点击生物查看基因与大脑</div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var __mods = {};
+function __def(n, f){ __mods[n] = { f: f, e: null }; }
+function __req(n){ var m = __mods[n]; if(!m.e){ m.e = {}; m.f(m.e, __req); } return m.e; }
+__def("rng", function(__exports, __req) {
+// 确定性伪随机与噪声：整个模拟只用这一个随机源，保证同种子同结果。
+function makeRng(seed) {
+  let s = (seed >>> 0) || 0x9e3779b9;
+  return function rng() {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;  s >>>= 0;
+    return s / 4294967296;
+  };
+}
+
+function gauss(rng) {
+  let u = 0, v = 0;
+  while (u === 0) u = rng();
+  while (v === 0) v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.283185307179586 * v);
+}
+
+function smooth(t) { return t * t * (3 - 2 * t); }
+
+// x 方向周期（星球东西相接），y 方向夹紧（南北极是边界）的分形值噪声。
+function makeFbm(rng, baseGw, baseGh, octaves) {
+  const layers = [];
+  for (let o = 0; o < octaves; o++) {
+    const gw = baseGw << o, gh = baseGh << o;
+    const g = new Float32Array(gw * gh);
+    for (let i = 0; i < g.length; i++) g[i] = rng();
+    layers.push({ gw, gh, g });
+  }
+  return function fbm(u, v) {
+    let sum = 0, amp = 1, norm = 0;
+    for (let k = 0; k < layers.length; k++) {
+      const L = layers[k], gw = L.gw, gh = L.gh, g = L.g;
+      const fx = u * gw, fy = v * (gh - 1);
+      let x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = smooth(fx - x0), ty = smooth(fy - y0);
+      const xa = ((x0 % gw) + gw) % gw, xb = (xa + 1) % gw;
+      const ya = Math.max(0, Math.min(gh - 1, y0)), yb = Math.max(0, Math.min(gh - 1, y0 + 1));
+      const a = g[ya * gw + xa], b = g[ya * gw + xb], c = g[yb * gw + xa], d = g[yb * gw + xb];
+      sum += amp * ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty);
+      norm += amp; amp *= 0.5;
+    }
+    return sum / norm;
+  };
+}
+
+__exports.makeRng = makeRng;
+__exports.gauss = gauss;
+__exports.makeFbm = makeFbm;
+
+});
+__def("config", function(__exports, __req) {
+// 全部规则常数集中在此，方便解释与调参。没有任何常数指向“某个物种”。
+function makeConfig(overrides = {}) {
+  return Object.assign({
+    width: 1024, height: 512,
+    seed: 1,
+    maxPop: 150000,
+    initialPop: 30000,
+
+    // —— 天文与气候 ——
+    dayLength: 90, daysPerYear: 30, axialTilt: 23,
+    landFraction: 0.34,
+    lapseRate: 26,
+    baseTempMin: -22, baseTempMax: 34,
+    slowEvery: 8,
+    // 长周期轨道变化（米兰科维奇式）：让选择压力永不静止
+    orbitalPeriod: 42000, orbitalTempAmp: 4.5, orbitalRainAmp: 0.22, orbitalTiltAmp: 6,
+    // 自发地质扰动：真实星球本来就有火山与撞击，中等强度扰动维持多样性
+    naturalDisturbance: true, volcanoRate: 0.0002, meteorRate: 0.000018,
+    // 深海埋藏：物质沉入深海退出循环，火山再把它带回地表（封闭的地质循环）
+    burialRate: 0.00004,
+
+    // —— 物质与能量 ——
+    mineralsLand: 0.5, mineralsSea: 0.35,
+    energyPerMass: 12,
+    buildCost: 3.0,
+    decompRate: 0.014,
+    mineralDiffuseSea: 0.10, mineralDiffuseLand: 0.02,
+    detritusDiffuseSea: 0.05,
+
+    // —— 生理 ——
+    basal: 0.030,
+    brainCost: 0.0022,
+    chloroCost: 0.030, armorCost: 0.030, attackCost: 0.030, speedCost: 0.030,
+    toxinCost: 0.030, senseCost: 0.008, digestCost: 0.020, tolCost: 0.012,
+    photoGain: 3.4,
+    shadeK: 0.020,
+    mediumCost: 0.35,
+    stressCost: 0.05,
+    moveCost: 0.55,
+    slopeCost: 8,
+    growthRate: 0.05,
+    uptakeFrac: 0.25,
+    minMass: 0.08,
+    maxEnergyFactor: 4.0,
+    biteK: 0.55, biteFrac: 0.34,
+    toxinK: 2.2,
+    scavRate: 0.05,
+    signalDecay: 0.86,
+    shareLoss: 0.12,
+    adhereK: 0.06,
+
+    // —— 繁殖与演化 ——
+    matureBase: 25, matureSpan: 220,
+    lifespanBase: 260, lifespanSpan: 2600,
+    reproCost: 2.0,
+    mateTagThreshold: 0.16,
+    speciationThreshold: 0.16,
+    mutSigma: 0.075, mutPerGene: 0.10,
+    structMutAdd: 0.055, structMutDel: 0.04, structMutNode: 0.022, structMutAct: 0.03,
+    weightMutRate: 0.12, weightSigma: 0.34,
+
+    // —— 观测 ——
+    sampleEvery: 200,
+    historyLimit: 900,
+  }, overrides);
+}
+
+__exports.makeConfig = makeConfig;
+
+});
+__def("genome", function(__exports, __req) {
+const { gauss } = __req("rng");
+
+// 基因组：一串 [0,1] 的连续基因。没有“植物/食草/食肉”这种类别基因，
+// 任何生态角色都只是这些连续投资的组合结果。
+const G = {
+  SIZE: 0, CHLORO: 1, ATTACK: 2, ARMOR: 3, SPEED: 4, DIGEST: 5, DETRIT: 6, ROOT: 7,
+  TEMP_OPT: 8, TEMP_TOL: 9, AQUATIC: 10, TOXIN: 11, TOX_RES: 12, SENSE: 13,
+  REPRO: 14, INVEST: 15, MATURITY: 16, LIFESPAN: 17, SEXUAL: 18,
+  TAG1: 19, TAG2: 20, TAG3: 21, MUTRATE: 22, PIG_R: 23, PIG_G: 24, PIG_B: 25,
+  ADHERE: 26, SHARE: 27,
+};
+const GENE_COUNT = 28;
+
+const GENE_NAMES = [
+  "体型", "光合", "攻击", "护甲", "运动", "消化", "食腐", "吸收",
+  "适温", "耐温", "亲水", "毒素", "抗毒", "感官",
+  "繁殖阈", "育幼投入", "成熟期", "寿命", "有性",
+  "标记1", "标记2", "标记3", "突变率", "色素R", "色素G", "色素B",
+  "粘附", "馈赠",
+];
+
+// 生态学意义上的基因（用于物种划分），色素为中性漂变标记不参与
+const ECO_WEIGHT = new Float32Array(GENE_COUNT);
+for (let i = 0; i < GENE_COUNT; i++) ECO_WEIGHT[i] = 1;
+ECO_WEIGHT[G.PIG_R] = ECO_WEIGHT[G.PIG_G] = ECO_WEIGHT[G.PIG_B] = 0;
+ECO_WEIGHT[G.TAG1] = ECO_WEIGHT[G.TAG2] = ECO_WEIGHT[G.TAG3] = 2.2;
+let ECO_NORM = 0;
+for (let i = 0; i < GENE_COUNT; i++) ECO_NORM += ECO_WEIGHT[i];
+
+function randomGenome(genes, off, rng) {
+  for (let k = 0; k < GENE_COUNT; k++) genes[off + k] = rng();
+  // 初始种群不预设角色，但把突变率和寿命拉进可存活的区间，避免全部一 tick 暴毙
+  genes[off + G.MUTRATE] = 0.25 + rng() * 0.5;
+}
+
+function copyGenome(genes, src, dst) {
+  for (let k = 0; k < GENE_COUNT; k++) genes[dst + k] = genes[src + k];
+}
+
+function mutateGenome(genes, off, rng, cfg) {
+  const rate = 0.2 + 2.6 * genes[off + G.MUTRATE];  // 突变率本身可演化
+  const p = cfg.mutPerGene * rate, sigma = cfg.mutSigma * rate;
+  for (let k = 0; k < GENE_COUNT; k++) {
+    if (rng() < p) {
+      let v = genes[off + k] + gauss(rng) * sigma;
+      if (v < 0) v = 0; else if (v > 1) v = 1;
+      genes[off + k] = v;
+    }
+  }
+}
+
+function crossoverGenome(genes, a, b, dst, rng) {
+  for (let k = 0; k < GENE_COUNT; k++) {
+    genes[dst + k] = rng() < 0.5 ? genes[a + k] : genes[b + k];
+  }
+}
+
+function geneDistance(genes, a, b) {
+  let s = 0;
+  for (let k = 0; k < GENE_COUNT; k++) {
+    const d = genes[a + k] - genes[b + k];
+    s += ECO_WEIGHT[k] * d * d;
+  }
+  return Math.sqrt(s / ECO_NORM);
+}
+
+function geneDistanceToRep(genes, a, rep) {
+  let s = 0;
+  for (let k = 0; k < GENE_COUNT; k++) {
+    const d = genes[a + k] - rep[k];
+    s += ECO_WEIGHT[k] * d * d;
+  }
+  return Math.sqrt(s / ECO_NORM);
+}
+
+function tagDistance(genes, a, b) {
+  return (Math.abs(genes[a + G.TAG1] - genes[b + G.TAG1])
+    + Math.abs(genes[a + G.TAG2] - genes[b + G.TAG2])
+    + Math.abs(genes[a + G.TAG3] - genes[b + G.TAG3])) / 3;
+}
+
+__exports.G = G;
+__exports.GENE_COUNT = GENE_COUNT;
+__exports.GENE_NAMES = GENE_NAMES;
+__exports.randomGenome = randomGenome;
+__exports.copyGenome = copyGenome;
+__exports.mutateGenome = mutateGenome;
+__exports.crossoverGenome = crossoverGenome;
+__exports.geneDistance = geneDistance;
+__exports.geneDistanceToRep = geneDistanceToRep;
+__exports.tagDistance = tagDistance;
+
+});
+__def("brain", function(__exports, __req) {
+const { gauss } = __req("rng");
+
+// 大脑：可增删连接与节点的循环神经网络。拓扑本身是基因的一部分，
+// 每条连接都要付代谢费，所以“想得多”必须换来收益，否则会被自然选择剪掉。
+const NUM_IN = 16;
+const MAX_HIDDEN = 12;
+const NUM_OUT = 10;
+const NODES = NUM_IN + MAX_HIDDEN + NUM_OUT;
+const OUT_BASE = NUM_IN + MAX_HIDDEN;
+const MAX_CONN = 40;
+
+const IN = {
+  BIAS: 0, ENERGY: 1, MASS: 2, AGE: 3, LIGHT: 4, THERMAL: 5, WATER: 6, MINERAL: 7,
+  DETRITUS: 8, CROWD: 9, CROWD_AHEAD: 10, ANIMAL_AHEAD: 11, SIGNAL: 12,
+  SIGNAL_AHEAD: 13, PAIN: 14, CLOCK: 15,
+};
+const OUT = {
+  THRUST: 0, TURN: 1, BITE: 2, GROW: 3, REPRO: 4, SIGNAL: 5, SHARE: 6,
+  ADHERE: 7, UPTAKE: 8, SCAVENGE: 9,
+};
+const IN_NAMES = ["偏置", "自身能量", "自身体量", "年龄", "光照", "冷热", "水/湿", "矿物",
+  "腐殖质", "拥挤", "前方生物量", "前方动物", "信号", "前方信号", "痛觉", "生物钟"];
+const OUT_NAMES = ["前进", "转向", "撕咬", "生长", "繁殖", "发信号", "馈赠", "粘附", "吸收", "食腐"];
+
+const sums = new Float32Array(NODES);
+
+function activate(kind, x) {
+  switch (kind) {
+    case 0: return Math.tanh(x);
+    case 1: return 1 / (1 + Math.exp(-x)) * 2 - 1;
+    case 2: return x > 0 ? Math.min(1, x) : 0;
+    case 3: return Math.sin(x);
+    case 4: return Math.max(-1, Math.min(1, x));
+    default: return Math.exp(-x * x);
+  }
+}
+
+class BrainPool {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.connCount = new Uint8Array(capacity);
+    this.connFrom = new Uint8Array(capacity * MAX_CONN);
+    this.connTo = new Uint8Array(capacity * MAX_CONN);
+    this.connW = new Float32Array(capacity * MAX_CONN);
+    this.hiddenAct = new Uint8Array(capacity * MAX_HIDDEN);
+    this.state = new Float32Array(capacity * NODES);
+  }
+
+  initRandom(slot, rng) {
+    const n = 2 + (rng() * 6) | 0;
+    this.connCount[slot] = n;
+    const co = slot * MAX_CONN;
+    for (let k = 0; k < n; k++) {
+      this.connFrom[co + k] = (rng() * NODES) | 0;
+      this.connTo[co + k] = NUM_IN + ((rng() * (NODES - NUM_IN)) | 0);
+      this.connW[co + k] = gauss(rng) * 1.1;
+    }
+    const ho = slot * MAX_HIDDEN;
+    for (let k = 0; k < MAX_HIDDEN; k++) this.hiddenAct[ho + k] = (rng() * 6) | 0;
+    const so = slot * NODES;
+    for (let k = 0; k < NODES; k++) this.state[so + k] = 0;
+  }
+
+  inherit(src, dst, rng, cfg) {
+    let n = this.connCount[src];
+    const so = src * MAX_CONN, doff = dst * MAX_CONN;
+    for (let k = 0; k < n; k++) {
+      this.connFrom[doff + k] = this.connFrom[so + k];
+      this.connTo[doff + k] = this.connTo[so + k];
+      let w = this.connW[so + k];
+      if (rng() < cfg.weightMutRate) w += gauss(rng) * cfg.weightSigma;
+      this.connW[doff + k] = w;
+    }
+    const hs = src * MAX_HIDDEN, hd = dst * MAX_HIDDEN;
+    for (let k = 0; k < MAX_HIDDEN; k++) {
+      let a = this.hiddenAct[hs + k];
+      if (rng() < cfg.structMutAct) a = (rng() * 6) | 0;
+      this.hiddenAct[hd + k] = a;
+    }
+    // 结构变异：加连接 / 删连接 / 在连接中间插入一个神经元
+    if (rng() < cfg.structMutAdd && n < MAX_CONN) {
+      this.connFrom[doff + n] = (rng() * NODES) | 0;
+      this.connTo[doff + n] = NUM_IN + ((rng() * (NODES - NUM_IN)) | 0);
+      this.connW[doff + n] = gauss(rng) * 0.9;
+      n++;
+    }
+    if (rng() < cfg.structMutDel && n > 1) {
+      const k = (rng() * n) | 0;
+      this.connFrom[doff + k] = this.connFrom[doff + n - 1];
+      this.connTo[doff + k] = this.connTo[doff + n - 1];
+      this.connW[doff + k] = this.connW[doff + n - 1];
+      n--;
+    }
+    if (rng() < cfg.structMutNode && n > 0 && n + 1 < MAX_CONN) {
+      const k = (rng() * n) | 0;
+      const hid = NUM_IN + ((rng() * MAX_HIDDEN) | 0);
+      const oldTo = this.connTo[doff + k], oldW = this.connW[doff + k];
+      this.connTo[doff + k] = hid;
+      this.connW[doff + k] = 1;
+      this.connFrom[doff + n] = hid;
+      this.connTo[doff + n] = oldTo;
+      this.connW[doff + n] = oldW;
+      n++;
+    }
+    this.connCount[dst] = n;
+    const st = dst * NODES;
+    for (let k = 0; k < NODES; k++) this.state[st + k] = 0;
+  }
+
+  // 一步递归求值：输入直接写入，其余节点用上一 tick 的状态求和 → 天然带记忆
+  evaluate(slot, inputs, outputs) {
+    const st = slot * NODES, state = this.state;
+    for (let k = 0; k < NUM_IN; k++) state[st + k] = inputs[k];
+    for (let k = NUM_IN; k < NODES; k++) sums[k] = 0;
+    const n = this.connCount[slot], co = slot * MAX_CONN;
+    for (let k = 0; k < n; k++) {
+      sums[this.connTo[co + k]] += this.connW[co + k] * state[st + this.connFrom[co + k]];
+    }
+    const ho = slot * MAX_HIDDEN;
+    for (let k = NUM_IN; k < OUT_BASE; k++) {
+      state[st + k] = activate(this.hiddenAct[ho + k - NUM_IN], sums[k]);
+    }
+    for (let k = 0; k < NUM_OUT; k++) {
+      const v = Math.tanh(sums[OUT_BASE + k]);
+      state[st + OUT_BASE + k] = v;
+      outputs[k] = v;
+    }
+  }
+}
+
+__exports.NUM_IN = NUM_IN;
+__exports.MAX_HIDDEN = MAX_HIDDEN;
+__exports.NUM_OUT = NUM_OUT;
+__exports.NODES = NODES;
+__exports.OUT_BASE = OUT_BASE;
+__exports.MAX_CONN = MAX_CONN;
+__exports.IN = IN;
+__exports.OUT = OUT;
+__exports.IN_NAMES = IN_NAMES;
+__exports.OUT_NAMES = OUT_NAMES;
+__exports.BrainPool = BrainPool;
+
+});
+__def("world", function(__exports, __req) {
+const { makeRng, makeFbm } = __req("rng");
+
+const DEG = Math.PI / 180;
+
+// 星球：地形、气候、物质场。规则里没有“生物群系”这种类别，
+// 群系只是温度/湿度/水深这几条连续场的结果，观测时才被命名。
+class World {
+  constructor(cfg) {
+    const w = cfg.width, h = cfg.height;
+    this.cfg = cfg;
+    this.width = w; this.height = h; this.size = w * h;
+    const rng = makeRng(cfg.seed ^ 0x5f3a71);
+
+    this.elev = new Float32Array(this.size);
+    this.isWater = new Uint8Array(this.size);
+    this.depth = new Float32Array(this.size);
+    this.depthAtten = new Float32Array(this.size);
+    this.tempStatic = new Float32Array(this.size);
+    this.moistBase = new Float32Array(this.size);
+    this.moisture = new Float32Array(this.size);
+    this.minerals = new Float64Array(this.size);
+    this.detritus = new Float64Array(this.size);
+    this.signal = new Float32Array(this.size);
+    this.bioMoist = new Float32Array(this.size);   // 生物蒸腾（生命改造气候的通道）
+    this.bioMoistBlur = new Float32Array(this.size);
+    this.sediment = new Float64Array(this.size);   // 生物沉积（生命改造地形的通道）
+
+    this.rowLat = new Float32Array(h);
+    this.rowSolar = new Float32Array(h);
+    this.rowTemp = new Float32Array(h);
+    this.rowWind = new Float32Array(h);
+    this.dayCos = new Float32Array(w);
+
+    // 全局可被用户/事件改变的气候状态
+    this.climate = { tempOffset: 0, rainMul: 1, solarMul: 1 };
+    this.ash = 0;               // 尘埃/火山灰遮蔽（撞击与喷发的长期后果）
+    this.injectedNutrient = 0;  // 外部注入的物质（守恒校验时计入）
+    this.buried = 0;            // 沉入深海、暂时退出循环的物质（火山会把它带回来）
+    this.orbitalRain = 1;
+
+    this._generate(rng);
+    this.update(0);
+    this.moisture.set(this.moistBase);
+  }
+
+  index(x, y) { return y * this.width + x; }
+
+  _generate(rng) {
+    const w = this.width, h = this.height;
+    const cont = makeFbm(rng, 4, 3, 5);
+    const detail = makeFbm(rng, 12, 7, 5);
+    const ridge = makeFbm(rng, 7, 4, 4);
+    const tnoise = makeFbm(rng, 6, 4, 3);
+
+    for (let y = 0; y < h; y++) {
+      const v = y / (h - 1);
+      const lat = (v - 0.5) * 180;
+      this.rowLat[y] = lat;
+      // 三圈环流：低纬东风、中纬西风、极地东风
+      const a = Math.abs(lat);
+      this.rowWind[y] = a < 30 ? -1 : a < 62 ? 1 : -1;
+      for (let x = 0; x < w; x++) {
+        const u = x / w;
+        const c = cont(u, v);
+        const d = detail(u, v);
+        const r = 1 - Math.abs(ridge(u, v) * 2 - 1);       // 脊线噪声造山脉
+        // 极区略微抬升（陆架），赤道无偏置
+        let e = (c - 0.5) * 1.9 + (d - 0.5) * 0.55 + r * r * 0.45 * Math.max(0, c - 0.35);
+        this.elev[y * w + x] = e;
+      }
+    }
+    // 用分位数确定海平面，保证陆海比例可控
+    const sample = [];
+    for (let i = 0; i < this.size; i += 37) sample.push(this.elev[i]);
+    sample.sort((a, b) => a - b);
+    this.seaLevel = sample[Math.floor(sample.length * (1 - this.cfg.landFraction))];
+
+    let maxE = 0;
+    for (let i = 0; i < this.size; i++) maxE = Math.max(maxE, this.elev[i] - this.seaLevel);
+    this.maxElev = maxE || 1;
+
+    for (let y = 0; y < h; y++) {
+      const v = y / (h - 1);
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const e = this.elev[i];
+        const water = e < this.seaLevel;
+        this.isWater[i] = water ? 1 : 0;
+        const dep = water ? Math.min(1, (this.seaLevel - e) / 0.9) : 0;
+        this.depth[i] = dep;
+        this.depthAtten[i] = water ? Math.exp(-3.2 * dep) : 1;
+        const alt = Math.max(0, e - this.seaLevel) / this.maxElev;
+        this.tempStatic[i] = (water ? 1.5 : 0) - this.cfg.lapseRate * alt * alt
+          + (tnoise(x / w, v) - 0.5) * 3.0;
+        this.minerals[i] = water ? this.cfg.mineralsSea : this.cfg.mineralsLand;
+      }
+    }
+    this._buildMoisture();
+  }
+
+  // 水汽随盛行风推进：海面蒸发、陆地消耗、迎风坡卸货 → 自然长出雨影荒漠
+  _buildMoisture() {
+    const w = this.width, h = this.height;
+    for (let y = 0; y < h; y++) {
+      const dir = this.rowWind[y] > 0 ? 1 : -1;
+      const lat = Math.abs(this.rowLat[y]);
+      const warmth = Math.max(0.05, Math.cos(lat * DEG));
+      const band = 1 - 0.5 * Math.exp(-Math.pow((lat - 27) / 11, 2)); // 副热带干旱带
+      let m = 0.5;
+      for (let pass = 0; pass < 2; pass++) {
+        for (let k = 0; k < w; k++) {
+          const x = ((dir > 0 ? k : w - 1 - k) % w + w) % w;
+          const i = y * w + x;
+          const px = ((x - dir) % w + w) % w;
+          if (this.isWater[i]) {
+            m += (1 - m) * 0.30 * warmth;
+          } else {
+            const climb = Math.max(0, this.elev[i] - this.elev[y * w + px]);
+            m -= climb * 2.0;         // 迎风坡卸货 → 背风面是雨影荒漠
+            m *= 0.996;               // 深入内陆缓慢变干
+          }
+          m = Math.max(0.03, Math.min(1, m));
+          this.moistBase[i] = m * band;
+        }
+      }
+    }
+  }
+
+  // 每 tick 的廉价更新：季节、昼夜、灰尘衰减
+  update(t) {
+    const cfg = this.cfg, h = this.height, w = this.width;
+    const yearPhase = (t / (cfg.dayLength * cfg.daysPerYear)) * 2 * Math.PI;
+    // 轨道长周期：倾角摆动 + 温度 + 降水的缓慢起伏，几万 tick 一轮
+    const orb = (t / cfg.orbitalPeriod) * 2 * Math.PI;
+    const tilt = cfg.axialTilt + cfg.orbitalTiltAmp * Math.sin(orb * 0.61);
+    this.orbitalTemp = cfg.orbitalTempAmp * Math.sin(orb);
+    this.orbitalRain = 1 + cfg.orbitalRainAmp * Math.sin(orb * 1.37);
+    const dec = tilt * Math.sin(yearPhase) * DEG;
+    this.season = yearPhase;
+    for (let y = 0; y < h; y++) {
+      const lat = this.rowLat[y] * DEG;
+      const s = Math.max(0, Math.cos(lat - dec));
+      this.rowSolar[y] = s * this.climate.solarMul * (1 - this.ash);
+      this.rowTemp[y] = cfg.baseTempMin + (cfg.baseTempMax - cfg.baseTempMin) * Math.pow(s, 0.75)
+        + this.climate.tempOffset + this.orbitalTemp - this.ash * 22;
+    }
+    const sunLon = (t / cfg.dayLength) * 2 * Math.PI;
+    for (let x = 0; x < w; x++) {
+      this.dayCos[x] = Math.max(0, Math.cos((x / w) * 2 * Math.PI - sunLon));
+    }
+    if (this.ash > 0) this.ash = Math.max(0, this.ash - 0.00012);
+  }
+
+  temperatureAt(i) {
+    const y = (i / this.width) | 0;
+    let t = this.rowTemp[y] + this.tempStatic[i];
+    if (this.isWater[i]) t = Math.max(-2, t);   // 海水结冰点
+    return t;
+  }
+
+  lightAt(i) {
+    const y = (i / this.width) | 0, x = i - y * this.width;
+    let l = this.rowSolar[y] * this.dayCos[x] * this.depthAtten[i];
+    if (this.isWater[i] && this.temperatureAt(i) < -1.5) l *= 0.15; // 冰盖
+    return l;
+  }
+
+  isIce(i) { return this.isWater[i] && this.temperatureAt(i) < -1.5; }
+
+  // 每 slowEvery tick 的场更新：分解、扩散、湿度松弛、信号衰减
+  slowUpdate() {
+    const cfg = this.cfg, n = this.size, w = this.width, h = this.height;
+    const det = this.detritus, min = this.minerals, sig = this.signal;
+    for (let i = 0; i < n; i++) {
+      const t = this.temperatureAt(i);
+      const q10 = Math.min(3.2, Math.exp(0.0693 * (t - 15)));
+      const wet = this.isWater[i] ? 1 : Math.min(1, this.moisture[i] * 1.7);
+      const d = det[i] * cfg.decompRate * q10 * wet;
+      if (d > 0) { det[i] -= d; min[i] += d; }
+      // 深海埋藏：海雪沉降把物质带出循环，等待火山把它送回地表
+      if (this.depth[i] > 0.55) {
+        const b = (min[i] + det[i] * 0.5) * cfg.burialRate;
+        if (b > 0) {
+          const fromMin = Math.min(min[i], b);
+          min[i] -= fromMin;
+          this.buried += fromMin;
+        }
+      }
+      sig[i] *= cfg.signalDecay;
+    }
+    // 守恒式扩散（只做交换，不产生也不销毁）
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const jx = y * w + ((x + 1) % w);
+        const kmin = this.isWater[i] && this.isWater[jx] ? cfg.mineralDiffuseSea : cfg.mineralDiffuseLand;
+        let f = (min[i] - min[jx]) * kmin; min[i] -= f; min[jx] += f;
+        if (this.isWater[i] && this.isWater[jx]) {
+          f = (det[i] - det[jx]) * cfg.detritusDiffuseSea; det[i] -= f; det[jx] += f;
+        }
+        if (y + 1 < h) {
+          const jy = i + w;
+          const kmin2 = this.isWater[i] && this.isWater[jy] ? cfg.mineralDiffuseSea : cfg.mineralDiffuseLand;
+          f = (min[i] - min[jy]) * kmin2; min[i] -= f; min[jy] += f;
+          if (this.isWater[i] && this.isWater[jy]) {
+            f = (det[i] - det[jy]) * cfg.detritusDiffuseSea; det[i] -= f; det[jy] += f;
+          }
+        }
+      }
+    }
+    // 生物沉积抬升浅海地形：珊瑚礁式的“生命造地”
+    this.sedTimer = (this.sedTimer || 0) + 1;
+    if (this.sedTimer % 8 === 0) {
+      let changed = false;
+      const sed = this.sediment;
+      for (let i = 0; i < n; i++) {
+        if (sed[i] > 0.0001) {
+          const room = this.seaLevel + 0.02 - this.elev[i];
+          if (room > 0) { this.elev[i] += Math.min(room, sed[i] * 0.004); changed = true; }
+          sed[i] *= 0.75;
+        }
+      }
+      if (changed) this._refreshTerrain();
+    }
+    // 生物蒸腾模糊后回馈湿度：森林自己造雨
+    const bm = this.bioMoist, bb = this.bioMoistBlur;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const l = y * w + ((x - 1 + w) % w), r = y * w + ((x + 1) % w);
+        bb[i] = (bm[l] + bm[i] * 2 + bm[r]) * 0.25;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const u = y > 0 ? i - w : i, d = y < h - 1 ? i + w : i;
+        const v = (bb[u] + bb[i] * 2 + bb[d]) * 0.25;
+        const target = Math.min(1, this.moistBase[i] * this.climate.rainMul * this.orbitalRain + v * 0.9);
+        this.moisture[i] += (target - this.moisture[i]) * 0.3;
+        bm[i] *= 0.90;
+      }
+    }
+  }
+
+  // —— 用户干预：撞击与喷发。都只改场，不直接创造或删除物种。——
+  meteor(cx, cy, radius, power) {
+    const w = this.width, h = this.height;
+    const r2 = radius * radius;
+    for (let y = Math.max(0, cy - radius | 0); y <= Math.min(h - 1, cy + radius | 0); y++) {
+      for (let dx = -radius | 0; dx <= radius; dx++) {
+        const x = ((cx + dx) % w + w) % w;
+        const d2 = dx * dx + (y - cy) * (y - cy);
+        if (d2 > r2) continue;
+        const i = y * w + x;
+        const f = 1 - Math.sqrt(d2) / radius;
+        this.elev[i] -= f * 0.25 * power;
+        this.tempStatic[i] += f * 3;
+      }
+    }
+    this._refreshTerrain();
+    this.ash = Math.min(0.92, this.ash + 0.30 * power);
+  }
+
+  volcano(cx, cy, radius, power) {
+    const w = this.width, h = this.height;
+    const r2 = radius * radius;
+    for (let y = Math.max(0, cy - radius | 0); y <= Math.min(h - 1, cy + radius | 0); y++) {
+      for (let dx = -radius | 0; dx <= radius; dx++) {
+        const x = ((cx + dx) % w + w) % w;
+        const d2 = dx * dx + (y - cy) * (y - cy);
+        if (d2 > r2) continue;
+        const i = y * w + x;
+        const f = 1 - Math.sqrt(d2) / radius;
+        this.elev[i] += f * 0.20 * power;
+        // 火山灰是肥料：优先把深海埋藏的物质重新带回地表，不够才算外部注入
+        const want = f * 3.0 * power;
+        const fromBuried = Math.min(want, this.buried);
+        this.buried -= fromBuried;
+        this.minerals[i] += want;
+        this.injectedNutrient += want - fromBuried;
+      }
+    }
+    this._refreshTerrain();
+    this.ash = Math.min(0.92, this.ash + 0.16 * power);
+  }
+
+  _refreshTerrain() {
+    for (let i = 0; i < this.size; i++) {
+      const e = this.elev[i];
+      const water = e < this.seaLevel;
+      this.isWater[i] = water ? 1 : 0;
+      const dep = water ? Math.min(1, (this.seaLevel - e) / 0.9) : 0;
+      this.depth[i] = dep;
+      this.depthAtten[i] = water ? Math.exp(-3.2 * dep) : 1;
+    }
+    this.terrainVersion = (this.terrainVersion || 0) + 1;
+  }
+
+  totalNutrient() {
+    let s = 0;
+    for (let i = 0; i < this.size; i++) s += this.minerals[i] + this.detritus[i];
+    return s;
+  }
+}
+
+__exports.World = World;
+
+});
+__def("metrics", function(__exports, __req) {
+const { G, GENE_COUNT, GENE_NAMES, geneDistance } = __req("genome");
+const { makeRng } = __req("rng");
+
+// 观测层：只统计，不参与规则。生物群系、营养级、物种都是“事后测出来的”，
+// 模拟内部从来不知道这些概念。
+
+function totalNutrient(sim) {
+  const p = sim.population;
+  let biomass = 0;
+  for (let i = 0; i < p.capacity; i++) if (p.alive[i]) biomass += p.mass[i];
+  return biomass + sim.world.totalNutrient() + sim.world.buried - sim.world.injectedNutrient;
+}
+
+const BIOME_NAMES = ["深海", "浅海", "冰原", "荒漠", "草原", "雨林", "高山"];
+
+function biomeOf(world, i) {
+  const t = world.temperatureAt(i);
+  if (world.isWater[i]) {
+    if (t < -1.5) return 2;
+    return world.depth[i] > 0.35 ? 0 : 1;
+  }
+  if (t < -4) return 2;
+  const alt = (world.elev[i] - world.seaLevel) / world.maxElev;
+  if (alt > 0.45) return 6;
+  const m = world.moisture[i];
+  if (m < 0.22) return 3;
+  return t > 20 && m > 0.5 ? 5 : 4;
+}
+
+function mutualInfo(a, b, na, nb) {
+  const n = a.length;
+  if (n === 0) return 0;
+  const joint = new Float64Array(na * nb);
+  const pa = new Float64Array(na), pb = new Float64Array(nb);
+  for (let i = 0; i < n; i++) { joint[a[i] * nb + b[i]]++; pa[a[i]]++; pb[b[i]]++; }
+  let mi = 0;
+  for (let x = 0; x < na; x++) {
+    if (!pa[x]) continue;
+    for (let y = 0; y < nb; y++) {
+      const j = joint[x * nb + y];
+      if (!j) continue;
+      mi += (j / n) * Math.log2((j * n) / (pa[x] * pb[y]));
+    }
+  }
+  return mi;
+}
+
+const MI_TRAITS = [G.AQUATIC, G.TEMP_OPT, G.CHLORO, G.SPEED, G.SIZE, G.ATTACK];
+
+// 性状分布与地形的互信息，对照随机置换基线：证明是地形塑造了生命，而非巧合。
+function biomeTraitMutualInfo(sim, permutations = 40) {
+  const p = sim.population, w = sim.world, W = w.width;
+  const biome = [], traits = MI_TRAITS.map(() => []);
+  for (let i = 0; i < p.capacity; i++) {
+    if (!p.alive[i]) continue;
+    const ci = (p.y[i] | 0) * W + (p.x[i] | 0);
+    biome.push(biomeOf(w, ci));
+    const go = i * GENE_COUNT;
+    for (let k = 0; k < MI_TRAITS.length; k++) {
+      traits[k].push(Math.min(3, (p.genes[go + MI_TRAITS[k]] * 4) | 0));
+    }
+  }
+  const perTrait = traits.map((t, k) => ({
+    gene: GENE_NAMES[MI_TRAITS[k]], mi: mutualInfo(biome, t, 7, 4),
+  }));
+  const value = perTrait.reduce((m, x) => Math.max(m, x.mi), 0);
+  const rng = makeRng(12345);
+  const shuffled = biome.slice();
+  const base = [];
+  for (let s = 0; s < permutations; s++) {
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = (rng() * (i + 1)) | 0;
+      const tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
+    }
+    let best = 0;
+    for (let k = 0; k < traits.length; k++) best = Math.max(best, mutualInfo(shuffled, traits[k], 7, 4));
+    base.push(best);
+  }
+  base.sort((a, b) => a - b);
+  return {
+    value, p95Baseline: base[Math.min(base.length - 1, Math.floor(base.length * 0.95))],
+    perTrait, sample: biome.length,
+  };
+}
+
+// 营养级完全由真实取食事件推出：吃光=0贡献，吃活物=继承猎物营养级。
+function trophicSpectrum(sim) {
+  const p = sim.population;
+  const hist = new Array(12).fill(0);
+  let max = 1, sum = 0, n = 0, above2 = 0, above3 = 0;
+  for (let i = 0; i < p.capacity; i++) {
+    if (!p.alive[i]) continue;
+    const tl = p.trophicOf(i);
+    hist[Math.min(11, Math.floor(tl * 2))]++;
+    if (tl > max) max = tl;
+    if (tl >= 2) above2++;
+    if (tl >= 3) above3++;
+    sum += tl; n++;
+  }
+  return { max, mean: n ? sum / n : 0, hist, above2, above3, count: n };
+}
+
+// 稳定捕食关系：同一对物种之间持续了足够长时间的取食
+function stableLinks(sim, minSpan = 1000, minCount = 5) {
+  const out = [];
+  for (const rec of sim.foodWeb.values()) {
+    if (rec.count >= minCount && rec.last - rec.first >= minSpan) out.push(rec);
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
+}
+
+function speciesTable(sim, limit = 24) {
+  const rows = [];
+  for (const sp of sim.species.values()) {
+    if (sp.count > 0) rows.push(sp);
+  }
+  rows.sort((a, b) => b.count - a.count);
+  return rows.slice(0, limit);
+}
+
+function biomeCensus(sim) {
+  const p = sim.population, w = sim.world, W = w.width;
+  const cells = new Array(7).fill(0), pop = new Array(7).fill(0), biomass = new Array(7).fill(0);
+  for (let i = 0; i < w.size; i++) cells[biomeOf(w, i)]++;
+  for (let i = 0; i < p.capacity; i++) {
+    if (!p.alive[i]) continue;
+    const b = biomeOf(w, (p.y[i] | 0) * W + (p.x[i] | 0));
+    pop[b]++; biomass[b] += p.mass[i];
+  }
+  return BIOME_NAMES.map((name, i) => ({
+    name, cells: cells[i], pop: pop[i], biomass: biomass[i],
+    density: cells[i] ? pop[i] / cells[i] : 0,
+  }));
+}
+
+function traitMeans(sim) {
+  const p = sim.population;
+  const sums = new Float64Array(GENE_COUNT);
+  let n = 0;
+  for (let i = 0; i < p.capacity; i++) {
+    if (!p.alive[i]) continue;
+    const go = i * GENE_COUNT;
+    for (let k = 0; k < GENE_COUNT; k++) sums[k] += p.genes[go + k];
+    n++;
+  }
+  const out = {};
+  for (let k = 0; k < GENE_COUNT; k++) out[GENE_NAMES[k]] = n ? sums[k] / n : 0;
+  return out;
+}
+
+// 真正的“演化是否还在进行”：抽样个体两两基因距离 + 关键性状的标准差。
+// 物种数会因竞争排斥而收敛，但只要遗传方差还在，演化就没有停。
+function geneticDiversity(sim, sample = 240) {
+  const p = sim.population;
+  const idx = [];
+  const stride = Math.max(1, Math.floor(p.capacity / (sample * 3)));
+  for (let i = 0; i < p.capacity && idx.length < sample; i += stride) if (p.alive[i]) idx.push(i);
+  if (idx.length < 4) return { meanPairwise: 0, sampled: idx.length, traitStd: {} };
+  let sum = 0, pairs = 0;
+  for (let a = 0; a < idx.length; a++) {
+    for (let b = a + 1; b < idx.length; b++) {
+      sum += geneDistance(p.genes, idx[a] * GENE_COUNT, idx[b] * GENE_COUNT);
+      pairs++;
+    }
+  }
+  const traitStd = {};
+  for (const gi of MI_TRAITS.concat([G.ARMOR, G.DETRIT, G.LIFESPAN, G.SEXUAL])) {
+    let m = 0, m2 = 0;
+    for (const i of idx) { const v = p.genes[i * GENE_COUNT + gi]; m += v; m2 += v * v; }
+    m /= idx.length;
+    traitStd[GENE_NAMES[gi]] = Math.sqrt(Math.max(0, m2 / idx.length - m * m));
+  }
+  return { meanPairwise: sum / pairs, sampled: idx.length, traitStd };
+}
+
+function summarize(sim) {
+  const tro = trophicSpectrum(sim);
+  return {
+    t: sim.t,
+    pop: sim.population.count,
+    species: sim.stats.speciesAlive,
+    biomass: sim.stats.biomass,
+    trophic: { max: tro.max, mean: tro.mean, above2: tro.above2, above3: tro.above3 },
+    stableLinks: stableLinks(sim).length,
+    biomes: biomeCensus(sim),
+    traits: traitMeans(sim),
+  };
+}
+
+__exports.totalNutrient = totalNutrient;
+__exports.BIOME_NAMES = BIOME_NAMES;
+__exports.biomeOf = biomeOf;
+__exports.biomeTraitMutualInfo = biomeTraitMutualInfo;
+__exports.trophicSpectrum = trophicSpectrum;
+__exports.stableLinks = stableLinks;
+__exports.speciesTable = speciesTable;
+__exports.biomeCensus = biomeCensus;
+__exports.traitMeans = traitMeans;
+__exports.geneticDiversity = geneticDiversity;
+__exports.summarize = summarize;
+
+});
+__def("sim", function(__exports, __req) {
+const { makeConfig } = __req("config");
+const { makeRng } = __req("rng");
+const { World } = __req("world");
+const { G, GENE_COUNT, randomGenome, copyGenome, mutateGenome, crossoverGenome, geneDistanceToRep, tagDistance } = __req("genome");
+const { BrainPool, NUM_IN, NUM_OUT, IN, OUT } = __req("brain");
+
+const inputs = new Float32Array(NUM_IN);
+const outputs = new Float32Array(NUM_OUT);
+
+// 代谢 Q10 与温度适应度查表（热循环里每个个体每 tick 省下两次 Math.exp）
+const Q10_MIN = -80, Q10_STEP = 10, Q10_N = 1601;
+const Q10_TABLE = new Float32Array(Q10_N);
+for (let k = 0; k < Q10_N; k++) {
+  const T = Q10_MIN + k / Q10_STEP;
+  Q10_TABLE[k] = Math.max(0.2, Math.min(3.2, Math.exp(0.0693 * (T - 15))));
+}
+const FIT_N = 512, FIT_MAX = 8;
+const FIT_TABLE = new Float32Array(FIT_N + 1);
+for (let k = 0; k <= FIT_N; k++) FIT_TABLE[k] = Math.exp(-(k * FIT_MAX) / FIT_N);
+
+class Population {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.count = 0;
+    this.alive = new Uint8Array(capacity);
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    this.heading = new Float32Array(capacity);
+    this.mass = new Float64Array(capacity);
+    this.energy = new Float32Array(capacity);
+    this.age = new Float32Array(capacity);
+    this.damage = new Float32Array(capacity);
+    this.speciesId = new Int32Array(capacity);
+    this.gainTotal = new Float32Array(capacity);
+    this.trophicSum = new Float32Array(capacity);
+    this.gainLight = new Float32Array(capacity);
+    this.gainPrey = new Float32Array(capacity);
+    this.gainDetritus = new Float32Array(capacity);
+    this.birthTick = new Int32Array(capacity);
+    this.genes = new Float32Array(capacity * GENE_COUNT);
+    this.next = new Int32Array(capacity);
+    this.freeList = new Int32Array(capacity);
+    this.freeCount = capacity;
+    for (let i = 0; i < capacity; i++) this.freeList[i] = capacity - 1 - i;
+  }
+  alloc() {
+    if (this.freeCount === 0) return -1;
+    const s = this.freeList[--this.freeCount];
+    this.alive[s] = 1; this.count++;
+    return s;
+  }
+  release(s) {
+    this.alive[s] = 0; this.freeList[this.freeCount++] = s; this.count--;
+  }
+  trophicOf(i) { return 1 + this.trophicSum[i] / Math.max(1e-9, this.gainTotal[i]); }
+}
+
+class Simulation {
+  constructor(overrides = {}) {
+    const cfg = this.cfg = makeConfig(overrides);
+    this.rng = makeRng(cfg.seed);
+    this.world = new World(cfg);
+    this.population = new Population(cfg.maxPop);
+    this.brains = new BrainPool(cfg.maxPop);
+    this.t = 0;
+
+    const n = this.world.size;
+    this.cellHead = new Int32Array(n).fill(-1);
+    this.cellBiomass = new Float32Array(n);
+    this.cellChloro = new Float32Array(n);
+    this.cellAnimal = new Float32Array(n);
+    this.touched = new Int32Array(n);
+    this.touchedCount = 0;
+
+    this.species = new Map();
+    this.notable = new Map();     // 达到过一定规模的物种：谱系树用，随物种表裁剪而保留
+    this.nextSpeciesId = 1;
+    this.foodWeb = new Map();
+    this.eventSample = 0;
+
+    this.stats = {
+      births: 0, deaths: 0, predationEvents: 0, photosynthesisEvents: 0,
+      scavengeEvents: 0, shareEvents: 0, matings: 0, starvations: 0,
+      birthGeneDistances: [], speciesAlive: 0, meanTrophic: 1, maxTrophic: 1, maxTrophicEver: 1,
+      biomass: 0, extinctions: 0, newSpecies: 0, naturalVolcanoes: 0, naturalMeteors: 0,
+    };
+    this.history = [];
+    this.seed(cfg.initialPop);
+    this.sample();
+  }
+
+  seed(n) {
+    const p = this.population, w = this.world, rng = this.rng, cfg = this.cfg;
+    for (let k = 0; k < n; k++) {
+      const x = rng() * w.width, y = 1 + rng() * (w.height - 2);
+      const ci = (y | 0) * w.width + (x | 0);
+      const mass = Math.min(0.7, w.minerals[ci] * 0.55);
+      if (mass < cfg.minMass * 2) continue;
+      const s = p.alloc();
+      if (s < 0) break;
+      w.minerals[ci] -= mass;
+      p.x[s] = x; p.y[s] = y; p.heading[s] = rng() * 6.283;
+      p.mass[s] = mass;
+      p.energy[s] = mass * cfg.energyPerMass * 2.5;
+      p.age[s] = 0; p.damage[s] = 0;
+      p.gainTotal[s] = 0; p.trophicSum[s] = 0;
+      p.gainLight[s] = 0; p.gainPrey[s] = 0; p.gainDetritus[s] = 0;
+      p.birthTick[s] = -1;
+      randomGenome(p.genes, s * GENE_COUNT, rng);
+      this.brains.initRandom(s, rng);
+      this.assignSpecies(s, -1);
+    }
+  }
+
+  assignSpecies(child, parent) {
+    const p = this.population, off = child * GENE_COUNT;
+    let sp = parent >= 0 ? this.species.get(p.speciesId[parent]) : null;
+    if (sp) {
+      const d = geneDistanceToRep(p.genes, off, sp.rep);
+      if (d <= this.cfg.speciationThreshold) {
+        p.speciesId[child] = sp.id;
+        const rep = sp.rep;
+        for (let k = 0; k < GENE_COUNT; k++) rep[k] += (p.genes[off + k] - rep[k]) * 0.004;
+        return;
+      }
+    }
+    const rep = new Float32Array(GENE_COUNT);
+    for (let k = 0; k < GENE_COUNT; k++) rep[k] = p.genes[off + k];
+    const id = this.nextSpeciesId++;
+    this.species.set(id, {
+      id, parent: sp ? sp.id : 0, born: this.t, extinct: -1,
+      rep, count: 0, peak: 0, trophic: 1,
+    });
+    p.speciesId[child] = id;
+    this.stats.newSpecies++;
+  }
+
+  buildIndex() {
+    const p = this.population, w = this.world, W = w.width;
+    const head = this.cellHead, bio = this.cellBiomass, chl = this.cellChloro, ani = this.cellAnimal;
+    const touched = this.touched;
+    for (let k = 0; k < this.touchedCount; k++) {
+      const c = touched[k]; head[c] = -1; bio[c] = 0; chl[c] = 0; ani[c] = 0;
+    }
+    let tc = 0;
+    const genes = p.genes;
+    for (let i = 0; i < p.capacity; i++) {
+      if (!p.alive[i]) continue;
+      const ci = (p.y[i] | 0) * W + (p.x[i] | 0);
+      if (head[ci] === -1) touched[tc++] = ci;
+      p.next[i] = head[ci];
+      head[ci] = i;
+      const m = p.mass[i], go = i * GENE_COUNT;
+      bio[ci] += m;
+      chl[ci] += m * genes[go + G.CHLORO];
+      ani[ci] += m * genes[go + G.SPEED];
+    }
+    this.touchedCount = tc;
+  }
+
+  tick() {
+    const cfg = this.cfg, w = this.world, p = this.population, b = this.brains, rng = this.rng;
+    const W = w.width, H = w.height;
+    this.t++;
+    w.update(this.t);
+    if (this.t % cfg.slowEvery === 0) w.slowUpdate();
+    // 自发地质扰动：星球自己就会喷发和挨砸，中等强度的扰动是多样性的来源之一
+    if (cfg.naturalDisturbance) {
+      if (rng() < cfg.volcanoRate) {
+        this.volcano(rng() * W, 4 + rng() * (H - 8), 5 + rng() * 18, 0.3 + rng() * 1.1);
+        this.stats.naturalVolcanoes++;
+      }
+      if (rng() < cfg.meteorRate) {
+        this.meteor(rng() * W, 4 + rng() * (H - 8), 12 + rng() * 65, 0.3 + rng() * 1.5);
+        this.stats.naturalMeteors++;
+      }
+    }
+    this.buildIndex();
+
+    const genes = p.genes, head = this.cellHead, bio = this.cellBiomass,
+      chl = this.cellChloro, ani = this.cellAnimal;
+    const minerals = w.minerals, detritus = w.detritus, signal = w.signal,
+      moisture = w.moisture, isWater = w.isWater, elev = w.elev, bioMoist = w.bioMoist;
+    const rowTemp = w.rowTemp, rowSolar = w.rowSolar, dayCos = w.dayCos,
+      tempStatic = w.tempStatic, depthAtten = w.depthAtten;
+    const st = this.stats;
+    const t = this.t;
+
+    for (let i = 0; i < p.capacity; i++) {
+      if (!p.alive[i] || p.birthTick[i] === t) continue;
+      const go = i * GENE_COUNT;
+      let x = p.x[i], y = p.y[i];
+      let cx = x | 0, cy = y | 0;
+      if (cx < 0) cx = 0; else if (cx >= W) cx = W - 1;
+      if (cy < 0) cy = 0; else if (cy >= H) cy = H - 1;
+      const ci = cy * W + cx;
+      if (!(p.mass[i] > 0)) { this.kill(i, ci); continue; }
+
+      const mass = p.mass[i];
+      const sm = Math.sqrt(mass);
+      const m075 = sm * Math.sqrt(sm);
+      const m066 = Math.cbrt(mass * mass);
+      const maxMass = 0.4 + 55 * genes[go + G.SIZE] * genes[go + G.SIZE];
+
+      const water = isWater[ci];
+      let temp = rowTemp[cy] + tempStatic[ci];
+      if (water && temp < -2) temp = -2;
+      const ice = water && temp < -1.5;
+      const light = rowSolar[cy] * dayCos[cx] * depthAtten[ci] * (ice ? 0.15 : 1);
+      const moist = water ? 1 : moisture[ci];
+
+      const tOpt = -15 + 55 * genes[go + G.TEMP_OPT];
+      const tTol = 4 + 26 * genes[go + G.TEMP_TOL];
+      const dT = (temp - tOpt) / tTol;
+      const dT2 = dT * dT;
+      const tempFit = dT2 >= FIT_MAX ? 0 : FIT_TABLE[(dT2 * (FIT_N / FIT_MAX)) | 0];
+      let qi = ((temp - Q10_MIN) * Q10_STEP) | 0;
+      if (qi < 0) qi = 0; else if (qi >= Q10_N) qi = Q10_N - 1;
+      const q10 = Q10_TABLE[qi];
+
+      // —— 感官 ——
+      const gSense = genes[go + G.SENSE];
+      const range = 1 + 7 * gSense;
+      const hd = p.heading[i];
+      let ax = x + Math.cos(hd) * range, ay = y + Math.sin(hd) * range;
+      ax = ((ax % W) + W) % W;
+      if (ay < 0) ay = 0; else if (ay > H - 1) ay = H - 1;
+      const ai = (ay | 0) * W + (ax | 0);
+      const maxEnergy = mass * cfg.energyPerMass * cfg.maxEnergyFactor;
+      const lifespan = cfg.lifespanBase + cfg.lifespanSpan * genes[go + G.LIFESPAN];
+
+      inputs[IN.BIAS] = 1;
+      inputs[IN.ENERGY] = Math.min(1, p.energy[i] / maxEnergy) * 2 - 1;
+      inputs[IN.MASS] = Math.min(1, mass / maxMass) * 2 - 1;
+      inputs[IN.AGE] = Math.min(1, p.age[i] / lifespan) * 2 - 1;
+      inputs[IN.LIGHT] = light * 2 - 1;
+      inputs[IN.THERMAL] = Math.max(-1, Math.min(1, dT));
+      inputs[IN.WATER] = water ? 1 : moist * 2 - 1;
+      inputs[IN.MINERAL] = minerals[ci] / (minerals[ci] + 2) * 2 - 1;
+      inputs[IN.DETRITUS] = detritus[ci] / (detritus[ci] + 2) * 2 - 1;
+      inputs[IN.CROWD] = bio[ci] / (bio[ci] + 12) * 2 - 1;
+      inputs[IN.CROWD_AHEAD] = (bio[ai] - bio[ci]) / (Math.abs(bio[ai] - bio[ci]) + 12);
+      inputs[IN.ANIMAL_AHEAD] = ani[ai] / (ani[ai] + 6) * 2 - 1;
+      inputs[IN.SIGNAL] = Math.min(1, signal[ci]) * 2 - 1;
+      inputs[IN.SIGNAL_AHEAD] = Math.max(-1, Math.min(1, signal[ai] - signal[ci]));
+      inputs[IN.PAIN] = Math.min(1, p.damage[i]) * 2 - 1;
+      inputs[IN.CLOCK] = Math.sin(p.age[i] * (0.02 + 0.5 * genes[go + G.MUTRATE]));
+
+      b.evaluate(i, inputs, outputs);
+
+      let energy = p.energy[i];
+      let m = mass;
+
+      // —— 光合作用：从阳光取得能量，被遮荫者压制 ——
+      const gChloro = genes[go + G.CHLORO];
+      if (gChloro > 0.02 && light > 0.001) {
+        const waterFac = water ? 1 : Math.min(1, moist * 1.7);
+        const others = Math.max(0, chl[ci] - m * gChloro);
+        const shade = 1 / (1 + cfg.shadeK * others);
+        const gain = cfg.photoGain * gChloro * m066 * light * waterFac * tempFit * shade;
+        if (gain > 0) {
+          energy += gain;
+          p.gainTotal[i] += gain;
+          p.gainLight[i] += gain;
+          st.photosynthesisEvents++;
+          if (!water) bioMoist[ci] += gain * 0.02;   // 蒸腾：植被自己造雨
+        }
+      }
+
+      // —— 取食腐殖质 ——
+      const digestEff = 0.3 + 0.6 * genes[go + G.DIGEST];
+      const scav = outputs[OUT.SCAVENGE];
+      if (scav > 0.05 && genes[go + G.DETRIT] > 0.05 && detritus[ci] > 0.001) {
+        const take = Math.min(detritus[ci], cfg.scavRate * m066 * genes[go + G.DETRIT] * scav * tempFit);
+        if (take > 0) {
+          detritus[ci] -= take;
+          const assim = take * digestEff;
+          const gainMass = Math.min(assim, Math.max(0, maxMass - m));
+          m += gainMass;
+          detritus[ci] += take - gainMass;
+          const e = take * digestEff * cfg.energyPerMass;
+          energy += e;
+          p.gainTotal[i] += e;
+          p.gainDetritus[i] += e;
+          st.scavengeEvents++;
+        }
+      }
+
+      // —— 撕咬：同一个规则同时长出食草与食肉 ——
+      const gAttack = genes[go + G.ATTACK];
+      const bite = outputs[OUT.BITE];
+      if (bite > 0.1 && gAttack > 0.02) {
+        let j = head[ci], best = -1, scan = 0;
+        const pick = 1 + ((this.eventSample + i) & 3);
+        while (j >= 0 && scan < 8) {
+          if (j !== i && p.alive[j] && ((p.y[j] | 0) * W + (p.x[j] | 0)) === ci) {
+            best = j;
+            if (++scan >= pick) break;
+          }
+          j = p.next[j];
+        }
+        if (best >= 0) {
+          const jo = best * GENE_COUNT;
+          const jm = p.mass[best];
+          const jm075 = Math.sqrt(jm) * Math.sqrt(Math.sqrt(jm));
+          const power = gAttack * m075 * bite * tempFit;
+          const defense = (0.35 + 2.2 * genes[jo + G.ARMOR]) * jm075;
+          let take = cfg.biteK * power / (1 + defense) * m075;
+          take = Math.min(take, jm * cfg.biteFrac);
+          if (take > 0.0005) {
+            p.mass[best] = jm - take;
+            p.damage[best] = Math.min(2, p.damage[best] + take / Math.max(0.05, jm));
+            const preyTL = p.trophicOf(best);
+            const assim = take * digestEff;
+            const gainMass = Math.min(assim, Math.max(0, maxMass - m));
+            m += gainMass;
+            detritus[ci] += take - gainMass;
+            const e = take * digestEff * cfg.energyPerMass;
+            energy += e;
+            p.gainTotal[i] += e;
+            p.gainPrey[i] += e;
+            p.trophicSum[i] += e * preyTL;
+            energy -= genes[jo + G.TOXIN] * take * cfg.toxinK * (1 - genes[go + G.TOX_RES]);
+            energy -= cfg.attackCost * power;
+            st.predationEvents++;
+            if ((this.eventSample++ & 15) === 0) this.recordTrophicLink(p.speciesId[i], p.speciesId[best]);
+            if (p.mass[best] < cfg.minMass) this.kill(best, ci);
+          }
+        }
+      }
+
+      // —— 生长：把矿物变成自己的身体 ——
+      const grow = Math.max(0, Math.min(1, 0.5 + 0.5 * outputs[OUT.GROW]));
+      if (m < maxMass) {
+        let want = cfg.growthRate * m066 * grow * (0.2 + genes[go + G.ROOT]) * tempFit;
+        want = Math.min(want, minerals[ci] * cfg.uptakeFrac, maxMass - m, energy / cfg.buildCost);
+        if (want > 0) {
+          minerals[ci] -= want;
+          m += want;
+          energy -= want * cfg.buildCost;
+        }
+      }
+
+      // —— 信号与馈赠：交流与利他的物理通道 ——
+      const sig = outputs[OUT.SIGNAL];
+      if (sig > 0.1) {
+        signal[ci] += sig * 0.35;
+        energy -= sig * 0.02 * m066;
+      }
+      const share = outputs[OUT.SHARE];
+      if (share > 0.2 && genes[go + G.SHARE] > 0.1 && energy > 2) {
+        let j = head[ci];
+        while (j >= 0) {
+          if (j !== i && p.alive[j] && ((p.y[j] | 0) * W + (p.x[j] | 0)) === ci) break;
+          j = p.next[j];
+        }
+        if (j >= 0) {
+          const amt = Math.min(energy * 0.05 * genes[go + G.SHARE] * share, energy * 0.25);
+          energy -= amt;
+          p.energy[j] += amt * (1 - cfg.shareLoss);
+          st.shareEvents++;
+        }
+      }
+
+      // —— 运动 ——
+      const gSpeed = genes[go + G.SPEED];
+      const thrust = Math.max(0, outputs[OUT.THRUST]);
+      let heading = hd + outputs[OUT.TURN] * (0.15 + 0.55 * gSpeed);
+      const maxSpeed = 0.02 + 0.55 * gSpeed;
+      let v = thrust * maxSpeed * tempFit;
+      let moveCost = 0;
+      if (v > 0.0005) {
+        let nx = x + Math.cos(heading) * v;
+        let ny = y + Math.sin(heading) * v;
+        nx = ((nx % W) + W) % W;
+        if (ny < 0.001) { ny = 0.001; heading = -heading; }
+        else if (ny > H - 1.001) { ny = H - 1.001; heading = -heading; }
+        const ni = (ny | 0) * W + (nx | 0);
+        const climb = elev[ni] - elev[ci];
+        moveCost = cfg.moveCost * v * v * m075 + (climb > 0 ? cfg.slopeCost * climb * climb * m075 : 0);
+        x = nx; y = ny;
+      }
+      // 洋流/风把漂浮者带走：连不动的生命也能扩散
+      if (water) {
+        x += w.rowWind[cy] * 0.012 * (1 - gSpeed);
+        x = ((x % W) + W) % W;
+      }
+      p.heading[i] = heading;
+
+      // —— 粘附：同格个体互相拉近，多细胞式聚落的物理前提 ——
+      const adh = outputs[OUT.ADHERE];
+      if (adh > 0.3 && genes[go + G.ADHERE] > 0.2) {
+        let j = head[ci];
+        while (j >= 0) {
+          if (j !== i && p.alive[j] && ((p.y[j] | 0) * W + (p.x[j] | 0)) === ci) {
+            const k = cfg.adhereK * genes[go + G.ADHERE] * adh;
+            x += (p.x[j] - x) * k;
+            y += (p.y[j] - y) * k;
+            break;
+          }
+          j = p.next[j];
+        }
+      }
+
+      // —— 代谢账单 ——
+      const mismatch = water ? 1 - genes[go + G.AQUATIC] : genes[go + G.AQUATIC];
+      let cost = cfg.basal * m075
+        + cfg.brainCost * b.connCount[i]
+        + cfg.chloroCost * gChloro * m066
+        + cfg.armorCost * genes[go + G.ARMOR] * m075
+        + cfg.attackCost * gAttack * m075
+        + cfg.speedCost * gSpeed * m075
+        + cfg.toxinCost * genes[go + G.TOXIN] * m066
+        + cfg.senseCost * gSense
+        + cfg.digestCost * genes[go + G.DIGEST] * m066
+        + cfg.tolCost * genes[go + G.TEMP_TOL];
+      cost *= q10;
+      cost += cfg.mediumCost * mismatch * mismatch * m075
+        + cfg.stressCost * (1 - tempFit) * m075
+        + moveCost;
+      energy -= cost;
+
+      if (energy < 0) {
+        // 饥饿：烧掉自己的身体换能量，物质以排泄物形式回到土壤
+        const need = -energy;
+        const burn = Math.min(m * 0.5, need / (cfg.energyPerMass * 0.6));
+        m -= burn;
+        detritus[ci] += burn;
+        energy += burn * cfg.energyPerMass * 0.6;
+        if (energy < 0) energy = 0;
+        st.starvations++;
+      }
+      if (energy > maxEnergy) energy = maxEnergy;
+
+      p.age[i] += 1;
+      p.damage[i] *= 0.9;
+      p.x[i] = x; p.y[i] = y;
+      p.mass[i] = m;
+      p.energy[i] = energy;
+
+      // —— 衰老与死亡 ——
+      if (m < cfg.minMass) { this.kill(i, ci); continue; }
+      if (p.age[i] > lifespan && rng() < 0.02 * (p.age[i] - lifespan) / lifespan) { this.kill(i, ci); continue; }
+
+      // —— 繁殖 ——
+      const repro = outputs[OUT.REPRO];
+      const matureAge = cfg.matureBase + cfg.matureSpan * genes[go + G.MATURITY];
+      if (p.age[i] > matureAge) {
+        const invest = 0.12 + 0.45 * genes[go + G.INVEST];
+        const childMass = m * invest;
+        const threshold = (0.25 + 0.55 * genes[go + G.REPRO]) * maxEnergy * (1 - 0.35 * repro);
+        if (childMass > cfg.minMass * 1.5 && energy > threshold && m - childMass > cfg.minMass * 1.5) {
+          let mate = -1;
+          const sexual = genes[go + G.SEXUAL] > 0.5;
+          if (sexual) {
+            let j = head[ci];
+            while (j >= 0) {
+              if (j !== i && p.alive[j] && p.age[j] > 20 &&
+                tagDistance(genes, go, j * GENE_COUNT) < cfg.mateTagThreshold) { mate = j; break; }
+              j = p.next[j];
+            }
+          }
+          if (!sexual || mate >= 0) this.reproduce(i, mate, childMass, ci);
+        }
+      }
+    }
+
+    if (this.t % cfg.sampleEvery === 0) this.sample();
+    return this;
+  }
+
+  reproduce(parent, mate, childMass, ci) {
+    const p = this.population, cfg = this.cfg, rng = this.rng, b = this.brains;
+    const s = p.alloc();
+    if (s < 0) return;
+    const go = parent * GENE_COUNT, so = s * GENE_COUNT;
+    if (mate >= 0) {
+      crossoverGenome(p.genes, go, mate * GENE_COUNT, so, rng);
+      this.stats.matings++;
+    } else {
+      copyGenome(p.genes, go, so);
+    }
+    mutateGenome(p.genes, so, rng, cfg);
+    let dist2 = 0;
+    for (let k = 0; k < GENE_COUNT; k++) { const d = p.genes[so + k] - p.genes[go + k]; dist2 += d * d; }
+    // dist2 = 子代相对亲代的基因位移，用于"遗传但有变异"的验收统计
+    b.inherit(mate >= 0 && rng() < 0.5 ? mate : parent, s, rng, cfg);
+
+    // 伴侣只能出得起自己有的那份，否则会被掏成负体量（物质凭空消失）
+    let mateShare = 0;
+    if (mate >= 0) mateShare = Math.min(childMass * 0.5, Math.max(0, p.mass[mate] - cfg.minMass * 1.5));
+    const parentShare = childMass - mateShare;
+    const fracP = childMass > 0 ? parentShare / childMass : 1;
+    p.mass[parent] -= parentShare;
+    const childEnergy = Math.min(p.energy[parent] * 0.35, childMass * cfg.energyPerMass * 1.2);
+    p.energy[parent] -= (childEnergy + childMass * cfg.reproCost) * fracP;
+    if (mate >= 0) {
+      p.mass[mate] -= mateShare;
+      p.energy[mate] -= (childEnergy + childMass * cfg.reproCost) * (1 - fracP);
+      if (p.energy[mate] < 0) p.energy[mate] = 0;
+    }
+    if (p.energy[parent] < 0) p.energy[parent] = 0;
+
+    const ang = rng() * 6.283, r = 0.4 + rng() * 1.4;
+    let nx = p.x[parent] + Math.cos(ang) * r, ny = p.y[parent] + Math.sin(ang) * r;
+    nx = ((nx % this.world.width) + this.world.width) % this.world.width;
+    ny = Math.max(0.001, Math.min(this.world.height - 1.001, ny));
+    p.x[s] = nx; p.y[s] = ny;
+    p.heading[s] = rng() * 6.283;
+    p.mass[s] = childMass;
+    p.energy[s] = childEnergy;
+    p.age[s] = 0; p.damage[s] = 0;
+    p.gainTotal[s] = 0; p.trophicSum[s] = 0;
+    p.gainLight[s] = 0; p.gainPrey[s] = 0; p.gainDetritus[s] = 0;
+    p.birthTick[s] = this.t;
+    this.assignSpecies(s, parent);
+    this.stats.births++;
+    const gd = this.stats.birthGeneDistances;
+    if (gd.length < 600) gd.push(Math.sqrt(dist2 / GENE_COUNT));
+    else if ((this.stats.births & 63) === 0) gd[(this.stats.births >> 6) % 600] = Math.sqrt(dist2 / GENE_COUNT);
+  }
+
+  kill(i, ci) {
+    const p = this.population;
+    if (!p.alive[i]) return;
+    const cell = ci !== undefined ? ci : (p.y[i] | 0) * this.world.width + (p.x[i] | 0);
+    this.world.detritus[cell] += Math.max(0, p.mass[i]);
+    if (this.world.isWater[cell]) this.world.sediment[cell] += p.mass[i] * 0.02;
+    p.mass[i] = 0;
+    p.release(i);
+    this.stats.deaths++;
+  }
+
+  recordTrophicLink(pred, prey) {
+    if (!pred || !prey || pred === prey) return;
+    const key = pred * 2097152 + prey;
+    const fw = this.foodWeb;
+    const rec = fw.get(key);
+    if (rec) { rec.count++; rec.last = this.t; }
+    else {
+      if (fw.size > 6000) {
+        // 逐步抬高门槛直到真的缩下去，避免观测层无界增长
+        let thresh = 3;
+        while (fw.size > 5000 && thresh < 1e6) {
+          for (const [k, v] of fw) if (v.count < thresh) fw.delete(k);
+          thresh *= 3;
+        }
+      }
+      fw.set(key, { pred, prey, count: 1, first: this.t, last: this.t });
+    }
+  }
+
+  sample() {
+    const p = this.population, cfg = this.cfg;
+    for (const sp of this.species.values()) { sp.count = 0; sp.trophic = 0; }
+    let biomass = 0, tlSum = 0, tlMax = 1, n = 0;
+    for (let i = 0; i < p.capacity; i++) {
+      if (!p.alive[i]) continue;
+      biomass += p.mass[i];
+      const tl = p.trophicOf(i);
+      tlSum += tl; if (tl > tlMax) tlMax = tl;
+      n++;
+      const sp = this.species.get(p.speciesId[i]);
+      if (sp) { sp.count++; sp.trophic += tl; }
+    }
+    let alive = 0;
+    for (const sp of this.species.values()) {
+      if (sp.count > 0) {
+        alive++;
+        sp.trophic /= sp.count;
+        if (sp.count > sp.peak) sp.peak = sp.count;
+        sp.extinct = -1;
+        if (sp.peak >= 8) {
+          let note = this.notable.get(sp.id);
+          if (!note) {
+            note = { id: sp.id, parent: sp.parent, born: sp.born, extinct: -1, peak: 0, trophic: 1 };
+            this.notable.set(sp.id, note);
+          }
+          note.peak = sp.peak; note.trophic = sp.trophic; note.extinct = -1;
+        }
+      } else if (sp.extinct < 0) {
+        sp.extinct = this.t;
+        this.stats.extinctions++;
+        const note = this.notable.get(sp.id);
+        if (note) note.extinct = this.t;
+      }
+    }
+    if (this.species.size > 6000) {
+      for (const [id, sp] of this.species) {
+        if (sp.count === 0 && sp.peak < 8) this.species.delete(id);
+      }
+    }
+    if (this.notable.size > 3000) {
+      const dead = [];
+      for (const n of this.notable.values()) if (n.extinct > 0) dead.push(n);
+      dead.sort((a, b) => a.peak - b.peak);
+      for (let k = 0; k < dead.length - 2000; k++) this.notable.delete(dead[k].id);
+    }
+    const w = this.world;
+    let minerals = 0, detritus = 0;
+    for (let i = 0; i < w.size; i++) { minerals += w.minerals[i]; detritus += w.detritus[i]; }
+    const st = this.stats;
+    st.speciesAlive = alive;
+    st.biomass = biomass;
+    st.meanTrophic = n ? tlSum / n : 0;
+    st.maxTrophic = tlMax;
+    if (tlMax > st.maxTrophicEver) st.maxTrophicEver = tlMax;
+    this.history.push({
+      t: this.t, pop: n, species: alive, biomass, minerals, detritus, buried: w.buried,
+      meanTrophic: st.meanTrophic, maxTrophic: tlMax,
+      births: st.births, deaths: st.deaths, predation: st.predationEvents,
+      ash: w.ash, temp: w.climate.tempOffset,
+    });
+    if (this.history.length > cfg.historyLimit) this.history.shift();
+  }
+
+  // —— 用户干预 ——
+  meteor(cx, cy, radius = 40, power = 1) {
+    radius = Math.max(2, Math.min(200, radius));
+    power = Math.max(0.05, Math.min(3, power));
+    this.world.meteor(cx | 0, cy | 0, radius, power);
+    const p = this.population, W = this.world.width;
+    const kr = radius * 1.15;
+    for (let i = 0; i < p.capacity; i++) {
+      if (!p.alive[i]) continue;
+      let dx = Math.abs(p.x[i] - cx); if (dx > W / 2) dx = W - dx;
+      const dy = p.y[i] - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < kr && this.rng() < 1 - d / kr) this.kill(i);
+    }
+    return this;
+  }
+
+  volcano(cx, cy, radius = 22, power = 1) {
+    radius = Math.max(2, Math.min(120, radius));
+    power = Math.max(0.05, Math.min(3, power));
+    this.world.volcano(cx | 0, cy | 0, radius, power);
+    const p = this.population, W = this.world.width;
+    const kr = radius * 0.8;
+    for (let i = 0; i < p.capacity; i++) {
+      if (!p.alive[i]) continue;
+      let dx = Math.abs(p.x[i] - cx); if (dx > W / 2) dx = W - dx;
+      const dy = p.y[i] - cy;
+      if (Math.sqrt(dx * dx + dy * dy) < kr) this.kill(i);
+    }
+    return this;
+  }
+
+  setClimate(patch) {
+    const c = this.world.climate;
+    if (patch.tempOffset !== undefined) c.tempOffset = Math.max(-30, Math.min(30, patch.tempOffset));
+    if (patch.rainMul !== undefined) c.rainMul = Math.max(0.05, Math.min(3, patch.rainMul));
+    if (patch.solarMul !== undefined) c.solarMul = Math.max(0.05, Math.min(2, patch.solarMul));
+    return this;
+  }
+}
+
+__exports.Population = Population;
+__exports.Simulation = Simulation;
+
+});
+__def("viewer", function(__exports, __req) {
+const { Simulation } = __req("sim");
+const { G, GENE_COUNT, GENE_NAMES } = __req("genome");
+const { NUM_IN, MAX_HIDDEN, NUM_OUT, NODES, OUT_BASE, MAX_CONN, IN_NAMES, OUT_NAMES } = __req("brain");
+const { biomeOf, BIOME_NAMES, speciesTable, biomeCensus } = __req("metrics");
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("view"), ctx = canvas.getContext("2d", { alpha: false });
+
+let sim, W, H, off, offCtx, img, buf32, baseBuf, accM, domIdx, touchedPix;
+const view = { x: 0, y: 0, scale: 1 };
+let layer = "true", tint = "func", tool = "inspect", speed = 2, selected = -1, follow = false, tab = "ind";
+let baseDirty = true, baseAge = 0, lastTerrain = -1;
+let fps = 0, tps = 0, frames = 0, tickAcc = 0, lastFpsT = performance.now();
+let panelAge = 0, tickMs = 3, tickCredit = 0;
+
+function build(seed) {
+  sim = new Simulation({ seed, width: 1024, height: 512, maxPop: 150000, initialPop: 30000 });
+  W = sim.world.width; H = sim.world.height;
+  if (!off) {
+    off = document.createElement("canvas");
+    offCtx = off.getContext("2d", { alpha: false });
+  }
+  off.width = W; off.height = H;
+  img = offCtx.createImageData(W, H);
+  buf32 = new Uint32Array(img.data.buffer);
+  baseBuf = new Uint32Array(W * H);
+  accM = new Float32Array(W * H);
+  domIdx = new Int32Array(W * H);
+  touchedPix = new Int32Array(W * H);
+  selected = -1; baseDirty = true; lastTerrain = -1;
+  fitView();
+  window.sim = sim;
+}
+
+function fitView() {
+  const s = Math.min(canvas.clientWidth / W, canvas.clientHeight / H);
+  view.scale = s; view.x = 0; view.y = (H - canvas.clientHeight / s) / 2;
+}
+
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(canvas.clientWidth * dpr);
+  canvas.height = Math.floor(canvas.clientHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
+const pack = (r, g, b) => (255 << 24) | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function ramp(v, stops) {
+  v = Math.max(0, Math.min(0.9999, v));
+  const n = stops.length - 1, k = Math.floor(v * n), f = v * n - k;
+  const a = stops[k], b = stops[k + 1];
+  return pack(lerp(a[0], b[0], f), lerp(a[1], b[1], f), lerp(a[2], b[2], f));
+}
+const RAMP_TEMP = [[20, 30, 90], [40, 110, 190], [80, 200, 200], [230, 220, 120], [220, 110, 50], [160, 30, 30]];
+const RAMP_RAIN = [[120, 96, 60], [190, 170, 110], [120, 180, 110], [40, 140, 170], [30, 70, 200]];
+const RAMP_MIN = [[10, 10, 14], [90, 70, 30], [200, 170, 60], [255, 240, 170]];
+const RAMP_DET = [[10, 10, 12], [70, 45, 28], [150, 100, 55], [220, 180, 120]];
+const RAMP_GREY = [[4, 6, 10], [90, 96, 110], [220, 228, 240]];
+
+// —— 地表底图：真彩加地形晕渲，其余为科学图层 ——
+let baseBand = 0;
+function buildBase(full) {
+  const y0 = full ? 0 : (baseBand * H / 4) | 0;
+  const y1 = full ? H : ((baseBand + 1) * H / 4) | 0;
+  baseBand = (baseBand + 1) & 3;
+  const w = sim.world, elev = w.elev, isW = w.isWater, dep = w.depth,
+    moist = w.moisture, minerals = w.minerals, det = w.detritus,
+    rowTemp = w.rowTemp, tempStatic = w.tempStatic, rowSolar = w.rowSolar, atten = w.depthAtten;
+  const sea = w.seaLevel, maxE = w.maxElev;
+  for (let y = y0; y < y1; y++) {
+    const night = 0.44 + 0.56 * Math.sqrt(Math.max(0, rowSolar[y] / Math.max(0.001, w.climate.solarMul)));
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      let t = rowTemp[y] + tempStatic[i];
+      if (isW[i] && t < -2) t = -2;
+      let c;
+      if (layer === "temp") c = ramp((t + 35) / 80, RAMP_TEMP);
+      else if (layer === "rain") c = ramp(isW[i] ? 1 : moist[i], RAMP_RAIN);
+      else if (layer === "min") c = ramp(minerals[i] / 2.2, RAMP_MIN);
+      else if (layer === "det") c = ramp(det[i] / 1.5, RAMP_DET);
+      else if (layer === "light") c = ramp(rowSolar[y] * atten[i] * 1.1, RAMP_GREY);
+      else {
+        let r, g, b;
+        if (isW[i]) {
+          const d = dep[i];
+          if (t < -1.5) { const f = 1 - d * 0.5; r = 200 * f + 30; g = 218 * f + 30; b = 232 * f + 30; }
+          else { r = lerp(24, 6, d); g = lerp(104, 22, d); b = lerp(126, 56, d); }
+        } else {
+          const alt = Math.max(0, elev[i] - sea) / maxE;
+          const m = moist[i];
+          if (m < 0.24) { const f = m / 0.24; r = lerp(206, 178, f); g = lerp(180, 168, f); b = lerp(120, 104, f); }
+          else { const f = Math.min(1, (m - 0.24) / 0.62); r = lerp(150, 32, f); g = lerp(152, 96, f); b = lerp(80, 44, f); }
+          if (t < 2) { const f = Math.min(1, (2 - t) / 12); r = lerp(r, 226, f); g = lerp(g, 234, f); b = lerp(b, 240, f); }
+          if (alt > 0.4) { const f = Math.min(1, (alt - 0.4) / 0.5); r = lerp(r, 138, f); g = lerp(g, 130, f); b = lerp(b, 122, f); }
+          const west = elev[y * W + ((x - 1 + W) % W)];
+          const sh = Math.max(0.62, Math.min(1.42, 1 + (elev[i] - west) * 9));
+          r *= sh; g *= sh; b *= sh;
+        }
+        c = pack(Math.min(255, r * night), Math.min(255, g * night), Math.min(255, b * night));
+      }
+      baseBuf[i] = c;
+    }
+  }
+  if (full) { baseDirty = false; baseBand = 0; }
+  baseAge = 0;
+}
+
+const TROPHIC_RAMP = [[70, 200, 90], [220, 210, 70], [230, 120, 40], [220, 50, 60], [200, 60, 200]];
+function hueOf(id) { const h = (id * 2654435761 % 360); return h; }
+
+// —— 生物层：把每个个体按体量涂进它所在的格子，远看就是植被与种群的分布 ——
+function drawLife() {
+  const p = sim.population, genes = p.genes, cap = p.capacity, pm = p.mass;
+  const px = p.x, py = p.y, alive = p.alive;
+  let tp = 0;
+  for (let i = 0; i < cap; i++) {
+    if (!alive[i]) continue;
+    const ci = (py[i] | 0) * W + (px[i] | 0);
+    const m = pm[i];
+    const prev = accM[ci];
+    if (prev === 0) { touchedPix[tp++] = ci; domIdx[ci] = i; }
+    else if (m > pm[domIdx[ci]]) domIdx[ci] = i;
+    accM[ci] = prev + m;
+  }
+  for (let k = 0; k < tp; k++) {
+    const ci = touchedPix[k];
+    const i = domIdx[ci];
+    const go = i * GENE_COUNT;
+    let r, g, b;
+    if (tint === "clade") {
+      r = 45 + 210 * genes[go + G.PIG_R]; g = 45 + 210 * genes[go + G.PIG_G]; b = 45 + 210 * genes[go + G.PIG_B];
+    } else if (tint === "trophic") {
+      const v = Math.min(0.999, (p.trophicOf(i) - 1) / 3);
+      const n = TROPHIC_RAMP.length - 1, k = Math.floor(v * n), f = v * n - k;
+      const a = TROPHIC_RAMP[k], c2 = TROPHIC_RAMP[k + 1];
+      r = lerp(a[0], c2[0], f); g = lerp(a[1], c2[1], f); b = lerp(a[2], c2[2], f);
+    } else if (tint === "species") {
+      const h = hueOf(p.speciesId[i]) / 60;
+      const k = Math.floor(h) % 6, f = h - Math.floor(h);
+      const q = 1 - f, tt = f;
+      if (k === 0) { r = 1; g = tt; b = 0; } else if (k === 1) { r = q; g = 1; b = 0; }
+      else if (k === 2) { r = 0; g = 1; b = tt; } else if (k === 3) { r = 0; g = q; b = 1; }
+      else if (k === 4) { r = tt; g = 0; b = 1; } else { r = 1; g = 0; b = q; }
+      r = 60 + r * 195; g = 60 + g * 195; b = 60 + b * 195;
+    } else {
+      r = 40 + 205 * genes[go + G.ATTACK] + 30 * genes[go + G.TOXIN];
+      g = 40 + 210 * genes[go + G.CHLORO];
+      b = 50 + 120 * genes[go + G.AQUATIC] + 80 * genes[go + G.ARMOR];
+    }
+    const a = Math.min(1, accM[ci] / 0.9) * 0.92;
+    const bs = baseBuf[ci];
+    const br = bs & 255, bg = (bs >> 8) & 255, bb = (bs >> 16) & 255;
+    buf32[ci] = pack(lerp(br, r, a), lerp(bg, g, a), lerp(bb, b, a));
+    accM[ci] = 0;
+  }
+}
+
+function render() {
+  const w = sim.world;
+  if (w.terrainVersion !== lastTerrain) { lastTerrain = w.terrainVersion; baseDirty = true; }
+  if (baseDirty) buildBase(true);
+  else if (++baseAge > 12) buildBase(false);
+  buf32.set(baseBuf);
+  drawLife();
+  offCtx.putImageData(img, 0, 0);
+
+  const cw = canvas.clientWidth, ch = canvas.clientHeight, s = view.scale;
+  ctx.fillStyle = "#05070d"; ctx.fillRect(0, 0, cw, ch);
+  const sx0 = -view.x * s, sy0 = -view.y * s;
+  for (let k = -1; k <= 1; k++) {
+    const px = sx0 + k * W * s;
+    if (px > cw || px + W * s < 0) continue;
+    ctx.drawImage(off, px, sy0, W * s, H * s);
+  }
+  // 昼夜晨昏线
+  const grad = ctx.createLinearGradient(0, 0, cw, 0);
+  for (let k = 0; k <= 24; k++) {
+    const wx = ((view.x + (k / 24) * (cw / s)) % W + W) % W;
+    const d = w.dayCos[wx | 0];
+    grad.addColorStop(k / 24, "rgba(3,7,20," + (0.5 * (1 - d)).toFixed(3) + ")");
+  }
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, cw, ch);
+
+  if (s >= 5) drawCreatures(s, sx0, sy0, cw, ch);
+  if (selected >= 0 && sim.population.alive[selected]) {
+    const p = sim.population;
+    let px = sx0 + p.x[selected] * s, py = sy0 + p.y[selected] * s;
+    while (px < -W * s / 2) px += W * s; while (px > cw + W * s / 2) px -= W * s;
+    ctx.strokeStyle = "#4ce0b3"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, Math.max(7, s * 1.5), 0, 6.283); ctx.stroke();
+  }
+}
+
+function drawCreatures(s, sx0, sy0, cw, ch) {
+  const p = sim.population, genes = p.genes;
+  const x0 = Math.max(0, Math.floor(view.x - 1)), x1 = Math.ceil(view.x + cw / s + 1);
+  const y0 = Math.max(0, Math.floor(view.y - 1)), y1 = Math.min(H - 1, Math.ceil(view.y + ch / s + 1));
+  ctx.lineWidth = 1;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const wx = ((x % W) + W) % W;
+      let j = sim.cellHead[y * W + wx];
+      while (j >= 0) {
+        if (p.alive[j]) {
+          const go = j * GENE_COUNT;
+          const r = Math.max(1.2, Math.sqrt(p.mass[j]) * s * 0.45);
+          const px = sx0 + p.x[j] * s, py = sy0 + p.y[j] * s;
+          if (px > -20 && px < cw + 20) {
+            const cr = 40 + 205 * genes[go + G.ATTACK], cg = 40 + 210 * genes[go + G.CHLORO],
+              cb = 50 + 120 * genes[go + G.AQUATIC] + 80 * genes[go + G.ARMOR];
+            ctx.fillStyle = "rgb(" + (cr | 0) + "," + (cg | 0) + "," + (cb | 0) + ")";
+            ctx.beginPath(); ctx.arc(px, py, r, 0, 6.283); ctx.fill();
+            if (genes[go + G.SPEED] > 0.25) {
+              ctx.strokeStyle = "rgba(255,255,255,.55)";
+              ctx.beginPath(); ctx.moveTo(px, py);
+              ctx.lineTo(px + Math.cos(p.heading[j]) * r * 2.1, py + Math.sin(p.heading[j]) * r * 2.1);
+              ctx.stroke();
+            }
+          }
+        }
+        j = p.next[j];
+      }
+    }
+  }
+}
+
+// ———————————————— 星球纪事：只从统计里读事件，不参与任何规则 ————————————————
+const evLog = [];
+let lastEvT = -1, lastMaxTL = 1, bioRecord = 0, specRecord = 0, ashSeen = 0;
+const spTier = new Map(), goneReported = new Set();
+const TIERS = [200, 1000, 5000, 20000];
+
+function pushEv(text, kind) {
+  evLog.unshift({ t: sim.t, text, kind: kind || "" });
+  if (evLog.length > 80) evLog.pop();
+  const el = $("tickerText");
+  if (el) el.textContent = "t=" + fmt(sim.t) + " · " + text;
+}
+
+function scanEvents() {
+  const h = sim.history;
+  if (h.length < 2) return;
+  const cur = h[h.length - 1], prev = h[h.length - 2];
+  if (cur.t === lastEvT) return;
+  lastEvT = cur.t;
+  const dp = (cur.pop - prev.pop) / Math.max(1, prev.pop);
+  if (dp > 0.35) pushEv("种群暴涨 " + (dp * 100).toFixed(0) + "%，现有 " + fmt(cur.pop) + " 个体", "good");
+  else if (dp < -0.3) pushEv("种群骤降 " + (-dp * 100).toFixed(0) + "%，只剩 " + fmt(cur.pop) + " 个体", "bad");
+  const mt = sim.stats.maxTrophicEver;
+  if (Math.floor(mt) > Math.floor(lastMaxTL)) {
+    pushEv("食物链再延长一层：出现营养级 " + mt.toFixed(1) + " 的捕食者", "good");
+  }
+  lastMaxTL = mt;
+  if (cur.biomass > bioRecord * 1.35) { bioRecord = cur.biomass; if (h.length > 3) pushEv("总生物量创新高：" + fmt(cur.biomass), "good"); }
+  if (cur.species > specRecord * 1.4) { specRecord = cur.species; if (h.length > 3) pushEv("同时存活物种数创新高：" + fmt(cur.species), "good"); }
+  if (sim.world.ash > 0.05 && sim.world.ash > ashSeen + 0.05) {
+    ashSeen = sim.world.ash;
+    pushEv("尘埃遮蔽 " + (sim.world.ash * 100).toFixed(0) + "% 阳光，全球降温", "bad");
+  } else if (sim.world.ash < 0.02) ashSeen = 0;
+  for (const sp of speciesTable(sim, 40)) {
+    const tier = spTier.get(sp.id) || 0;
+    for (let k = TIERS.length - 1; k >= 0; k--) {
+      if (sp.count >= TIERS[k] && tier < TIERS[k]) {
+        spTier.set(sp.id, TIERS[k]);
+        pushEv("物种 #" + sp.id + " 扩张到 " + fmt(sp.count) + " 个体（营养级 " + sp.trophic.toFixed(1) + "）", "good");
+        break;
+      }
+    }
+  }
+  for (const n of sim.notable.values()) {
+    if (n.extinct > 0 && n.peak >= 200 && !goneReported.has(n.id)) {
+      goneReported.add(n.id);
+      pushEv("物种 #" + n.id + " 灭绝，曾达 " + fmt(n.peak) + " 个体，存续 " + fmt(n.extinct - n.born) + " tick", "bad");
+    }
+  }
+}
+
+function logPanel() {
+  if (!evLog.length) return '<div class="hint">还没有值得记录的事件。</div>';
+  return evLog.map((e) => '<div class="kv"><span style="color:' +
+    (e.kind === "bad" ? "#ff8a7a" : e.kind === "good" ? "#4ce0b3" : "#9fb2c9") + '">' + e.text +
+    "</span><b>t=" + fmt(e.t) + "</b></div>").join("");
+}
+
+// ———————————————— HUD ————————————————
+function fmt(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return (n | 0) + "";
+}
+function updateHud() {
+  const st = sim.stats, cfg = sim.cfg;
+  const day = Math.floor(sim.t / cfg.dayLength), year = Math.floor(day / cfg.daysPerYear);
+  $("s-time").textContent = year + "年" + (day % cfg.daysPerYear + 1) + "日 (t=" + fmt(sim.t) + ")";
+  $("s-pop").textContent = fmt(sim.population.count);
+  $("s-spec").textContent = fmt(st.speciesAlive);
+  $("s-bio").textContent = fmt(st.biomass);
+  $("s-tl").textContent = st.meanTrophic.toFixed(2);
+  $("s-tlmax").textContent = st.maxTrophic.toFixed(2);
+  const h = sim.history[sim.history.length - 1];
+  $("s-min").textContent = h ? fmt(h.minerals) : "—";
+  $("s-fps").textContent = fps.toFixed(0);
+  $("s-tps").textContent = tps.toFixed(0) + " tick/s";
+}
+
+const LAYERS = [["true", "真彩"], ["temp", "温度"], ["rain", "降水"], ["min", "矿物"], ["det", "腐殖质"], ["light", "光照"]];
+const TINTS = [["func", "功能"], ["clade", "血统"], ["trophic", "营养级"], ["species", "物种"]];
+const TOOLS = [["inspect", "观察"], ["meteor", "陨石"], ["volcano", "火山"]];
+const SPEEDS = [[0, "暂停"], [1, "1×"], [2, "2×"], [4, "4×"], [99, "最大"]];
+
+function mkButtons(host, items, get, set) {
+  host.innerHTML = "";
+  for (const [val, label] of items) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = get() === val ? "on" : "";
+    b.onclick = () => { set(val); mkButtons(host, items, get, set); };
+    host.appendChild(b);
+  }
+}
+
+const LEGENDS = {
+  true: "海拔+湿度+温度合成的真彩地表，含地形晕渲与晨昏线",
+  temp: "蓝=严寒 → 红=酷热", rain: "棕=干旱 → 蓝=湿润",
+  min: "土壤/海水中的可用矿物营养", det: "生物遗骸堆积成的腐殖质",
+  light: "当前太阳辐照（含昼夜与水深衰减）",
+};
+const TINT_LEG = {
+  func: "绿=光合 红=攻击 蓝=亲水/护甲", clade: "颜色=中性色素基因（同色即近亲）",
+  trophic: "绿=生产者 黄=植食 橙红=捕食者 紫=顶级", species: "每个物种一个色相",
+};
+function updateLegend() {
+  $("legendBody").innerHTML = '<div class="lg">' + LEGENDS[layer] + "</div><div class=\"lg\" style=\"margin-top:6px\">" + TINT_LEG[tint] + "</div>";
+}
+
+// ———————————————— 右侧面板 ————————————————
+function geneBars(i) {
+  const g = sim.population.genes, go = i * GENE_COUNT;
+  let s = "";
+  for (let k = 0; k < GENE_COUNT; k++) {
+    const v = g[go + k];
+    s += '<div class="gene"><span style="color:#7b8ba3">' + GENE_NAMES[k] + '</span><div class="bar"><i style="width:' +
+      (v * 100).toFixed(0) + '%"></i></div><span>' + v.toFixed(2) + "</span></div>";
+  }
+  return s;
+}
+
+function brainSVG(i) {
+  const b = sim.brains, n = b.connCount[i];
+  const wpx = 300, hpx = 210;
+  const posOf = (node) => {
+    if (node < NUM_IN) return [26, 12 + node * (hpx - 24) / (NUM_IN - 1)];
+    if (node < OUT_BASE) return [wpx / 2, 24 + (node - NUM_IN) * (hpx - 48) / (MAX_HIDDEN - 1)];
+    return [wpx - 26, 14 + (node - OUT_BASE) * (hpx - 28) / (NUM_OUT - 1)];
+  };
+  let s = '<svg width="' + wpx + '" height="' + hpx + '" style="background:#0a0f18;border-radius:6px">';
+  const used = new Set();
+  for (let k = 0; k < n; k++) {
+    const f = b.connFrom[i * MAX_CONN + k], t = b.connTo[i * MAX_CONN + k], w = b.connW[i * MAX_CONN + k];
+    used.add(f); used.add(t);
+    const [x1, y1] = posOf(f), [x2, y2] = posOf(t);
+    const col = w > 0 ? "76,224,179" : "255,110,110";
+    s += '<line x1="' + x1 + '" y1="' + y1.toFixed(1) + '" x2="' + x2 + '" y2="' + y2.toFixed(1) +
+      '" stroke="rgba(' + col + ',' + Math.min(0.95, 0.25 + Math.abs(w) / 3).toFixed(2) + ')" stroke-width="' +
+      Math.min(3, 0.5 + Math.abs(w) / 2).toFixed(2) + '"/>';
+  }
+  const st = sim.brains.state;
+  for (let node = 0; node < NODES; node++) {
+    if (!used.has(node) && node >= NUM_IN && node < OUT_BASE) continue;
+    const [x, y] = posOf(node);
+    const act = st[i * NODES + node];
+    const v = Math.max(-1, Math.min(1, act));
+    const c = v >= 0 ? "rgb(" + (40 + 120 * v | 0) + "," + (90 + 165 * v | 0) + "," + (80 + 80 * v | 0) + ")"
+      : "rgb(" + (90 - 60 * v | 0) + ",60,70)";
+    s += '<circle cx="' + x + '" cy="' + y.toFixed(1) + '" r="4" fill="' + c + '" stroke="#233045"/>';
+    if (node < NUM_IN) s += '<text x="' + (x - 8) + '" y="' + (y + 3).toFixed(1) + '" font-size="8" fill="#6d7f96" text-anchor="end">' + IN_NAMES[node] + "</text>";
+    else if (node >= OUT_BASE) s += '<text x="' + (x + 8) + '" y="' + (y + 3).toFixed(1) + '" font-size="8" fill="#6d7f96">' + OUT_NAMES[node - OUT_BASE] + "</text>";
+  }
+  s += "</svg>";
+  return s;
+}
+
+function individualPanel() {
+  const p = sim.population;
+  if (selected < 0 || !p.alive[selected]) return '<div class="hint">用“观察”工具在星球上点一个生物：这里会显示它的基因、大脑、食谱与身世。<br><br>提示：放大到能看见个体形状后更容易点中。</div>';
+  const i = selected, go = i * GENE_COUNT, g = p.genes;
+  const ci = (p.y[i] | 0) * W + (p.x[i] | 0);
+  const tl = p.trophicOf(i);
+  const total = p.gainLight[i] + p.gainPrey[i] + p.gainDetritus[i] || 1;
+  const sp = sim.species.get(p.speciesId[i]);
+  const maxMass = 0.4 + 55 * g[go + G.SIZE] * g[go + G.SIZE];
+  const kv = (k, v) => '<div class="kv"><span>' + k + "</span><b>" + v + "</b></div>";
+  return kv("物种编号", "#" + p.speciesId[i] + (sp ? "（同类 " + sp.count + " 个体）" : "")) +
+    kv("营养级", tl.toFixed(2) + (tl < 1.25 ? " · 生产者" : tl < 2.2 ? " · 植食/杂食" : tl < 3.2 ? " · 捕食者" : " · 顶级捕食者")) +
+    kv("年龄 / 寿命", (p.age[i] | 0) + " / " + (sim.cfg.lifespanBase + sim.cfg.lifespanSpan * g[go + G.LIFESPAN]).toFixed(0)) +
+    kv("体量 / 上限", p.mass[i].toFixed(2) + " / " + maxMass.toFixed(2)) +
+    kv("能量", p.energy[i].toFixed(1)) +
+    kv("神经连接", sim.brains.connCount[i] + " 条") +
+    kv("所在环境", BIOME_NAMES[biomeOf(sim.world, ci)] + " · " + sim.world.temperatureAt(ci).toFixed(1) + "°C") +
+    "<h4>食谱（能量来源）</h4>" +
+    '<div class="kv"><span>阳光</span><b>' + (100 * p.gainLight[i] / total).toFixed(0) + "%</b></div>" +
+    '<div class="kv"><span>捕食活物</span><b>' + (100 * p.gainPrey[i] / total).toFixed(0) + "%</b></div>" +
+    '<div class="kv"><span>腐殖质</span><b>' + (100 * p.gainDetritus[i] / total).toFixed(0) + "%</b></div>" +
+    "<h4>大脑（可演化拓扑）</h4>" + brainSVG(i) +
+    "<h4>基因组</h4>" + geneBars(i);
+}
+
+function speciesPanel() {
+  const rows = speciesTable(sim, 22);
+  if (!rows.length) return '<div class="hint">还没有形成规模的物种。</div>';
+  let s = '<div class="hint">按当前个体数排序；点击可选中该物种的一个成员。</div>';
+  for (const sp of rows) {
+    const h = hueOf(sp.id);
+    s += '<div class="sp" data-sp="' + sp.id + '"><div class="sw" style="background:hsl(' + h + ',70%,55%)"></div>' +
+      "<span>#" + sp.id + " · " + (sim.t - sp.born > 0 ? "存续 " + fmt(sim.t - sp.born) : "新生") + "</span>" +
+      "<span>" + fmt(sp.count) + " 个</span><span>TL " + sp.trophic.toFixed(1) + "</span></div>";
+  }
+  const cen = biomeCensus(sim);
+  s += "<h4>各地形的生命密度</h4>";
+  for (const b of cen) {
+    if (!b.cells) continue;
+    s += '<div class="kv"><span>' + b.name + "</span><b>" + fmt(b.pop) + " 个 · 密度 " + b.density.toFixed(2) + "</b></div>";
+  }
+  return s;
+}
+
+function treePanel() {
+  const notes = [...sim.notable.values()].sort((a, b) => b.peak - a.peak).slice(0, 90);
+  if (!notes.length) return '<div class="hint">还没有物种达到可入谱系的规模（峰值 ≥ 8 个体）。</div>';
+  const wpx = 300, hpx = Math.max(160, notes.length * 4 + 20);
+  const t0 = Math.min(...notes.map((n) => n.born)), t1 = sim.t;
+  const X = (t) => 8 + (t - t0) / Math.max(1, t1 - t0) * (wpx - 40);
+  const order = new Map(); notes.forEach((n, k) => order.set(n.id, k));
+  let s = '<div class="hint">横轴=时间，每条线是一个成规模的物种，分叉=物种形成。</div><svg width="' + wpx + '" height="' + hpx + '" style="background:#0a0f18;border-radius:6px">';
+  for (const n of notes) {
+    const y = 10 + order.get(n.id) * 4;
+    const x1 = X(n.born), x2 = X(n.extinct > 0 ? n.extinct : t1);
+    const h = hueOf(n.id);
+    s += '<line x1="' + x1.toFixed(1) + '" y1="' + y + '" x2="' + Math.max(x1 + 1, x2).toFixed(1) + '" y2="' + y +
+      '" stroke="hsl(' + h + ',65%,55%)" stroke-width="' + Math.min(3, 1 + Math.log10(n.peak)).toFixed(1) + '"/>';
+    if (order.has(n.parent)) {
+      const py = 10 + order.get(n.parent) * 4;
+      s += '<line x1="' + x1.toFixed(1) + '" y1="' + py + '" x2="' + x1.toFixed(1) + '" y2="' + y +
+        '" stroke="rgba(120,140,170,.35)" stroke-width="0.7"/>';
+    }
+  }
+  s += "</svg>";
+  return s;
+}
+
+function chartPanel() {
+  const h = sim.history;
+  if (h.length < 2) return '<div class="hint">正在积累生态数据…</div>';
+  const wpx = 300, hpx = 92;
+  const draw = (title, key, color, scaleLog) => {
+    const vals = h.map((r) => r[key] || 0);
+    const max = Math.max(1, ...vals), min = 0;
+    let d = "";
+    vals.forEach((v, k) => {
+      const x = (k / (vals.length - 1)) * (wpx - 6) + 3;
+      const y = hpx - 6 - ((v - min) / (max - min)) * (hpx - 14);
+      d += (k ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    });
+    return "<h4>" + title + " · 当前 " + fmt(vals[vals.length - 1]) + " · 峰值 " + fmt(max) + "</h4>" +
+      '<svg width="' + wpx + '" height="' + hpx + '" style="background:#0a0f18;border-radius:6px">' +
+      '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.5"/></svg>';
+  };
+  return draw("种群总数", "pop", "#4ce0b3") + draw("同时存活物种数", "species", "#59a7ff") +
+    draw("总生物量", "biomass", "#e8c15a") + draw("平均营养级", "meanTrophic", "#ff7a59") +
+    draw("土壤可用矿物", "minerals", "#b48bff") + draw("腐殖质储量", "detritus", "#c98b5a") +
+    draw("沉入深海的物质（等火山送回）", "buried", "#5aa0c9");
+}
+
+function refreshPanel() {
+  const body = $("panelBody");
+  body.innerHTML = tab === "ind" ? individualPanel() : tab === "spec" ? speciesPanel()
+    : tab === "tree" ? treePanel() : tab === "log" ? logPanel() : chartPanel();
+  if (tab === "spec") {
+    body.querySelectorAll(".sp").forEach((el) => {
+      el.onclick = () => {
+        const id = +el.dataset.sp, p = sim.population;
+        for (let i = 0; i < p.capacity; i++) if (p.alive[i] && p.speciesId[i] === id) { selected = i; follow = true; break; }
+        tab = "ind"; syncTabs(); refreshPanel();
+      };
+    });
+  }
+}
+function syncTabs() {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+}
+
+// ———————————————— 交互 ————————————————
+function screenToWorld(ev) {
+  const r = canvas.getBoundingClientRect();
+  const sx = ev.clientX - r.left, sy = ev.clientY - r.top;
+  return { x: ((view.x + sx / view.scale) % W + W) % W, y: Math.max(0, Math.min(H - 1, view.y + sy / view.scale)) };
+}
+let dragging = false, dragMoved = 0, lastPt = null;
+canvas.addEventListener("pointerdown", (e) => { dragging = true; dragMoved = 0; lastPt = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastPt.x, dy = e.clientY - lastPt.y;
+  dragMoved += Math.abs(dx) + Math.abs(dy);
+  view.x -= dx / view.scale; view.y -= dy / view.scale;
+  view.y = Math.max(-40, Math.min(H - 10, view.y));
+  lastPt = { x: e.clientX, y: e.clientY };
+  follow = false;
+});
+canvas.addEventListener("pointerup", (e) => {
+  dragging = false;
+  if (dragMoved > 6) return;
+  const wpt = screenToWorld(e);
+  const power = +$("cl-power").value;
+  if (tool === "meteor") {
+    const before = sim.population.count;
+    sim.meteor(wpt.x, wpt.y, 26 + 34 * power, power); baseDirty = true;
+    pushEv("陨石撞击 (" + (wpt.x | 0) + "," + (wpt.y | 0) + ")，瞬间抹去 " + fmt(before - sim.population.count) + " 个生命", "bad");
+  } else if (tool === "volcano") {
+    const before = sim.population.count;
+    sim.volcano(wpt.x, wpt.y, 10 + 14 * power, power); baseDirty = true;
+    pushEv("火山喷发 (" + (wpt.x | 0) + "," + (wpt.y | 0) + ")，吞噬 " + fmt(before - sim.population.count) + " 个生命，同时喷出大量矿物", "bad");
+  }
+  else {
+    let best = -1, bestD = 1e9;
+    const p = sim.population;
+    for (let dy = -3; dy <= 3; dy++) {
+      const y = (wpt.y | 0) + dy;
+      if (y < 0 || y >= H) continue;
+      for (let dx = -3; dx <= 3; dx++) {
+        const x = (((wpt.x | 0) + dx) % W + W) % W;
+        let j = sim.cellHead[y * W + x];
+        while (j >= 0) {
+          if (p.alive[j]) {
+            const d = (p.x[j] - wpt.x) ** 2 + (p.y[j] - wpt.y) ** 2;
+            if (d < bestD) { bestD = d; best = j; }
+          }
+          j = p.next[j];
+        }
+      }
+    }
+    if (best >= 0) { selected = best; tab = "ind"; syncTabs(); refreshPanel(); }
+  }
+});
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const wx = view.x + sx / view.scale, wy = view.y + sy / view.scale;
+  const f = e.deltaY < 0 ? 1.25 : 0.8;
+  view.scale = Math.max(Math.min(canvas.clientWidth / W, canvas.clientHeight / H) * 0.9, Math.min(40, view.scale * f));
+  view.x = wx - sx / view.scale; view.y = wy - sy / view.scale;
+  follow = false;
+}, { passive: false });
+
+let cinema = false, cinemaTimer = 0, camTarget = null;
+
+// 纪录片模式：镜头自动巡游到当下最有看头的地方（纯观看功能，不影响任何规则）
+function pickCinemaTarget() {
+  const p = sim.population;
+  const rows = speciesTable(sim, 6);
+  let pick = -1;
+  const mode = (Math.random() * 3) | 0;
+  if (mode === 0) {
+    let best = -1, bestTL = 1.6;
+    for (let i = 0; i < p.capacity; i += 3) {
+      if (!p.alive[i]) continue;
+      const tl = p.trophicOf(i);
+      if (tl > bestTL) { bestTL = tl; best = i; }
+    }
+    pick = best;
+    if (pick >= 0) pushEv("镜头转向一只营养级 " + bestTL.toFixed(1) + " 的猎手", "");
+  } else if (mode === 1 && rows.length) {
+    const sp = rows[(Math.random() * rows.length) | 0];
+    for (let i = 0; i < p.capacity; i++) if (p.alive[i] && p.speciesId[i] === sp.id) { pick = i; break; }
+    if (pick >= 0) pushEv("镜头转向当下最兴旺的物种之一 #" + sp.id + "（" + fmt(sp.count) + " 个体）", "");
+  } else {
+    let bestCell = -1, bestM = 0;
+    for (let k = 0; k < sim.touchedCount; k += 7) {
+      const c = sim.touched[k];
+      if (sim.cellBiomass[c] > bestM) { bestM = sim.cellBiomass[c]; bestCell = c; }
+    }
+    if (bestCell >= 0) {
+      let j = sim.cellHead[bestCell];
+      while (j >= 0 && !p.alive[j]) j = p.next[j];
+      pick = j;
+      if (pick >= 0) pushEv("镜头转向生命最密集的一片群落", "");
+    }
+  }
+  if (pick >= 0) { selected = pick; camTarget = { zoom: 5 + Math.random() * 5 }; refreshPanel(); }
+}
+
+function loop() {
+  requestAnimationFrame(loop);
+  const budget = speed === 99 ? 55 : 13;
+  const want = speed === 99 ? 1e9 : speed;
+  tickCredit += Math.min(want, budget / Math.max(0.02, tickMs));
+  if (tickCredit > 4) tickCredit = 4;
+  const budgetStart = performance.now();
+  let done = 0;
+  while (tickCredit >= 1 && done < want && (done === 0 || performance.now() - budgetStart < budget)) {
+    sim.tick(); done++; tickCredit -= 1;
+  }
+  if (done > 0) tickMs = tickMs * 0.75 + ((performance.now() - budgetStart) / done) * 0.25;
+  tickAcc += done;
+  if (cinema && (--cinemaTimer <= 0 || selected < 0 || !sim.population.alive[selected])) {
+    cinemaTimer = 720;
+    pickCinemaTarget();
+  }
+  if (cinema && camTarget) view.scale += (camTarget.zoom - view.scale) * 0.02;
+  if ((follow || cinema) && selected >= 0 && sim.population.alive[selected]) {
+    const tx = sim.population.x[selected] - canvas.clientWidth / view.scale / 2;
+    const ty = sim.population.y[selected] - canvas.clientHeight / view.scale / 2;
+    const k = cinema ? 0.06 : 1;
+    view.x += (tx - view.x) * k;
+    view.y += (ty - view.y) * k;
+  }
+  scanEvents();
+  render();
+  frames++;
+  const now = performance.now();
+  if (now - lastFpsT > 500) {
+    fps = frames * 1000 / (now - lastFpsT);
+    tps = tickAcc * 1000 / (now - lastFpsT);
+    frames = 0; tickAcc = 0; lastFpsT = now;
+    updateHud();
+  }
+  if (++panelAge > 30) { panelAge = 0; refreshPanel(); }
+}
+
+const params = new URLSearchParams(location.search);
+
+function warmup(n) {
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    sim.tick();
+    if ((i & 63) === 0 && performance.now() - t0 > 60000) break;
+  }
+}
+
+function boot() {
+  resize();
+  const seed = +(params.get("seed") || $("seedIn").value) || 42;
+  $("seedIn").value = seed;
+  build(seed);
+  const wu = params.has("warmup") ? +params.get("warmup") : 1400;
+  if (wu > 0) {
+    $("loadmsg").textContent = "正在推演最初的 " + wu + " 个 tick，让星球先长出生命…";
+    warmup(wu);
+  }
+  if (params.has("speed")) speed = +params.get("speed");
+  const bench = +(params.get("bench") || 0);
+  if (bench > 0) {
+    $("loadmsg").textContent = "渲染基准测试中…";
+    for (let i = 0; i < bench; i++) render();
+  }
+  mkButtons($("layers"), LAYERS, () => layer, (v) => { layer = v; baseDirty = true; updateLegend(); });
+  mkButtons($("tints"), TINTS, () => tint, (v) => { tint = v; updateLegend(); });
+  mkButtons($("tools"), TOOLS, () => tool, (v) => { tool = v; });
+  mkButtons($("speeds"), SPEEDS, () => speed, (v) => { speed = v; });
+  updateLegend();
+  $("btn-fit").onclick = () => { fitView(); follow = false; };
+  $("btn-follow").onclick = () => { follow = !follow; };
+  $("btn-cinema").onclick = (e) => {
+    cinema = !cinema; cinemaTimer = 0;
+    e.target.classList.toggle("on", cinema);
+    pushEv(cinema ? "进入纪录片模式：镜头会自动巡游" : "退出纪录片模式", "");
+  };
+  if (params.get("cinema") === "1") { cinema = true; $("btn-cinema").classList.add("on"); }
+  $("btn-reset").onclick = () => {
+    build(+($("seedIn").value) || 42);
+    evLog.length = 0; spTier.clear(); goneReported.clear();
+    lastEvT = -1; lastMaxTL = 1; bioRecord = 0; specRecord = 0; ashSeen = 0;
+    pushEv("星球重启：新的随机地形与初代随机基因组", "");
+    refreshPanel();
+  };
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    b.onclick = () => { tab = b.dataset.tab; syncTabs(); refreshPanel(); };
+  });
+  const bind = (id, label, key, fmtv) => {
+    $(id).oninput = () => {
+      const v = +$(id).value;
+      $(label).textContent = fmtv(v);
+      sim.setClimate({ [key]: v });
+      baseDirty = true;
+      pushEv("人为调整" + ({ tempOffset: "全球气温至 " + v.toFixed(1) + "°C 偏移", rainMul: "降水至 " + v.toFixed(2) + "×", solarMul: "日照至 " + v.toFixed(2) + "×" })[key], "");
+    };
+  };
+  bind("cl-temp", "v-temp", "tempOffset", (v) => v.toFixed(1));
+  bind("cl-rain", "v-rain", "rainMul", (v) => v.toFixed(2));
+  bind("cl-solar", "v-solar", "solarMul", (v) => v.toFixed(2));
+  $("cl-power").oninput = () => { $("v-power").textContent = (+$("cl-power").value).toFixed(1); };
+  window.addEventListener("resize", () => { resize(); });
+  refreshPanel();
+  $("loading").style.display = "none";
+  loop();
+}
+
+function fail(msg) {
+  $("loadmsg").innerHTML = '<span style="color:#ff8a7a">' + msg + "</span>";
+  $("loading").style.display = "flex";
+}
+
+$("loadmsg").textContent = "正在生成行星地形与初代生命…";
+setTimeout(() => {
+  if (!canvas.getContext || !ctx) { fail("这个浏览器不支持 Canvas 2D，无法运行本模拟。"); return; }
+  if (typeof Float64Array === "undefined" || typeof Map === "undefined") { fail("浏览器过旧：缺少 Float64Array / Map。"); return; }
+  try { boot(); }
+  catch (e) { fail("启动失败：" + (e && e.message ? e.message : e)); throw e; }
+}, 30);
+
+
+
+});
+__req("viewer");
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a594303e2ed0c9',t:'MTc4OTI4NjAxMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
