@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-fd61e274/v5ab2cc1f621d/">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>推箱子·色织 Demo</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
+  }
+  #game {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  /* 隐藏 Phaser 默认提示文字 */
+  #game canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script>
+"use strict";
+
+/* =========================================================================
+ * 第六章 视觉分层色值规格（唯一色值事实来源）
+ * 禁止就地硬编码十六进制字面量，所有色值引用 PALETTE / 派生常量。
+ * ========================================================================= */
+const PALETTE = {
+  bg:         '#262c3a',
+  cell:       '#0b0e14',
+  gridLine:   '#404c5f',
+  boardEdge:  '#3d7bff',
+  blockRed:   '#ff4d6d',
+  blockBlue:  '#4d9bff',
+  blockPurple:'#b96bff',
+  player:     '#ffe066'
+};
+
+// 派生常量（非业务主色，集中管理避免散落裸十六进制）
+const INK         = '#0a0a0f';                                 // 木箱/玩家描边深色
+const JELLY_EDGE  = { red:'#ffa0a0', blue:'#a0c8ff', purple:'#d8a0ff' }; // 果冻高亮描边（由主色加亮派生）
+const PANEL_FILL  = '#1b2233';                                 // UI 面板底色
+const PANEL_FILL2 = '#2a3550';                                 // UI 面板悬停
+const WHITE       = '#ffffff';                                 // 通用白
+const UI_TEXT     = WHITE;                                     // UI 文字
+
+const GEOM = { gridLineWidth: 2, boardEdgeWidth: 2.5 };
+
+// 页面底色与画布背景一致（避免加载前白色闪烁）
+document.body.style.backgroundColor = PALETTE.bg;
+
+const CONTRAST_RULES = [
+  ['背景/单元格分层', 'bg', 'cell', 1.30],
+  ['网格线可见性',    'gridLine', 'cell', 2.00],
+  ['棋盘边界可见性',  'boardEdge','bg',   3.00],
+  ['红色数字可读性',  'blockRed', 'bg',   3.00],
+  ['蓝色数字可读性',  'blockBlue','bg',   3.00]
+];
+
+function srgbToLin(c){ c/=255; return c<=0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); }
+function hexToRgb(hex){ const m=hex.replace('#',''); return [parseInt(m.slice(0,2),16),parseInt(m.slice(2,4),16),parseInt(m.slice(4,6),16)]; }
+function relLum(hex){ const [r,g,b]=hexToRgb(hex); return 0.2126*srgbToLin(r)+0.7152*srgbToLin(g)+0.0722*srgbToLin(b); }
+function contrast(a,b){ const la=relLum(PALETTE[a]), lb=relLum(PALETTE[b]); const hi=Math.max(la,lb), lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+function verifyPalette() {
+  let ok = true;
+  for (const [name,a,b,min] of CONTRAST_RULES) {
+    const v = contrast(a,b); const pass = v >= min;
+    if (!pass) ok = false;
+    console.log(`${pass?'PASS':'FAIL'}  ${name}: ${v.toFixed(3)}:1 (要求 >= ${min}:1)`);
+  }
+  if (GEOM.gridLineWidth < 2) { console.log('FAIL  网格线宽必须 >= 2px'); ok = false; }
+  else console.log('PASS  网格线宽: ' + GEOM.gridLineWidth + 'px');
+  console.log(ok ? 'PALETTE_OK — 允许交付' : 'PALETTE_FAIL — 禁止交付');
+  return ok;
+}
+
+// 把十六进制颜色字符串转成 Phaser 数值色
+function hexNum(hex){ return Phaser.Display.Color.HexStringToColor(hex).color; }
+
+/* =========================================================================
+ * 颜色 / 箱子 枚举 + 展开表
+ * ========================================================================= */
+const COLOR  = { RED:'red', BLUE:'blue', PURPLE:'purple' };
+const BOXTYPE= { WOOD:'wood', JELLY:'jelly' };
+const EXPAND = {
+  red:   { red:1, blue:0 },
+  blue:  { red:0, blue:1 },
+  purple:{ red:1, blue:1 }
+};
+function isOpposite(c1,c2){
+  return (c1===COLOR.RED && c2===COLOR.BLUE) || (c1===COLOR.BLUE && c2===COLOR.RED);
+}
+
+/* =========================================================================
+ * 第三章 3.2 关卡配置（硬编码数组）—— 共 5 关
+ * 坐标 (x=列, y=行)，左下角 (1,1)。下标 0 对应第 1 行/列。
+ * ========================================================================= */
+const LEVELS = [
+  { // 关卡一：入门级（教学关） 3x3
+    n: 3,
+    player: { x:1, y:1 },
+    boxes: [ { x:2, y:2, color:COLOR.BLUE, type:BOXTYPE.WOOD } ],
+    rowHints: [ [], [], [ {num:1,color:COLOR.BLUE} ] ],
+    colHints: [ [], [], [ {num:1,color:COLOR.BLUE} ] ]
+  },
+  { // 关卡二：进阶级（日常关） 4x4
+    n: 4,
+    player: { x:4, y:1 },
+    boxes: [
+      { x:2, y:4, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:3, y:3, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:2, y:3, color:COLOR.RED,  type:BOXTYPE.WOOD },
+      { x:3, y:2, color:COLOR.RED,  type:BOXTYPE.WOOD }
+    ],
+    rowHints: [
+      [],
+      [ {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.RED} ],
+      [ {num:2,color:COLOR.BLUE} ]
+    ],
+    colHints: [
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE} ],
+      []
+    ]
+  },
+  { // 关卡三：5x5 融合教学（全果冻）
+    n: 5,
+    player: { x:3, y:1 },
+    boxes: [
+      { x:3, y:2, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:3, y:3, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:3, y:4, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:3, y:5, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:4, y:2, color:COLOR.RED,  type:BOXTYPE.JELLY },
+      { x:4, y:3, color:COLOR.RED,  type:BOXTYPE.JELLY },
+      { x:4, y:4, color:COLOR.RED,  type:BOXTYPE.JELLY },
+      { x:4, y:5, color:COLOR.RED,  type:BOXTYPE.JELLY }
+    ],
+    rowHints: [
+      [],
+      [ {num:1,color:COLOR.BLUE} ],
+      [ {num:1,color:COLOR.BLUE}, {num:2,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ]
+    ],
+    colHints: [
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE} ],
+      [ {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ]
+    ]
+  },
+  { // 关卡四：5x5 木箱+果冻混合
+    n: 5,
+    player: { x:1, y:3 },
+    boxes: [
+      { x:2, y:2, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:2, y:4, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:4, y:4, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:3, y:2, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:4, y:3, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:4, y:2, color:COLOR.RED,  type:BOXTYPE.WOOD },
+      { x:2, y:3, color:COLOR.RED,  type:BOXTYPE.JELLY },
+      { x:3, y:3, color:COLOR.RED,  type:BOXTYPE.JELLY }
+    ],
+    rowHints: [
+      [],
+      [ {num:2,color:COLOR.BLUE}, {num:2,color:COLOR.RED} ],
+      [ {num:2,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE} ],
+      []
+    ],
+    colHints: [
+      [],
+      [ {num:1,color:COLOR.BLUE} ],
+      [ {num:2,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:2,color:COLOR.BLUE}, {num:2,color:COLOR.RED} ],
+      []
+    ]
+  },
+  { // 关卡五：5x5 混合进阶
+    n: 5,
+    player: { x:5, y:3 },
+    boxes: [
+      { x:2, y:3, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:2, y:4, color:COLOR.BLUE, type:BOXTYPE.WOOD },
+      { x:4, y:2, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:4, y:3, color:COLOR.BLUE, type:BOXTYPE.JELLY },
+      { x:4, y:1, color:COLOR.RED,  type:BOXTYPE.WOOD },
+      { x:4, y:5, color:COLOR.RED,  type:BOXTYPE.WOOD },
+      { x:2, y:2, color:COLOR.RED,  type:BOXTYPE.JELLY },
+      { x:4, y:4, color:COLOR.RED,  type:BOXTYPE.JELLY }
+    ],
+    rowHints: [
+      [ {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:2,color:COLOR.BLUE} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.RED} ]
+    ],
+    colHints: [
+      [],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      [ {num:2,color:COLOR.BLUE}, {num:2,color:COLOR.RED} ],
+      [ {num:1,color:COLOR.BLUE}, {num:1,color:COLOR.RED} ],
+      []
+    ]
+  }
+];
+
+/* =========================================================================
+ * 全局运行时状态（会话级，刷新即丢失）
+ * ========================================================================= */
+let sessionProgress = 0;                       // 本次会话已达最高关卡索引
+const settings = { soundOn: true, volume: 80 }; // 音效开关 & 音量(0~100)
+
+/* =========================================================================
+ * 第十章 音效（原生 Web Audio API）
+ * ========================================================================= */
+const Audio = {
+  ctx: null, gain: null, buffers: {},
+  init(){
+    if (this.ctx) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.gain = this.ctx.createGain();
+      this.gain.gain.value = settings.soundOn ? settings.volume/100 : 0;
+      this.gain.connect(this.ctx.destination);
+      this.buffers.move  = createToneBuffer(this.ctx, 300, 0.05, 0.15);
+      this.buffers.push  = createToneBuffer(this.ctx, 200, 0.08, 0.25);
+      this.buffers.merge = createToneBuffer(this.ctx, 880, 0.15, 0.30);
+    } catch(e) { this.ctx = null; }
+  },
+  resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+  ensure(){ this.init(); this.resume(); },
+  play(name){
+    if (!this.ctx || !settings.soundOn) return;
+    const b = this.buffers[name]; if (!b) return;
+    try {
+      const src = this.ctx.createBufferSource();
+      src.buffer = b; src.connect(this.gain); src.start();
+    } catch(e) {}
+  },
+  setVolume(v){ settings.volume = v; if (this.gain) this.gain.gain.value = settings.soundOn ? v/100 : 0; },
+  setSoundOn(on){ settings.soundOn = on; if (this.gain) this.gain.gain.value = on ? settings.volume/100 : 0; }
+};
+function createToneBuffer(ctx, freq, duration, volume){
+  const sampleRate = ctx.sampleRate;
+  const sampleCount = Math.floor(sampleRate * duration);
+  const buffer = ctx.createBuffer(1, sampleCount, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < sampleCount; i++) {
+    const envelope = 1 - (i / sampleCount);
+    data[i] = Math.sin(2 * Math.PI * freq * i / sampleRate) * volume * envelope;
+  }
+  return buffer;
+}
+
+/* =========================================================================
+ * DEPTH 分层（第九章 9.3）
+ * ========================================================================= */
+const DEPTH = { bg:0, cell:1, edge:3, glow:5, actor:6, grid:10, ui:20, overlay:1000 };
+
+/* 通用字体 */
+const FONT = '"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif';
+
+/* 颜色 -> 十六进制数值 */
+function colorOf(c){ return c===COLOR.RED ? hexNum(PALETTE.blockRed) : hexNum(PALETTE.blockBlue); }
+function colorHexOf(c){ return c===COLOR.RED ? PALETTE.blockRed : PALETTE.blockBlue; }
+
+/* 注意：第十五章取消了数字/对勾的一切外发光与呼吸动画，故不再需要 setShadow 相关代码 */
+
+/* 箱子纹理 key */
+function boxKey(color, type){
+  if (type === BOXTYPE.WOOD) return color===COLOR.RED ? 'box_wood_red' : 'box_wood_blue';
+  return color===COLOR.RED ? 'box_jelly_red' : (color===COLOR.BLUE ? 'box_jelly_blue' : 'box_jelly_purple');
+}
+
+/* =========================================================================
+ * 第七章 程序化纹理生成
+ * ========================================================================= */
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+function createWoodTexture(scene, key, colorHex) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, 64, 64);
+  const ctx = tex.getContext();
+  ctx.fillStyle = colorHex; ctx.globalAlpha = 1.0;
+  ctx.fillRect(8, 8, 48, 48);
+  ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeRect(8, 8, 48, 48);
+  tex.refresh();
+}
+function createJellyTexture(scene, key, colorHex, edgeHex) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, 64, 64);
+  const ctx = tex.getContext();
+  ctx.save();
+  ctx.shadowColor = colorHex; ctx.shadowBlur = 8;
+  ctx.fillStyle = colorHex; ctx.globalAlpha = 0.55;
+  drawRoundedRect(ctx, 8, 8, 48, 48, 12); ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5; ctx.strokeStyle = edgeHex;
+  drawRoundedRect(ctx, 8, 8, 48, 48, 12); ctx.stroke();
+  const grad = ctx.createRadialGradient(20, 20, 0, 20, 20, 16);
+  grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.globalAlpha = 1.0; ctx.fillStyle = grad; ctx.fillRect(0, 0, 64, 64);
+  tex.refresh();
+}
+function createPlayerTexture(scene, key) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, 64, 64);
+  const ctx = tex.getContext();
+  ctx.fillStyle = PALETTE.player; ctx.globalAlpha = 1.0;
+  ctx.fillRect(8, 8, 48, 48);
+  ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeRect(8, 8, 48, 48);
+  tex.refresh();
+}
+function createGlowTexture(scene, key) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const tex = scene.textures.createCanvas(key, 128, 128);
+  const ctx = tex.getContext();
+  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 60);
+  grad.addColorStop(0.00, 'rgba(255,255,255,1.00)');
+  grad.addColorStop(0.30, 'rgba(255,255,255,0.62)');
+  grad.addColorStop(0.58, 'rgba(255,255,255,0.24)');
+  grad.addColorStop(0.80, 'rgba(255,255,255,0.07)');
+  grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+  tex.refresh();
+}
+function generateAllTextures(scene) {
+  createWoodTexture(scene, 'box_wood_red',   PALETTE.blockRed);
+  createWoodTexture(scene, 'box_wood_blue',  PALETTE.blockBlue);
+  createJellyTexture(scene, 'box_jelly_red',   PALETTE.blockRed,   JELLY_EDGE.red);
+  createJellyTexture(scene, 'box_jelly_blue',  PALETTE.blockBlue,  JELLY_EDGE.blue);
+  createJellyTexture(scene, 'box_jelly_purple',PALETTE.blockPurple,JELLY_EDGE.purple);
+  createPlayerTexture(scene, 'player');
+  createGlowTexture(scene, 'glow_circle');
+}
+
+/* =========================================================================
+ * 通用按钮工厂
+ * ========================================================================= */
+function makeButton(scene, x, y, w, h, label, onClick, opts) {
+  opts = opts || {};
+  const c = scene.add.container(x, y).setDepth(opts.depth != null ? opts.depth : DEPTH.ui);
+  const bg = scene.add.rectangle(0, 0, w, h, hexNum(PANEL_FILL), opts.fillAlpha != null ? opts.fillAlpha : 0.96)
+    .setStrokeStyle(2, hexNum(PALETTE.boardEdge), 0.9);
+  const t = scene.add.text(0, 0, label, {
+    fontFamily: FONT, fontSize: (opts.fontSize || 20) + 'px',
+    color: opts.color || UI_TEXT, fontStyle: opts.bold ? 'bold' : 'normal'
+  }).setOrigin(0.5);
+  c.add([bg, t]);
+  c.setSize(w, h);
+  c.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains);
+  c.on('pointerover', () => bg.setFillStyle(hexNum(PANEL_FILL2), 1));
+  c.on('pointerout',  () => bg.setFillStyle(hexNum(PANEL_FILL), opts.fillAlpha != null ? opts.fillAlpha : 0.96));
+  c.on('pointerdown', () => { Audio.ensure(); onClick(); });
+  c.bgRef = bg; c.txtRef = t;
+  return c;
+}
+
+/* =========================================================================
+ * BootScene：生成纹理、校验色值、初始化（音频延迟至首次手势）
+ * ========================================================================= */
+class BootScene extends Phaser.Scene {
+  constructor(){ super('BootScene'); }
+  create(){
+    generateAllTextures(this);
+    const ok = verifyPalette();
+    console.log('[BootScene] palette check:', ok ? 'PALETTE_OK' : 'PALETTE_FAIL');
+    this.scene.start('MenuScene');
+  }
+}
+
+/* =========================================================================
+ * MenuScene：主菜单
+ * ========================================================================= */
+class MenuScene extends Phaser.Scene {
+  constructor(){ super('MenuScene'); }
+  create(){
+    this.cameras.main.setBackgroundColor(PALETTE.bg);
+    const W = this.scale.width, H = this.scale.height;
+    this.uiObjs = [];
+
+    /* ===== 第十七章 17.1：主菜单文本精简 =====
+     * - 标题文字改为「色织矩阵」，整体下移 30px（原副标题位置腾空后的视觉配平）
+     * - 已删除：副标题「RED + BLUE → PURPLE 数织验证」
+     * - 已删除：底部提示「方向键 / WASD 移动 · R 重置 · 红蓝果冻相撞融合为紫」
+     * 被删除的对象不再创建，因此不参与任何布局计算（17.3）
+     * 按钮起始 Y 保持 H*0.46 不变
+     */
+    const title = this.add.text(W/2, H*0.26 + 30, '色织矩阵', {
+      fontFamily: FONT, fontSize: '52px', color: PALETTE.player, fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.uiObjs.push(title);
+
+    const bw = 240, bh = 52, gap = 18;
+    let by = H*0.46;
+    const cx = W/2;
+
+    const startBtn = makeButton(this, cx, by, bw, bh, '开始游戏', () => {
+      this.scene.start('GameScene', { levelIndex: 0 });
+    }, { fontSize: 24, bold: true });
+    this.uiObjs.push(startBtn);
+    by += bh + gap;
+
+    if (sessionProgress > 0) {
+      const contBtn = makeButton(this, cx, by, bw, bh, '继续游戏（第 ' + (sessionProgress+1) + ' 关）', () => {
+        this.scene.start('GameScene', { levelIndex: sessionProgress });
+      });
+      this.uiObjs.push(contBtn);
+      by += bh + gap;
+    }
+
+    const setBtn = makeButton(this, cx, by, bw, bh, '设置', () => {
+      openSettings(this, false);
+    });
+    this.uiObjs.push(setBtn);
+    by += bh + gap;
+
+    // 底部提示文字已于第十七章删除，此处不再创建任何文本对象（17.1 / 17.3）
+
+    this.input.on('pointerdown', () => Audio.ensure());
+    this.scale.on('resize', this.onResize, this);
+    this.events.once('shutdown', () => this.scale.off('resize', this.onResize, this));
+  }
+  onResize(){
+    // 简单重建菜单以适应窗口
+    this.scene.restart();
+  }
+}
+
+/* =========================================================================
+ * GameScene：核心游戏场景
+ * ========================================================================= */
+class GameScene extends Phaser.Scene {
+  constructor(){ super('GameScene'); }
+
+  init(data){
+    this.current_level_index = (data && typeof data.levelIndex === 'number') ? data.levelIndex : 0;
+  }
+
+  create(){
+    this.cameras.main.setBackgroundColor(PALETTE.bg);
+
+    this.isMoving = false;
+    this.settingsOpen = false;
+    this.victoryOpen = false;
+
+    this.worldLayer = this.add.container(0, 0); // 棋盘/箱子/提示/玩家均在此层
+    this.uiLayer = this.add.container(0, 0);      // 按钮/关卡标签/教学/WASD（屏幕锚定）
+
+    this.boxData = [];   // 数据：{x,y,color,type,view}
+    this.hintRows = [];
+    this.hintCols = [];
+
+    this.loadLevel(this.current_level_index);
+
+    // 输入
+    this.input.keyboard.on('keydown-UP',    () => this.tryMove(0, 1));
+    this.input.keyboard.on('keydown-DOWN',  () => this.tryMove(0, -1));
+    this.input.keyboard.on('keydown-LEFT',  () => this.tryMove(-1, 0));
+    this.input.keyboard.on('keydown-RIGHT', () => this.tryMove(1, 0));
+    this.input.keyboard.on('keydown-W', () => this.tryMove(0, 1));
+    this.input.keyboard.on('keydown-S', () => this.tryMove(0, -1));
+    this.input.keyboard.on('keydown-A', () => this.tryMove(-1, 0));
+    this.input.keyboard.on('keydown-D', () => this.tryMove(1, 0));
+    this.input.keyboard.on('keydown-R', () => this.resetLevel());
+
+    this.input.on('pointerdown', () => Audio.ensure());
+    this.scale.on('resize', this.onResize, this);
+    this.events.once('shutdown', () => this.scale.off('resize', this.onResize, this));
+  }
+
+  /* ---------- 关卡加载 ---------- */
+  loadLevel(index){
+    const lvl = LEVELS[index];
+    if (!lvl) return;
+    this.tweens.killAll();      // 终止任何进行中的动画，避免旧闭包报错
+    this.isMoving = false;
+    this.current_level_index = index;
+    this.level = lvl;
+    this.n = lvl.n;
+
+    // 3.2 校验：行/列提示长度必须等于 n
+    if (lvl.rowHints.length !== this.n || lvl.colHints.length !== this.n) {
+      console.error('关卡 ' + (index+1) + ' 提示长度不合法：row=' + lvl.rowHints.length + ' col=' + lvl.colHints.length + ' n=' + this.n);
+      throw new Error('LEVEL_HINT_LENGTH_MISMATCH');
+    }
+
+    // 深拷贝箱子数据
+    this.boxData = lvl.boxes.map(b => ({ x:b.x, y:b.y, color:b.color, type:b.type, view:null }));
+    this.player = { x: lvl.player.x, y: lvl.player.y, img: null };
+
+    this.computeLayout();
+    this.clearWorld();
+    this.rebuildWorld();
+    this.updateFuseGlow();
+    this.updateHints();
+
+    this.isMoving = false;
+    this.victoryOpen = false;
+  }
+
+  resetLevel(){
+    if (this.settingsOpen) return;
+    this.closeVictory();
+    this.loadLevel(this.current_level_index);
+  }
+
+  /* ---------- 布局计算（第九章 + 第十七章 17.2 顶部纵向层级） ----------
+   * 自顶向下的纵向层级：
+   *   topSafeMargin(40)
+   *     → WASD 按键示意（仅第 1 关，高度 80）
+   *     → promptGap = cellSize * 0.6
+   *     → 关卡文字提示（promptHeight）
+   *     → promptGap
+   *     → 列提示数字区（hintTopHeight = hintPad = cellSize * 0.9）
+   *     → 棋盘（offsetY）
+   * 约束：promptY + promptHeight + promptGap <= offsetY - hintTopHeight
+   * 空间不足时依次降级：① 间隙收窄至 cellSize*0.3 ② 文字提示移至棋盘下方
+   */
+  computeLayout(){
+    const W = this.scale.width, H = this.scale.height;
+    const n = this.n;
+
+    const k = 0.9;               // 15.5：单/双提示统一，padding 系数恒为 0.9
+    const sideMargin   = 40;     // 左右安全边距
+    const bottomMargin = 40;     // 底部安全边距
+    const topSafeMargin = 40;    // 17.2.1 顶部安全边距
+    const uiBarBottom   = 70;    // 右上角「重置/设置」按钮行底边 + 余量
+    const topBase = Math.max(topSafeMargin, uiBarBottom);
+
+    const cellMin = 56, cellMax = 120;
+
+    // 17.2.2 本关是否含 WASD 教学与文字提示
+    this.hasWASDHint = (this.current_level_index === 0);
+    this.promptText  = this.hasWASDHint ? '把蓝色木箱推到右上角（第3行·第3列）' : null;
+    const wasdHeight   = this.hasWASDHint ? 80 : 0;   // WASD 倒 T 按键块高度
+    const promptHeight = this.promptText ? 18 : 0;    // 单行 15px 文字的估算高度
+
+    /* 二分求最大可容纳的 cellSize。
+     * 注意：cell 越大 → promptGap、hintPad、棋盘都越大 → 所需总高单调递增，
+     * 因此 fits(c) 关于 c 单调，可安全二分。 */
+    const solveCell = (gapK, reservePrompt) => {
+      const fits = (c) => {
+        const pad = k * c;
+        const gap = c * gapK;
+        const promptY = topBase + wasdHeight + gap + (this.hasWASDHint ? gap : 0);
+        // 只有真正存在文字提示时才为它预留顶部空间，否则仅预留 WASD 块
+        const top = (reservePrompt && this.promptText)
+          ? (promptY + promptHeight + gap)                          // 文字提示参与顶部预留
+          : (topBase + wasdHeight + (this.hasWASDHint ? gap : 0));  // 仅预留 WASD
+        const totalH = top + 2*pad + n*c;
+        const totalW = 2*pad + n*c;
+        return (totalH <= H - bottomMargin) && (totalW <= W - 2*sideMargin);
+      };
+      if (fits(cellMax)) return cellMax;
+      let lo = cellMin, hi = cellMax, best = 0;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (fits(mid)) { best = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      return best; // 0 表示连 cellMin 都放不下
+    };
+
+    /* 降级级联：① 正常间隙 ② 间隙收窄至 0.3 ③ 文字提示移出顶部预留 */
+    let cell = solveCell(0.6, true);
+    let gapK = 0.6, reservePrompt = true;
+    if (cell === 0) { cell = solveCell(0.3, true);  gapK = 0.3; }
+    if (cell === 0) { cell = solveCell(0.3, false); gapK = 0.3; reservePrompt = false; }
+    if (cell === 0) { cell = cellMin; gapK = 0.3; reservePrompt = false; }
+
+    this.cellSize = cell;
+
+    const pad = Math.round(k * cell);        // hintLeft/Right/Top/Bottom 四边等值
+    const gap = Math.round(cell * gapK);     // promptGap
+    this.hintPad = pad;
+    this.promptGap = gap;
+    this.wasdTopY  = topBase;
+    this.wasdHeight = wasdHeight;
+
+    const promptY = topBase + wasdHeight + gap + (this.hasWASDHint ? gap : 0);
+    const reservedTop = (reservePrompt && this.promptText)
+      ? (promptY + promptHeight + gap)
+      : (topBase + wasdHeight + (this.hasWASDHint ? gap : 0));
+
+    const totalW = 2*pad + n*cell;
+    const totalH = 2*pad + n*cell;
+    const centeredTop = Math.round((H - totalH) / 2);
+
+    /* 顶部层级优先，其次居中；若窗口极小导致底部溢出，则牺牲顶部预留保证棋盘完整可见 */
+    let contentTop = Math.max(reservedTop, centeredTop);
+    const maxTop = H - bottomMargin - totalH;   // 保证底部不出屏所允许的最大顶边
+    if (contentTop > maxTop) contentTop = Math.max(0, maxTop);
+
+    this.offsetX = Math.round((W - totalW) / 2) + pad;
+    this.offsetY = contentTop + pad;
+
+    // 顶部预留是否被完整满足（极小窗口下可能被底部防溢出钳制牺牲）
+    const topRespected = (reservedTop <= contentTop + 0.5);
+    this.showWASDHint = this.hasWASDHint && topRespected;
+
+    // 文字提示最终 Y（origin 0.5,0 → 该值为顶边）
+    if (!this.promptText) {
+      this.promptY = null;
+    } else if (reservePrompt && topRespected) {
+      this.promptY = promptY;
+    } else {
+      // 降级：移到棋盘下方，并保证不超出屏幕
+      const below = this.offsetY + n*cell + pad + gap;
+      this.promptY = Math.min(below, Math.max(0, H - promptHeight - 12));
+    }
+  }
+
+  /* 数据坐标 -> 屏幕格子左上角 */
+  cellLeft(x){ return this.offsetX + (x - 1) * this.cellSize; }
+  cellTop(y){  return this.offsetY + (this.n - y) * this.cellSize; }
+  cellCenterX(x){ return this.cellLeft(x) + this.cellSize/2; }
+  cellCenterY(y){ return this.cellTop(y)  + this.cellSize/2; }
+
+  /* ---------- 清空并重绘世界 ---------- */
+  clearWorld(){
+    this.tweens.killAll();   // 含对勾显隐 Tween，避免跨关卡/缩放残留（15.6.3）
+    this.worldLayer.removeAll(true);
+    this.boxData.forEach(b => b.view = null);
+    this.player.img = null;
+  }
+
+  rebuildWorld(){
+    const n = this.n, cell = this.cellSize, ox = this.offsetX, oy = this.offsetY;
+
+    // 单元格填充 (depth cell=1)
+    const gCell = this.add.graphics().setDepth(DEPTH.cell);
+    gCell.fillStyle(hexNum(PALETTE.cell), 1);
+    for (let x = 1; x <= n; x++)
+      for (let y = 1; y <= n; y++)
+        gCell.fillRect(this.cellLeft(x), this.cellTop(y), cell, cell);
+
+    // 外框霓虹线 (depth edge=3)
+    const gEdge = this.add.graphics().setDepth(DEPTH.edge);
+    gEdge.lineStyle(GEOM.boardEdgeWidth, hexNum(PALETTE.boardEdge), 1);
+    gEdge.strokeRect(ox, oy, n*cell, n*cell);
+
+    this.worldLayer.add([gCell, gEdge]);
+
+    // 箱子视图
+    for (const b of this.boxData) this.createBoxView(b);
+
+    // 玩家
+    const pimg = this.add.image(this.cellCenterX(this.player.x), this.cellCenterY(this.player.y), 'player')
+      .setDisplaySize(cell*0.8, cell*0.8).setDepth(DEPTH.actor);
+    this.player.img = pimg;
+    this.worldLayer.add(pimg);
+
+    // 网格线 (depth grid=10，永远在最上层)
+    const gGrid = this.add.graphics().setDepth(DEPTH.grid);
+    gGrid.lineStyle(GEOM.gridLineWidth, hexNum(PALETTE.gridLine), 1);
+    for (let i = 0; i <= n; i++) {
+      const gx = ox + i*cell;
+      gGrid.lineBetween(gx, oy, gx, oy + n*cell);
+      const gy = oy + i*cell;
+      gGrid.lineBetween(ox, gy, ox + n*cell, gy);
+    }
+    this.worldLayer.add(gGrid);
+
+    // 提示数字
+    this.buildHints();
+
+    // 屏幕锚定 UI（按钮、关卡标签、教学）
+    this.buildScreenUI();
+  }
+
+  /* ---------- 箱子视图 ---------- */
+  createBoxView(b){
+    const cell = this.cellSize;
+    const cx = this.cellCenterX(b.x), cy = this.cellCenterY(b.y);
+    const cont = this.add.container(cx, cy).setDepth(DEPTH.actor);
+    let glow = null;
+    if (b.type === BOXTYPE.JELLY && b.color !== COLOR.PURPLE) {
+      glow = this.add.image(0, 0, 'glow_circle')
+        .setDisplaySize(cell*1.30, cell*1.30)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setVisible(false).setAlpha(0.4);
+      cont.add(glow);
+    }
+    const img = this.add.image(0, 0, boxKey(b.color, b.type))
+      .setDisplaySize(cell*0.8, cell*0.8);
+    cont.add(img);
+    this.worldLayer.add(cont);
+    b.view = { container: cont, glow: glow, img: img, pulse: null };
+  }
+
+  destroyBoxView(b){
+    if (b.view) {
+      if (b.view.pulse) { b.view.pulse.stop(); b.view.pulse = null; }
+      b.view.container.destroy();
+      b.view = null;
+    }
+  }
+
+  /* ---------- 提示数字（第八章） ---------- */
+  classifyHint(hint){
+    if (!hint || hint.length === 0) return { type:'none' };
+    const hasRed = hint.some(p => p.color === COLOR.RED);
+    const hasBlue = hint.some(p => p.color === COLOR.BLUE);
+    if (hasRed && hasBlue) return { type:'double' };
+    return { type:'single', color: hasRed ? COLOR.RED : COLOR.BLUE };
+  }
+
+  buildHints(){
+    const n = this.n, cell = this.cellSize;
+    this.hintRows = []; this.hintCols = [];
+
+    // 行提示（左侧）
+    for (let i = 0; i < n; i++) {
+      const y = i + 1;
+      const cy = this.cellCenterY(y);
+      const numX = this.offsetX - cell*0.35;
+      const info = this.classifyHint(this.level.rowHints[i]);
+      const obj = { type: info.type, color: info.color, texts: [], checks: [], seps: [] };
+      if (info.type === 'single') {
+        // 数字：亮度恒定 alpha = 0.85（15.3.3）
+        const num = this.add.text(numX, cy, String(this.level.rowHints[i][0].num), {
+          fontFamily: FONT, fontSize: (cell*0.50)+'px', color: colorHexOf(info.color), fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        // 对勾：数字正左方，间距 cell*0.10，初始 alpha = 0（15.3.1 / 15.2）
+        const chk = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.40)+'px', color: colorHexOf(info.color)
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        chk.setPosition(numX - num.width/2 - cell*0.10 - chk.width/2, cy);
+        chk._target = 0;
+        this.worldLayer.add([num, chk]);
+        obj.numText = num; obj.chkText = chk;
+        obj.texts.push(num, chk); obj.checks.push(chk);
+      } else if (info.type === 'double') {
+        const redNum  = this.add.text(numX, cy - cell*0.26, String(this.sumColor(this.level.rowHints[i], COLOR.RED)), {
+          fontFamily: FONT, fontSize: (cell*0.35)+'px', color: PALETTE.blockRed, fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        const blueNum = this.add.text(numX, cy + cell*0.26, String(this.sumColor(this.level.rowHints[i], COLOR.BLUE)), {
+          fontFamily: FONT, fontSize: (cell*0.35)+'px', color: PALETTE.blockBlue, fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        const redChk  = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.30)+'px', color: PALETTE.blockRed
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        const blueChk = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.30)+'px', color: PALETTE.blockBlue
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        redChk.setPosition(numX - redNum.width/2 - cell*0.10 - redChk.width/2, cy - cell*0.26);
+        blueChk.setPosition(numX - blueNum.width/2 - cell*0.10 - blueChk.width/2, cy + cell*0.26);
+        redChk._target = 0; blueChk._target = 0;
+        // 数字间细横线分隔（15.4.2 新增）：宽度 = 数字渲染宽度，1px，位于两数字垂直中点
+        const sepW = Math.max(redNum.width, blueNum.width);
+        const sep = this.add.rectangle(numX, cy, sepW, 1, hexNum(PALETTE.gridLine), 1).setDepth(DEPTH.ui);
+        this.worldLayer.add([redNum, blueNum, redChk, blueChk, sep]);
+        obj.redNum = redNum; obj.blueNum = blueNum; obj.redChk = redChk; obj.blueChk = blueChk; obj.sep = sep;
+        obj.texts.push(redNum, blueNum, redChk, blueChk);
+        obj.checks.push(redChk, blueChk); obj.seps.push(sep);
+      }
+      this.hintRows.push(obj);
+    }
+
+    // 列提示（上方）
+    for (let i = 0; i < n; i++) {
+      const x = i + 1;
+      const cx = this.cellCenterX(x);
+      const numY = this.offsetY - cell*0.35;
+      const info = this.classifyHint(this.level.colHints[i]);
+      const obj = { type: info.type, color: info.color, texts: [], checks: [], seps: [] };
+      if (info.type === 'single') {
+        // 数字：亮度恒定 alpha = 0.85（15.3.3）
+        const num = this.add.text(cx, numY, String(this.level.colHints[i][0].num), {
+          fontFamily: FONT, fontSize: (cell*0.50)+'px', color: colorHexOf(info.color), fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        // 对勾：数字正上方，间距 cell*0.08，初始 alpha = 0（15.3.1 / 15.2）
+        const chk = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.40)+'px', color: colorHexOf(info.color)
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        chk.setPosition(cx, numY - num.height/2 - cell*0.08 - chk.height/2);
+        chk._target = 0;
+        this.worldLayer.add([num, chk]);
+        obj.numText = num; obj.chkText = chk;
+        obj.texts.push(num, chk); obj.checks.push(chk);
+      } else if (info.type === 'double') {
+        const blueNum = this.add.text(cx - cell*0.22, numY, String(this.sumColor(this.level.colHints[i], COLOR.BLUE)), {
+          fontFamily: FONT, fontSize: (cell*0.35)+'px', color: PALETTE.blockBlue, fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        const redNum  = this.add.text(cx + cell*0.22, numY, String(this.sumColor(this.level.colHints[i], COLOR.RED)), {
+          fontFamily: FONT, fontSize: (cell*0.35)+'px', color: PALETTE.blockRed, fontStyle:'bold'
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0.85);
+        const blueChk = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.30)+'px', color: PALETTE.blockBlue
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        const redChk  = this.add.text(0, 0, '✓', {
+          fontFamily: FONT, fontSize: (cell*0.30)+'px', color: PALETTE.blockRed
+        }).setOrigin(0.5).setDepth(DEPTH.ui).setAlpha(0);
+        // 对勾在对应数字正上方，间距 cell*0.08
+        blueChk.setPosition(cx - cell*0.22, numY - blueNum.height/2 - cell*0.08 - blueChk.height/2);
+        redChk.setPosition(cx + cell*0.22, numY - redNum.height/2 - cell*0.08 - redChk.height/2);
+        blueChk._target = 0; redChk._target = 0;
+        // 中间分隔竖线（保持 8.3.1）：gridLine 色，1px，高度与数字一致
+        const sep = this.add.graphics().setDepth(DEPTH.ui);
+        const hSep = Math.max(blueNum.height, redNum.height) / 2;
+        sep.lineStyle(1, hexNum(PALETTE.gridLine), 1);
+        sep.lineBetween(cx, numY - hSep, cx, numY + hSep);
+        this.worldLayer.add([blueNum, redNum, blueChk, redChk, sep]);
+        obj.blueNum = blueNum; obj.redNum = redNum; obj.blueChk = blueChk; obj.redChk = redChk;
+        obj.sep = sep;
+        obj.texts.push(blueNum, redNum, blueChk, redChk);
+        obj.checks.push(blueChk, redChk); obj.seps.push(sep);
+      }
+      this.hintCols.push(obj);
+    }
+  }
+
+  sumColor(hint, color){
+    return hint.filter(p => p.color === color).reduce((s,p) => s + p.num, 0);
+  }
+
+  expectedFrom(hint){
+    const e = { red:0, blue:0 };
+    for (const p of hint) { if (p.color === COLOR.RED) e.red += p.num; else if (p.color === COLOR.BLUE) e.blue += p.num; }
+    return e;
+  }
+
+  /* 4.2 数织验证（按颜色拆分返回） */
+  countRow(y){
+    const c = { red:0, blue:0 };
+    for (let x = 1; x <= this.n; x++) {
+      const b = this.getBoxAt(x, y);
+      if (b) { const e = EXPAND[b.color]; c.red += e.red; c.blue += e.blue; }
+    }
+    return c;
+  }
+  countCol(x){
+    const c = { red:0, blue:0 };
+    for (let y = 1; y <= this.n; y++) {
+      const b = this.getBoxAt(x, y);
+      if (b) { const e = EXPAND[b.color]; c.red += e.red; c.blue += e.blue; }
+    }
+    return c;
+  }
+  rowSatisfied(y){
+    const exp = this.expectedFrom(this.level.rowHints[y-1] || []);
+    const act = this.countRow(y);
+    return { red: act.red === exp.red, blue: act.blue === exp.blue };
+  }
+  colSatisfied(x){
+    const exp = this.expectedFrom(this.level.colHints[x-1] || []);
+    const act = this.countCol(x);
+    return { red: act.red === exp.red, blue: act.blue === exp.blue };
+  }
+  verifyAll(){
+    for (let y = 1; y <= this.n; y++) { const s = this.rowSatisfied(y); if (!s.red || !s.blue) return false; }
+    for (let x = 1; x <= this.n; x++) { const s = this.colSatisfied(x); if (!s.red || !s.blue) return false; }
+    return true;
+  }
+
+  /* 更新提示视觉 */
+  updateHints(){
+    for (let i = 0; i < this.n; i++) {
+      this.applyHint(this.hintRows[i], this.rowSatisfied(i+1));
+      this.applyHint(this.hintCols[i], this.colSatisfied(i+1));
+    }
+  }
+  /* 提示视觉更新：数字亮度恒定不变，仅对勾按满足状态淡入/淡出（第十五章） */
+  applyHint(obj, sat){
+    if (!obj || obj.type === 'none') return;
+    if (obj.type === 'single') {
+      this.animateCheck(obj.chkText, sat[obj.color]);
+    } else { // double：红蓝独立控制
+      this.animateCheck(obj.redChk,  sat.red);
+      this.animateCheck(obj.blueChk, sat.blue);
+    }
+  }
+  /* 对勾显隐（15.2）：120ms 淡入 Sine.Out / 淡出 Sine.In，初始 alpha = 0 */
+  animateCheck(chk, ok){
+    if (!chk) return;
+    const target = ok ? 1.0 : 0;
+    if (chk._target === target) return;   // 已处于目标状态或正在前往
+    chk._target = target;
+    if (chk._tween) { chk._tween.stop(); chk._tween = null; }
+    chk._tween = this.tweens.add({
+      targets: chk, alpha: target, duration: 120,
+      ease: ok ? 'Sine.Out' : 'Sine.In',
+      onComplete: () => { chk._tween = null; }
+    });
+  }
+
+  /* ---------- 可融合发光提示（4.4） ---------- */
+  getBoxAt(x, y){
+    for (const b of this.boxData) if (b.x === x && b.y === y) return b;
+    return null;
+  }
+  updateFuseGlow(){
+    for (const b of this.boxData) {
+      if (b.view && b.view.glow) {
+        b.view.glow.setVisible(false);
+        if (b.view.pulse) { b.view.pulse.stop(); b.view.pulse = null; }
+      }
+    }
+    const dirs = [[0,1],[0,-1],[-1,0],[1,0]];
+    for (const [dx,dy] of dirs) {
+      const tx = this.player.x + dx, ty = this.player.y + dy;
+      const fx = tx + dx, fy = ty + dy;
+      const A = this.getBoxAt(tx, ty), B = this.getBoxAt(fx, fy);
+      if (A && B && A.type === BOXTYPE.JELLY && B.type === BOXTYPE.JELLY
+          && A.color !== COLOR.PURPLE && B.color !== COLOR.PURPLE
+          && isOpposite(A.color, B.color)) {
+        this.showGlow(A); this.showGlow(B);
+      }
+    }
+  }
+  showGlow(b){
+    if (!b.view || !b.view.glow) return;
+    b.view.glow.setVisible(true).setAlpha(0.28);
+    b.view.pulse = this.tweens.add({
+      targets: b.view.glow, alpha: { from: 0.28, to: 0.55 },
+      duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.InOut'
+    });
+  }
+
+  /* ---------- 移动与动画（4.1 / 4.3） ---------- */
+  tryMove(dx, dy){
+    if (this.isMoving || this.settingsOpen || this.victoryOpen) return;
+    const px = this.player.x, py = this.player.y;
+    const tx = px + dx, ty = py + dy;
+    if (tx < 1 || tx > this.n || ty < 1 || ty > this.n) return; // 越界，忽略（is_moving 保持 false）
+
+    const boxA = this.getBoxAt(tx, ty);
+    if (boxA) {
+      const fx = tx + dx, fy = ty + dy;
+      if (fx < 1 || fx > this.n || fy < 1 || fy > this.n) return; // 前方越界，忽略
+      const boxB = this.getBoxAt(fx, fy);
+      if (boxB) {
+        // 融合判定
+        if (boxA.type === BOXTYPE.JELLY && boxB.type === BOXTYPE.JELLY
+            && isOpposite(boxA.color, boxB.color)) {
+          this.isMoving = true;
+          // 数据：移除 A、B，新增紫色于前方格
+          this.removeBoxData(boxA); this.removeBoxData(boxB);
+          const nb = this.addBoxData(fx, fy, COLOR.PURPLE, BOXTYPE.JELLY);
+          this.player.x = tx; this.player.y = ty;
+          // 玩家移动
+          this.tweens.add({
+            targets: this.player.img, x: this.cellCenterX(tx), y: this.cellCenterY(ty),
+            duration: 150, ease: 'Sine.InOut',
+            onComplete: () => {
+              // 原两箱淡出缩小
+              const va = boxA.view, vb = boxB.view;
+              const fadeOut = (v) => {
+                if (!v) return;
+                if (v.pulse) { v.pulse.stop(); v.pulse = null; }
+                this.tweens.add({
+                  targets: v.container, scale: 0, alpha: 0, duration: 150, ease: 'Sine.InOut',
+                  onComplete: () => { v.container.destroy(); }
+                });
+              };
+              fadeOut(va);
+              fadeOut(vb);
+              // 创建紫箱并弹出
+              this.time.delayedCall(150, () => {
+                this.createBoxView(nb);
+                nb.view.container.setScale(0);
+                this.tweens.add({
+                  targets: nb.view.container, scale: 1, duration: 180, ease: 'Back.easeOut',
+                  onComplete: () => { Audio.play('merge'); this.afterMove(); }
+                });
+              });
+            }
+          });
+          return;
+        } else {
+          return; // 不能融合（含木箱），忽略
+        }
+      } else {
+        // 推动
+        this.isMoving = true;
+        boxA.x = fx; boxA.y = fy;
+        this.player.x = tx; this.player.y = ty;
+        this.tweens.add({ targets: boxA.view.container, x: this.cellCenterX(fx), y: this.cellCenterY(fy), duration: 150, ease: 'Sine.InOut' });
+        this.tweens.add({
+          targets: this.player.img, x: this.cellCenterX(tx), y: this.cellCenterY(ty), duration: 150, ease: 'Sine.InOut',
+          onComplete: () => { Audio.play('push'); this.afterMove(); }
+        });
+        return;
+      }
+    } else {
+      // 空地移动
+      this.isMoving = true;
+      this.player.x = tx; this.player.y = ty;
+      this.tweens.add({
+        targets: this.player.img, x: this.cellCenterX(tx), y: this.cellCenterY(ty), duration: 150, ease: 'Sine.InOut',
+        onComplete: () => { Audio.play('move'); this.afterMove(); }
+      });
+      return;
+    }
+  }
+
+  addBoxData(x, y, color, type){
+    const b = { x, y, color, type, view:null };
+    this.boxData.push(b);
+    return b;
+  }
+  removeBoxData(b){
+    const i = this.boxData.indexOf(b);
+    if (i >= 0) this.boxData.splice(i, 1);
+    // 注意：视图由动画结束后销毁，这里不立即 destroy，以保留融合淡出动画
+  }
+
+  afterMove(){
+    this.updateFuseGlow();
+    this.updateHints();
+    this.isMoving = false;
+    if (this.verifyAll()) this.showVictory();
+  }
+
+  /* ---------- 屏幕锚定 UI（按钮 / 关卡标签 / 教学） ---------- */
+  buildScreenUI(){
+    // 清空旧 UI
+    this.uiLayer.removeAll(true);
+
+    const W = this.scale.width, H = this.scale.height;
+    const cell = this.cellSize;
+
+    // 关卡标签（左上）
+    const label = this.add.text(20, 20, '第 ' + (this.current_level_index+1) + ' 关', {
+      fontFamily: FONT, fontSize: '22px', color: PALETTE.player, fontStyle:'bold'
+    }).setOrigin(0, 0).setDepth(DEPTH.ui);
+
+    // 右上角：重置 + 设置（9.4）
+    const btnW = 96, btnH = 40, fontSize = 17;
+    const gap = cell * 0.3;
+    const rightPad = 20;
+    const y = 30;
+    const resetBtn = makeButton(this, W - rightPad - btnW/2, y, btnW, btnH, '重置', () => this.resetLevel(), { fontSize });
+    const setBtn   = makeButton(this, W - rightPad - btnW - gap - btnW/2, y, btnW, btnH, '设置', () => openSettings(this, true), { fontSize });
+
+    this.uiLayer.add([label, resetBtn, setBtn]);
+    this._resetBtn = resetBtn; this._setBtn = setBtn;
+
+    // 第十七章：WASD 教学块与关卡文字提示，位置全部由 computeLayout() 计算
+    if (this.showWASDHint) this.buildTeaching(W);
+    if (this.promptText && this.promptY != null) this.buildPrompt(W);
+  }
+
+  /* 关卡文字提示（17.2.3）：setOrigin(0.5, 0)，水平居中于屏幕，Y 由布局动态给出 */
+  buildPrompt(W){
+    const tip = this.add.text(W/2, this.promptY, this.promptText, {
+      fontFamily: FONT, fontSize: '15px', color: PALETTE.blockBlue
+    }).setOrigin(0.5, 0).setDepth(DEPTH.ui);
+    this.uiLayer.add(tip);
+  }
+
+  /* WASD 倒 T 按键示意：顶边 = wasdTopY，块高 = 2*s = wasdHeight */
+  buildTeaching(W){
+    const s = 40;                       // 单键尺寸；2*s = 80 == 17.2 规定的 wasdHeight
+    const cx = W/2;
+    const topY = this.wasdTopY;         // 由布局给出，不再写死 baseY = 84
+    const mk = (ox, oy, ch, arr) => {
+      const c = this.add.container(cx + ox, topY + s/2 + oy).setDepth(DEPTH.ui);
+      const bg = this.add.rectangle(0, 0, s, s, hexNum(PANEL_FILL), 0.0).setStrokeStyle(2, 0xffffff, 0.9);
+      const t = this.add.text(0, 0, ch, { fontFamily: FONT, fontSize: '22px', color: UI_TEXT, fontStyle:'bold' }).setOrigin(0.5);
+      const a = this.add.text(0, s*0.32, arr, { fontFamily: FONT, fontSize: '13px', color: UI_TEXT }).setOrigin(0.5);
+      c.add([bg, t, a]);
+      this.uiLayer.add(c);
+    };
+    mk(0,  0, 'W', '↑');
+    mk(-s, s, 'A', '←');
+    mk(0,  s, 'S', '↓');
+    mk(s,  s, 'D', '→');
+  }
+
+  /* ---------- 胜利覆盖层（5.4） ---------- */
+  showVictory(){
+    this.victoryOpen = true;
+    const W = this.scale.width, H = this.scale.height;
+    const objs = [];
+    const dim = this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.6).setDepth(DEPTH.overlay);
+    const panel = this.add.rectangle(W/2, H/2, 360, 260, hexNum(PANEL_FILL), 0.98)
+      .setStrokeStyle(2, hexNum(PALETTE.boardEdge), 1).setDepth(DEPTH.overlay);
+    const title = this.add.text(W/2, H/2 - 86, '胜利', {
+      fontFamily: FONT, fontSize: '46px', color: PALETTE.player, fontStyle:'bold'
+    }).setOrigin(0.5).setDepth(DEPTH.overlay);
+    objs.push(dim, panel, title);
+
+    const isLast = this.current_level_index >= LEVELS.length - 1;
+    const bw = 240, bh = 46, gap = 14;
+    let by = H/2 - 18;
+
+    if (!isLast) {
+      const next = makeButton(this, W/2, by, bw, bh, '下一关', () => {
+        this.closeVictory();
+        const ni = this.current_level_index + 1;
+        sessionProgress = Math.max(sessionProgress, ni);
+        this.loadLevel(ni);
+      }, { depth: DEPTH.overlay, fontSize: 22, bold: true });
+      objs.push(next); by += bh + gap;
+    } else {
+      const back = makeButton(this, W/2, by, bw, bh, '返回主菜单', () => {
+        this.closeVictory();
+        this.scene.start('MenuScene');
+      }, { depth: DEPTH.overlay, fontSize: 22 });
+      objs.push(back); by += bh + gap;
+    }
+
+    const replay = makeButton(this, W/2, by, bw, bh, '重新开始', () => {
+      this.closeVictory();
+      this.loadLevel(this.current_level_index);
+    }, { depth: DEPTH.overlay });
+    objs.push(replay); by += bh + gap;
+
+    if (!isLast) {
+      const back2 = makeButton(this, W/2, by, bw, bh, '返回主菜单', () => {
+        this.closeVictory();
+        this.scene.start('MenuScene');
+      }, { depth: DEPTH.overlay });
+      objs.push(back2); by += bh + gap;
+    }
+
+    this._victoryObjs = objs;
+  }
+  closeVictory(){
+    if (this._victoryObjs) { this._victoryObjs.forEach(o => o.destroy()); this._victoryObjs = null; }
+    this.victoryOpen = false;
+  }
+
+  /* ---------- 缩放 ---------- */
+  onResize(){
+    if (this.isMoving) return; // 移动中不做布局重建，避免跳动
+    this.computeLayout();
+    this.clearWorld();
+    this.rebuildWorld();
+    this.updateFuseGlow();
+    this.updateHints();
+    this.closeVictory();
+  }
+}
+
+/* =========================================================================
+ * 设置面板（覆盖层，第二章 2.2 / 5.3）
+ * ========================================================================= */
+function openSettings(scene, fromGame){
+  if (scene.settingsOpen || scene.victoryOpen) return;
+  scene.settingsOpen = true;
+  const W = scene.scale.width, H = scene.scale.height;
+  const objs = [];
+
+  const dim = scene.add.rectangle(W/2, H/2, W, H, 0x000000, 0.62).setDepth(DEPTH.overlay).setInteractive();
+
+  /* ===== 第十六章：设置面板水平分区布局（禁止标签与控件共用同一基准） ===== */
+  const pw = 400;                       // 面板宽度
+  const ph = fromGame ? 400 : 300;      // 面板高度（游戏中按钮更多）
+  const panelX = W/2 - pw/2;            // 面板左边界
+  const panelY = H/2 - ph/2;            // 面板上边界
+
+  const paddingX = 40;   // 面板左右内边距
+  const labelW   = 100;  // 标签区固定宽度
+  const gapX     = 20;   // 标签与控件间距
+  const valueW   = 50;   // 数值文字区固定宽度
+
+  const contentLeft   = panelX + paddingX;
+  const contentRight  = panelX + pw - paddingX;
+  const controlStartX = contentLeft + labelW + gapX;
+  const controlEndX   = contentRight - valueW - gapX;
+  const controlWidth  = controlEndX - controlStartX;
+
+  const panel = scene.add.rectangle(W/2, H/2, pw, ph, hexNum(PANEL_FILL), 0.98)
+    .setStrokeStyle(2, hexNum(PALETTE.boardEdge), 1).setDepth(DEPTH.overlay);
+  const title = scene.add.text(W/2, panelY + 40, '设置', {
+    fontFamily: FONT, fontSize: '30px', color: PALETTE.player, fontStyle:'bold'
+  }).setOrigin(0.5).setDepth(DEPTH.overlay);
+  objs.push(dim, panel, title);
+
+  const rowSoundY  = panelY + 110;
+  const rowVolumeY = panelY + 170;
+
+  /* ---- “音效”行：左标签 + 右控件（16.3.3） ---- */
+  const soundLabel = scene.add.text(contentLeft, rowSoundY, '音效', {
+    fontFamily: FONT, fontSize: '20px', color: UI_TEXT
+  }).setOrigin(0, 0.5).setDepth(DEPTH.overlay);
+  const sBtnW = 96, sBtnH = 40;
+  const soundBtn = makeButton(scene, contentRight - sBtnW/2, rowSoundY, sBtnW, sBtnH,
+    settings.soundOn ? '开' : '关',
+    () => {
+      Audio.setSoundOn(!settings.soundOn);
+      soundBtn.txtRef.setText(settings.soundOn ? '开' : '关');
+    }, { depth: DEPTH.overlay, fontSize: 18 });
+  objs.push(soundLabel, soundBtn);
+
+  /* ---- “音量”行：左标签 + 滑块 + 右对齐数值（16.3.2） ---- */
+  const volLabel = scene.add.text(contentLeft, rowVolumeY, '音量', {
+    fontFamily: FONT, fontSize: '20px', color: UI_TEXT
+  }).setOrigin(0, 0.5).setDepth(DEPTH.overlay);
+
+  const volText = scene.add.text(contentRight, rowVolumeY, settings.volume + '', {
+    fontFamily: FONT, fontSize: '20px', color: UI_TEXT
+  }).setOrigin(1, 0.5).setDepth(DEPTH.overlay);
+
+  const trackH = 6;
+  const track = scene.add.rectangle(controlStartX, rowVolumeY, controlWidth, trackH, hexNum(PALETTE.gridLine), 1)
+    .setOrigin(0, 0.5).setDepth(DEPTH.overlay);
+  const fill = scene.add.rectangle(controlStartX, rowVolumeY, controlWidth * (settings.volume/100), trackH, hexNum(PALETTE.boardEdge), 1)
+    .setOrigin(0, 0.5).setDepth(DEPTH.overlay);
+  // 透明热区（在手柄之下），让整条轨道区域都可点击
+  const zone = scene.add.rectangle(controlStartX + controlWidth/2, rowVolumeY, controlWidth + 24, 36, 0xffffff, 0.001)
+    .setDepth(DEPTH.overlay).setInteractive();
+  const handle = scene.add.circle(controlStartX + controlWidth*(settings.volume/100), rowVolumeY, 11, hexNum(PALETTE.player), 1)
+    .setDepth(DEPTH.overlay).setInteractive({ draggable: true });
+
+  const setVol = (v) => {
+    v = Math.max(0, Math.min(100, Math.round(v)));
+    settings.volume = v;
+    Audio.setVolume(v);
+    fill.width = controlWidth * (v/100);
+    handle.x = controlStartX + controlWidth * (v/100);
+    volText.setText(v + '');
+  };
+  const setVolFromX = (x) => {
+    const ratio = (x - controlStartX) / controlWidth;
+    setVol(ratio * 100);
+  };
+  const dragHandler = (pointer, obj, dragX) => {
+    if (obj !== handle) return;
+    setVolFromX(dragX);
+  };
+  scene.input.setDraggable(handle);
+  scene.input.on('drag', dragHandler);
+  zone.on('pointerdown', (pointer) => setVolFromX(pointer.x));
+  objs.push(volLabel, volText, track, fill, zone, handle);
+
+  // 按钮区
+  const bw = 240, bh = 44, gap = 14;
+  let by = panelY + 230;
+  if (fromGame) {
+    const cont = makeButton(scene, W/2, by, bw, bh, '继续', () => closeSettings(scene), { depth: DEPTH.overlay });
+    objs.push(cont); by += bh + gap;
+    const restart = makeButton(scene, W/2, by, bw, bh, '重新开始', () => {
+      closeSettings(scene); scene.resetLevel();
+    }, { depth: DEPTH.overlay });
+    objs.push(restart); by += bh + gap;
+    const home = makeButton(scene, W/2, by, bw, bh, '返回主界面', () => {
+      closeSettings(scene); scene.closeVictory(); scene.scene.start('MenuScene');
+    }, { depth: DEPTH.overlay });
+    objs.push(home); by += bh + gap;
+  } else {
+    const back = makeButton(scene, W/2, by, bw, bh, '返回', () => closeSettings(scene), { depth: DEPTH.overlay });
+    objs.push(back); by += bh + gap;
+  }
+
+  scene._settingsObjs = objs;
+  scene._settingsDrag = dragHandler;
+}
+function closeSettings(scene){
+  if (!scene.settingsOpen) return;
+  if (scene._settingsDrag) { scene.input.off('drag', scene._settingsDrag); scene._settingsDrag = null; }
+  if (scene._settingsObjs) { scene._settingsObjs.forEach(o => o.destroy()); scene._settingsObjs = null; }
+  scene.settingsOpen = false;
+}
+
+/* =========================================================================
+ * 启动
+ * ========================================================================= */
+const config = {
+  type: Phaser.AUTO,
+  parent: 'game',
+  backgroundColor: PALETTE.bg,
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: '100%',
+    height: '100%'
+  },
+  scene: [BootScene, MenuScene, GameScene]
+};
+
+window.addEventListener('load', () => {
+  // 校验色值（控制台输出 PALETTE_OK）
+  verifyPalette();
+  const game = new Phaser.Game(config);
+  window.__GAME = game;
+});
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a413b8afe59714',t:'MTc4OTI3MDI2NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<!-- source: deepdemos.top | author: public | title: 色织矩阵 -->
+</body>
+</html>

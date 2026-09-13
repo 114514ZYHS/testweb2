@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆翻牌 - 114514ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px; margin: 30px auto; padding: 0 20px;
+        background: #f0f2f5; color: #1e1e1e;
+    }
+    h1 {
+        font-size: 28px; font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px; margin-bottom: 6px;
+    }
+    .sub { color: #57606a; font-size: 15px; margin-top: -6px; margin-bottom: 24px; }
+    .back-link {
+        display: inline-block; margin-bottom: 16px;
+        color: #0969da; text-decoration: none; font-weight: 500;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .game-wrap { display: flex; gap: 20px; flex-wrap: wrap; }
+    .board-box { background: #ffffff; border: 1px solid #d0d7de; padding: 12px; }
+    #board { display: block; cursor: pointer; }
+    .panel { flex: 1; min-width: 180px; }
+    .panel-box {
+        background: #ffffff; border: 1px solid #d0d7de;
+        padding: 14px 16px; margin-bottom: 12px;
+    }
+    .panel-label { font-size: 13px; color: #57606a; margin-bottom: 4px; }
+    .panel-value { font-size: 24px; font-weight: 600; font-family: monospace; }
+    .key-list { font-size: 14px; color: #57606a; line-height: 1.9; }
+    button {
+        font-family: inherit; font-size: 14px; font-weight: 500;
+        padding: 8px 18px; border: 1px solid #d0d7de;
+        background: #f6f8fa; color: #24292e;
+        cursor: pointer; border-radius: 0;
+        margin-right: 8px; margin-bottom: 8px;
+    }
+    button:hover { background: #e9ecef; }
+    button.primary { background: #2da44e; border-color: #2da44e; color: #fff; }
+    button.primary:hover { background: #22863a; }
+    .msg { font-size: 14px; color: #57606a; min-height: 20px; }
+    .footer {
+        margin-top: 28px; text-align: center; font-size: 14px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        .board-box, .panel-box { background: #161b22; border-color: #30363d; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .footer { border-top-color: #30363d; color: #8b949e; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← 返回游戏列表</a>
+    <h1>记忆翻牌</h1>
+    <div class="sub">翻开两张相同的牌即可消除</div>
+
+    <div class="game-wrap">
+        <div class="board-box">
+            <canvas id="board" width="420" height="420"></canvas>
+        </div>
+
+        <div class="panel">
+            <div class="panel-box">
+                <div class="panel-label">步数</div>
+                <div class="panel-value" id="moves">0</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">已配对</div>
+                <div class="panel-value" id="pairs">0 / 8</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">用时</div>
+                <div class="panel-value" id="time">0s</div>
+            </div>
+            <div class="panel-box">
+                <div class="key-list">
+                    点击卡片翻开<br>
+                    找出全部 8 对
+                </div>
+            </div>
+            <button class="primary" id="btn-new">重新开始</button>
+            <div class="msg" id="msg"></div>
+        </div>
+    </div>
+
+    <div class="footer">44444448.xyz · 114514ZYHS</div>
+
+<script>
+(function () {
+    var SIZE = 4, CELL = 100, PAD = 5;
+    var cv = document.getElementById('board');
+    var ctx = cv.getContext('2d');
+
+    var SYMBOLS = ['★','●','▲','■','◆','♠','♥','♣'];
+    var cards, first, second, lock, moves, matched, startTime, timer, done;
+
+    function init() {
+        var deck = SYMBOLS.concat(SYMBOLS);
+        for (var i = deck.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+        }
+        cards = [];
+        for (var r = 0; r < SIZE; r++) {
+            var row = [];
+            for (var c = 0; c < SIZE; c++) {
+                row.push({ sym: deck[r * SIZE + c], open: false, done: false });
+            }
+            cards.push(row);
+        }
+        first = null; second = null; lock = false;
+        moves = 0; matched = 0; done = false;
+        startTime = Date.now();
+        document.getElementById('msg').textContent = '';
+        updateHud();
+        if (timer) clearInterval(timer);
+        timer = setInterval(function () {
+            if (!done) {
+                document.getElementById('time').textContent =
+                    Math.floor((Date.now() - startTime) / 1000) + 's';
+            }
+        }, 500);
+        draw();
+    }
+
+    function updateHud() {
+        document.getElementById('moves').textContent = moves;
+        document.getElementById('pairs').textContent = matched + ' / 8';
+    }
+
+    function draw() {
+        ctx.fillStyle = '#f0f2f5';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+
+        for (var r = 0; r < SIZE; r++) {
+            for (var c = 0; c < SIZE; c++) {
+                var card = cards[r][c];
+                var x = c * CELL + PAD, y = r * CELL + PAD;
+                var w = CELL - PAD * 2, h = CELL - PAD * 2;
+
+                if (card.open || card.done) {
+                    ctx.fillStyle = card.done ? '#ddf4e4' : '#ffffff';
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeStyle = card.done ? '#2da44e' : '#d0d7de';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = card.done ? '#2da44e' : '#0969da';
+                    ctx.font = '46px serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(card.sym, x + w / 2, y + h / 2 + 2);
+                } else {
+                    ctx.fillStyle = '#0969da';
+                    ctx.fillRect(x, y, w, h);
+                    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+                    ctx.fillRect(x, y, w, 6);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '30px serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('?', x + w / 2, y + h / 2 + 2);
+                }
+            }
+        }
+    }
+
+    cv.addEventListener('click', function (e) {
+        if (lock || done) return;
+        var rect = cv.getBoundingClientRect();
+        var sx = cv.width / rect.width, sy = cv.height / rect.height;
+        var x = (e.clientX - rect.left) * sx;
+        var y = (e.clientY - rect.top) * sy;
+        var c = Math.floor(x / CELL);
+        var r = Math.floor(y / CELL);
+        if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return;
+
+        var card = cards[r][c];
+        if (card.open || card.done) return;
+
+        card.open = true;
+        draw();
+
+        if (!first) {
+            first = { r: r, c: c };
+            return;
+        }
+
+        second = { r: r, c: c };
+        moves++;
+        updateHud();
+        lock = true;
+
+        var a = cards[first.r][first.c];
+        var b = cards[second.r][second.c];
+
+        if (a.sym === b.sym) {
+            setTimeout(function () {
+                a.done = true; b.done = true;
+                a.open = false; b.open = false;
+                matched++;
+                updateHud();
+                first = null; second = null; lock = false;
+                draw();
+                if (matched === 8) {
+                    done = true;
+                    clearInterval(timer);
+                    document.getElementById('msg').textContent =
+                        '全部配对完成，用了 ' + moves + ' 步';
+                }
+            }, 420);
+        } else {
+            setTimeout(function () {
+                a.open = false; b.open = false;
+                first = null; second = null; lock = false;
+                draw();
+            }, 780);
+        }
+    });
+
+    document.getElementById('btn-new').addEventListener('click', init);
+    init();
+})();
+</script>
+</body>
+</html>

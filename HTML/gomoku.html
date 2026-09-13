@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>五子棋 - 114514ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px;
+        margin: 30px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+    }
+    h1 {
+        font-size: 28px;
+        font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px;
+        margin-bottom: 6px;
+    }
+    .sub {
+        color: #57606a;
+        font-size: 15px;
+        margin-top: -6px;
+        margin-bottom: 24px;
+    }
+    .back-link {
+        display: inline-block;
+        margin-bottom: 16px;
+        color: #0969da;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .game-wrap {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+    .board-box {
+        background: #ffffff;
+        border: 1px solid #d0d7de;
+        padding: 12px;
+    }
+    #board { display: block; cursor: pointer; }
+    .panel { flex: 1; min-width: 190px; }
+    .panel-box {
+        background: #ffffff;
+        border: 1px solid #d0d7de;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+    }
+    .panel-label {
+        font-size: 13px;
+        color: #57606a;
+        margin-bottom: 6px;
+    }
+    .turn-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    .stone-dot {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid #666;
+    }
+    .stone-dot.black { background: #1a1a1a; }
+    .stone-dot.white { background: #fff; }
+    .key-list {
+        font-size: 14px;
+        color: #57606a;
+        line-height: 1.9;
+    }
+    button {
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        padding: 8px 18px;
+        border: 1px solid #d0d7de;
+        background: #f6f8fa;
+        color: #24292e;
+        cursor: pointer;
+        border-radius: 0;
+        margin-right: 8px;
+        margin-bottom: 8px;
+    }
+    button:hover { background: #e9ecef; }
+    button.primary {
+        background: #2da44e;
+        border-color: #2da44e;
+        color: #fff;
+    }
+    button.primary:hover { background: #22863a; }
+    .msg {
+        font-size: 14px;
+        color: #57606a;
+        min-height: 20px;
+        margin-top: 4px;
+    }
+    .footer {
+        margin-top: 28px;
+        text-align: center;
+        font-size: 14px;
+        color: #8b949e;
+        border-top: 1px solid #d0d7de;
+        padding-top: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        .board-box, .panel-box { background: #161b22; border-color: #30363d; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .stone-dot.white { background: #ddd; }
+        .footer { border-top-color: #30363d; color: #8b949e; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← 返回游戏列表</a>
+    <h1>五子棋</h1>
+    <div class="sub">15×15 棋盘 · 人机对战</div>
+
+    <div class="game-wrap">
+        <div class="board-box">
+            <canvas id="board" width="480" height="480"></canvas>
+        </div>
+
+        <div class="panel">
+            <div class="panel-box">
+                <div class="panel-label">当前回合</div>
+                <div class="turn-row">
+                    <span class="stone-dot black" id="turn-dot"></span>
+                    <span id="turn-text">黑棋（你）</span>
+                </div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">手数</div>
+                <div style="font-size:22px;font-weight:600;font-family:monospace;" id="move-count">0</div>
+            </div>
+            <div class="panel-box">
+                <div class="key-list">
+                    点击棋盘落子<br>
+                    你执黑先行<br>
+                    电脑会自动应对
+                </div>
+            </div>
+            <button class="primary" id="btn-restart">重新开始</button>
+            <button id="btn-undo">悔棋</button>
+            <button id="btn-mode">切换先手</button>
+            <div class="msg" id="msg"></div>
+        </div>
+    </div>
+
+    <div class="footer">44444448.xyz · 114514ZYHS</div>
+
+<script>
+(function () {
+    var N = 15;
+    var CELL = 480 / N;
+    var cv = document.getElementById('board');
+    var ctx = cv.getContext('2d');
+
+    var board = [];
+    var history = [];
+    var humanColor = 1;
+    var aiColor = 2;
+    var gameOver = false;
+    var busy = false;
+
+    function initBoard() {
+        board = [];
+        for (var i = 0; i < N; i++) {
+            var row = [];
+            for (var j = 0; j < N; j++) row.push(0);
+            board.push(row);
+        }
+    }
+
+    function drawBoard() {
+        ctx.fillStyle = '#e8b96a';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+
+        ctx.strokeStyle = '#8b6914';
+        ctx.lineWidth = 1;
+        for (var i = 0; i < N; i++) {
+            var p = CELL / 2 + i * CELL;
+            ctx.beginPath();
+            ctx.moveTo(CELL / 2, p);
+            ctx.lineTo(cv.width - CELL / 2, p);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(p, CELL / 2);
+            ctx.lineTo(p, cv.height - CELL / 2);
+            ctx.stroke();
+        }
+
+        var stars = [[3,3],[11,3],[3,11],[11,11],[7,7]];
+        ctx.fillStyle = '#5c4508';
+        for (var s = 0; s < stars.length; s++) {
+            var cx = CELL / 2 + stars[s][0] * CELL;
+            var cy = CELL / 2 + stars[s][1] * CELL;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawStone(col, row, color) {
+        var cx = CELL / 2 + col * CELL;
+        var cy = CELL / 2 + row * CELL;
+        var r = CELL * 0.42;
+        var g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
+        if (color === 1) {
+            g.addColorStop(0, '#666');
+            g.addColorStop(1, '#000');
+        } else {
+            g.addColorStop(0, '#fff');
+            g.addColorStop(1, '#bbb');
+        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.strokeStyle = color === 1 ? '#000' : '#999';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    function draw() {
+        drawBoard();
+        for (var r = 0; r < N; r++) {
+            for (var c = 0; c < N; c++) {
+                if (board[r][c]) drawStone(c, r, board[r][c]);
+            }
+        }
+        if (history.length > 0) {
+            var last = history[history.length - 1];
+            var cx = CELL / 2 + last.col * CELL;
+            var cy = CELL / 2 + last.row * CELL;
+            ctx.strokeStyle = last.color === 1 ? '#ff4444' : '#ff4444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, CELL * 0.16, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+
+    function checkWin(row, col, color) {
+        var dirs = [[0,1],[1,0],[1,1],[1,-1]];
+        for (var d = 0; d < dirs.length; d++) {
+            var dr = dirs[d][0], dc = dirs[d][1];
+            var count = 1;
+            for (var k = 1; k < 5; k++) {
+                var rr = row + dr * k, cc = col + dc * k;
+                if (rr < 0 || rr >= N || cc < 0 || cc >= N || board[rr][cc] !== color) break;
+                count++;
+            }
+            for (var k2 = 1; k2 < 5; k2++) {
+                var rr2 = row - dr * k2, cc2 = col - dc * k2;
+                if (rr2 < 0 || rr2 >= N || cc2 < 0 || cc2 >= N || board[rr2][cc2] !== color) break;
+                count++;
+            }
+            if (count >= 5) return true;
+        }
+        return false;
+    }
+
+    function scorePoint(row, col, color) {
+        var dirs = [[0,1],[1,0],[1,1],[1,-1]];
+        var total = 0;
+        for (var d = 0; d < dirs.length; d++) {
+            var dr = dirs[d][0], dc = dirs[d][1];
+            var count = 1;
+            var blockA = false, blockB = false;
+            for (var k = 1; k < 5; k++) {
+                var rr = row + dr * k, cc = col + dc * k;
+                if (rr < 0 || rr >= N || cc < 0 || cc >= N) { blockA = true; break; }
+                if (board[rr][cc] === 0) break;
+                if (board[rr][cc] !== color) { blockA = true; break; }
+                count++;
+            }
+            for (var k2 = 1; k2 < 5; k2++) {
+                var rr2 = row - dr * k2, cc2 = col - dc * k2;
+                if (rr2 < 0 || rr2 >= N || cc2 < 0 || cc2 >= N) { blockB = true; break; }
+                if (board[rr2][cc2] === 0) break;
+                if (board[rr2][cc2] !== color) { blockB = true; break; }
+                count++;
+            }
+            if (count >= 5) total += 1000000;
+            else if (count === 4) total += (blockA && blockB) ? 100 : 10000;
+            else if (count === 3) total += (blockA && blockB) ? 10 : 1000;
+            else if (count === 2) total += (blockA && blockB) ? 1 : 100;
+            else total += 10;
+        }
+        return total;
+    }
+
+    function findBest() {
+        var best = -1, bestScore = -1, bestRow = 7, bestCol = 7;
+        var hasStone = false;
+        for (var r = 0; r < N; r++) {
+            for (var c = 0; c < N; c++) {
+                if (board[r][c]) { hasStone = true; break; }
+            }
+            if (hasStone) break;
+        }
+        if (!hasStone) return { row: 7, col: 7 };
+
+        for (var r2 = 0; r2 < N; r2++) {
+            for (var c2 = 0; c2 < N; c2++) {
+                if (board[r2][c2] !== 0) continue;
+                if (!hasNeighbor(r2, c2, 2)) continue;
+                var attack = scorePoint(r2, c2, aiColor);
+                var defend = scorePoint(r2, c2, humanColor);
+                var sc = attack + defend * 0.9 + Math.random() * 5;
+                if (sc > bestScore) { bestScore = sc; bestRow = r2; bestCol = c2; }
+            }
+        }
+        if (bestScore < 0) {
+            for (var r3 = 0; r3 < N; r3++) {
+                for (var c3 = 0; c3 < N; c3++) {
+                    if (board[r3][c3] === 0) return { row: r3, col: c3 };
+                }
+            }
+        }
+        return { row: bestRow, col: bestCol };
+    }
+
+    function hasNeighbor(row, col, dist) {
+        for (var r = Math.max(0, row - dist); r <= Math.min(N - 1, row + dist); r++) {
+            for (var c = Math.max(0, col - dist); c <= Math.min(N - 1, col + dist); c++) {
+                if (board[r][c]) return true;
+            }
+        }
+        return false;
+    }
+
+    function updatePanel() {
+        document.getElementById('move-count').textContent = history.length;
+        var dot = document.getElementById('turn-dot');
+        var txt = document.getElementById('turn-text');
+        if (gameOver) {
+            txt.textContent = '已结束';
+        } else {
+            var isHuman = history.length % 2 === 0;
+            var colorName = (isHuman ? (humanColor === 1 ? '黑棋' : '白棋') : (aiColor === 1 ? '黑棋' : '白棋'));
+            var who = isHuman ? '你' : '电脑';
+            txt.textContent = colorName + '（' + who + '）';
+            dot.className = 'stone-dot ' + ((history.length % 2 === 0 ? humanColor : aiColor) === 1 ? 'black' : 'white');
+        }
+    }
+
+    function place(row, col, color) {
+        board[row][col] = color;
+        history.push({ row: row, col: col, color: color });
+        draw();
+        updatePanel();
+        if (checkWin(row, col, color)) {
+            gameOver = true;
+            var who = color === humanColor ? '你赢了！' : '电脑赢了。';
+            document.getElementById('msg').textContent = who;
+            updatePanel();
+            return true;
+        }
+        if (history.length === N * N) {
+            gameOver = true;
+            document.getElementById('msg').textContent = '棋盘满了，平局。';
+            updatePanel();
+            return true;
+        }
+        return false;
+    }
+
+    function aiMove() {
+        if (gameOver) return;
+        busy = true;
+        setTimeout(function () {
+            var m = findBest();
+            place(m.row, m.col, aiColor);
+            busy = false;
+        }, 120);
+    }
+
+    cv.addEventListener('click', function (e) {
+        if (gameOver || busy) return;
+        var rect = cv.getBoundingClientRect();
+        var scaleX = cv.width / rect.width;
+        var scaleY = cv.height / rect.height;
+        var x = (e.clientX - rect.left) * scaleX;
+        var y = (e.clientY - rect.top) * scaleY;
+        var col = Math.round(x / CELL - 0.5);
+        var row = Math.round(y / CELL - 0.5);
+        if (row < 0 || row >= N || col < 0 || col >= N) return;
+        if (board[row][col] !== 0) return;
+        var isHumanTurn = history.length % 2 === 0;
+        if (!isHumanTurn) return;
+        document.getElementById('msg').textContent = '';
+        if (place(row, col, humanColor)) return;
+        aiMove();
+    });
+
+    document.getElementById('btn-restart').addEventListener('click', function () {
+        initBoard();
+        history = [];
+        gameOver = false;
+        busy = false;
+        document.getElementById('msg').textContent = '';
+        draw();
+        updatePanel();
+        if (humanColor === 2) aiMove();
+    });
+
+    document.getElementById('btn-undo').addEventListener('click', function () {
+        if (busy || history.length === 0) return;
+        if (history.length >= 2) {
+            var last = history.pop();
+            board[last.row][last.col] = 0;
+            var prev = history.pop();
+            board[prev.row][prev.col] = 0;
+        } else if (history.length === 1) {
+            var only = history.pop();
+            board[only.row][only.col] = 0;
+        }
+        gameOver = false;
+        document.getElementById('msg').textContent = '';
+        draw();
+        updatePanel();
+    });
+
+    document.getElementById('btn-mode').addEventListener('click', function () {
+        var t = humanColor;
+        humanColor = aiColor;
+        aiColor = t;
+        initBoard();
+        history = [];
+        gameOver = false;
+        busy = false;
+        document.getElementById('msg').textContent = '';
+        draw();
+        updatePanel();
+        if (humanColor === 2) aiMove();
+    });
+
+    initBoard();
+    draw();
+    updatePanel();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 - 114514ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px; margin: 30px auto; padding: 0 20px;
+        background: #f0f2f5; color: #1e1e1e;
+    }
+    h1 {
+        font-size: 28px; font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px; margin-bottom: 6px;
+    }
+    .sub { color: #57606a; font-size: 15px; margin-top: -6px; margin-bottom: 24px; }
+    .back-link {
+        display: inline-block; margin-bottom: 16px;
+        color: #0969da; text-decoration: none; font-weight: 500;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .game-wrap { display: flex; gap: 20px; flex-wrap: wrap; }
+    .board-box { background: #ffffff; border: 1px solid #d0d7de; padding: 12px; position: relative; }
+    #board { display: block; background: #bbada0; }
+    .panel { flex: 1; min-width: 180px; }
+    .panel-box {
+        background: #ffffff; border: 1px solid #d0d7de;
+        padding: 14px 16px; margin-bottom: 12px;
+    }
+    .panel-label { font-size: 13px; color: #57606a; margin-bottom: 4px; }
+    .panel-value { font-size: 24px; font-weight: 600; font-family: monospace; }
+    .key-list { font-size: 14px; color: #57606a; line-height: 1.9; }
+    .key-list b {
+        color: #24292e; font-family: monospace;
+        background: #e9ecef; padding: 1px 6px; font-weight: 500;
+    }
+    button {
+        font-family: inherit; font-size: 14px; font-weight: 500;
+        padding: 8px 18px; border: 1px solid #d0d7de;
+        background: #f6f8fa; color: #24292e;
+        cursor: pointer; border-radius: 0;
+        margin-right: 8px; margin-bottom: 8px;
+    }
+    button:hover { background: #e9ecef; }
+    button.primary { background: #2da44e; border-color: #2da44e; color: #fff; }
+    button.primary:hover { background: #22863a; }
+    .overlay {
+        position: absolute; left: 12px; top: 12px;
+        right: 12px; bottom: 12px;
+        background: rgba(238,228,218,0.78);
+        display: none; align-items: center; justify-content: center;
+        flex-direction: column; text-align: center;
+    }
+    .overlay.show { display: flex; }
+    .overlay-title {
+        font-size: 34px; font-weight: 700;
+        color: #776e65; margin-bottom: 12px;
+    }
+    .footer {
+        margin-top: 28px; text-align: center; font-size: 14px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        .board-box, .panel-box { background: #161b22; border-color: #30363d; }
+        .key-list b { background: #30363d; color: #c9d1d9; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .footer { border-top-color: #30363d; color: #8b949e; }
+        .overlay { background: rgba(13,17,23,0.85); }
+        .overlay-title { color: #c9d1d9; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← 返回游戏列表</a>
+    <h1>2048</h1>
+    <div class="sub">方向键移动 · 相同数字合并 · 拼出 2048</div>
+
+    <div class="game-wrap">
+        <div class="board-box">
+            <canvas id="board" width="416" height="416"></canvas>
+            <div class="overlay" id="overlay">
+                <div class="overlay-title" id="over-title">游戏结束</div>
+                <button class="primary" id="over-btn">再来一局</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-box">
+                <div class="panel-label">分数</div>
+                <div class="panel-value" id="score">0</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">最高分</div>
+                <div class="panel-value" id="best">0</div>
+            </div>
+            <div class="panel-box">
+                <div class="key-list">
+                    <b>↑</b> <b>↓</b> <b>←</b> <b>→</b> 或 <b>WASD</b> 移动
+                </div>
+            </div>
+            <button class="primary" id="btn-new">新游戏</button>
+        </div>
+    </div>
+
+    <div class="footer">44444448.xyz · 114514ZYHS</div>
+
+<script>
+(function () {
+    var SIZE = 4, CELL = 92, GAP = 12, OFF = 16;
+    var cv = document.getElementById('board');
+    var ctx = cv.getContext('2d');
+
+    var grid, score, best, over, won;
+
+    best = parseInt(localStorage.getItem('g2048_best') || '0', 10);
+    document.getElementById('best').textContent = best;
+
+    var COLORS = {
+        2: ['#eee4da', '#776e65'],
+        4: ['#ede0c8', '#776e65'],
+        8: ['#f2b179', '#f9f6f2'],
+        16: ['#f59563', '#f9f6f2'],
+        32: ['#f67c5f', '#f9f6f2'],
+        64: ['#f65e3b', '#f9f6f2'],
+        128: ['#edcf72', '#f9f6f2'],
+        256: ['#edcc61', '#f9f6f2'],
+        512: ['#edc850', '#f9f6f2'],
+        1024: ['#edc53f', '#f9f6f2'],
+        2048: ['#edc22e', '#f9f6f2']
+    };
+
+    function init() {
+        grid = [];
+        for (var r = 0; r < SIZE; r++) {
+            var row = [];
+            for (var c = 0; c < SIZE; c++) row.push(0);
+            grid.push(row);
+        }
+        score = 0;
+        over = false;
+        won = false;
+        document.getElementById('overlay').classList.remove('show');
+        addTile();
+        addTile();
+        updateScore();
+        draw();
+    }
+
+    function addTile() {
+        var empty = [];
+        for (var r = 0; r < SIZE; r++) {
+            for (var c = 0; c < SIZE; c++) {
+                if (grid[r][c] === 0) empty.push({ r: r, c: c });
+            }
+        }
+        if (empty.length === 0) return;
+        var spot = empty[Math.floor(Math.random() * empty.length)];
+        grid[spot.r][spot.c] = Math.random() < 0.9 ? 2 : 4;
+    }
+
+    function updateScore() {
+        document.getElementById('score').textContent = score;
+        if (score > best) {
+            best = score;
+            localStorage.setItem('g2048_best', String(best));
+            document.getElementById('best').textContent = best;
+        }
+    }
+
+    function draw() {
+        ctx.fillStyle = '#bbada0';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+
+        for (var r = 0; r < SIZE; r++) {
+            for (var c = 0; c < SIZE; c++) {
+                var x = OFF + c * (CELL + GAP);
+                var y = OFF + r * (CELL + GAP);
+                ctx.fillStyle = '#cdc1b4';
+                ctx.fillRect(x, y, CELL, CELL);
+                var v = grid[r][c];
+                if (v) {
+                    var col = COLORS[v] || ['#3c3a32', '#f9f6f2'];
+                    ctx.fillStyle = col[0];
+                    ctx.fillRect(x, y, CELL, CELL);
+                    ctx.fillStyle = col[1];
+                    var size = v >= 1024 ? 30 : (v >= 128 ? 38 : 44);
+                    ctx.font = '700 ' + size + 'px -apple-system, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(String(v), x + CELL / 2, y + CELL / 2 + 2);
+                }
+            }
+        }
+    }
+
+    function slide(row) {
+        var arr = row.filter(function (v) { return v !== 0; });
+        var out = [];
+        for (var i = 0; i < arr.length; i++) {
+            if (i + 1 < arr.length && arr[i] === arr[i + 1]) {
+                out.push(arr[i] * 2);
+                score += arr[i] * 2;
+                if (arr[i] * 2 === 2048) won = true;
+                i++;
+            } else {
+                out.push(arr[i]);
+            }
+        }
+        while (out.length < SIZE) out.push(0);
+        return out;
+    }
+
+    function rotate(g) {
+        var n = [];
+        for (var r = 0; r < SIZE; r++) {
+            var row = [];
+            for (var c = 0; c < SIZE; c++) row.push(g[SIZE - 1 - c][r]);
+            n.push(row);
+        }
+        return n;
+    }
+
+    function move(dirKey) {
+        if (over) return;
+        var before = JSON.stringify(grid);
+        var times = { left: 0, up: 1, right: 2, down: 3 }[dirKey];
+
+        for (var i = 0; i < times; i++) grid = rotate(grid);
+        for (var r = 0; r < SIZE; r++) grid[r] = slide(grid[r]);
+        for (var j = 0; j < (4 - times) % 4; j++) grid = rotate(grid);
+
+        if (JSON.stringify(grid) !== before) {
+            addTile();
+            updateScore();
+            draw();
+            checkState();
+        }
+    }
+
+    function canMove() {
+        for (var r = 0; r < SIZE; r++) {
+            for (var c = 0; c < SIZE; c++) {
+                if (grid[r][c] === 0) return true;
+                if (c + 1 < SIZE && grid[r][c] === grid[r][c + 1]) return true;
+                if (r + 1 < SIZE && grid[r][c] === grid[r + 1][c]) return true;
+            }
+        }
+        return false;
+    }
+
+    function checkState() {
+        if (won && !over) {
+            won = false;
+            document.getElementById('over-title').textContent = '达成 2048！';
+            document.getElementById('overlay').classList.add('show');
+            return;
+        }
+        if (!canMove()) {
+            over = true;
+            document.getElementById('over-title').textContent = '游戏结束';
+            document.getElementById('overlay').classList.add('show');
+        }
+    }
+
+    document.addEventListener('keydown', function (e) {
+        var m = null;
+        switch (e.key) {
+            case 'ArrowLeft': case 'a': case 'A': m = 'left'; break;
+            case 'ArrowRight': case 'd': case 'D': m = 'right'; break;
+            case 'ArrowUp': case 'w': case 'W': m = 'up'; break;
+            case 'ArrowDown': case 's': case 'S': m = 'down'; break;
+        }
+        if (m) { move(m); e.preventDefault(); }
+    });
+
+    document.getElementById('btn-new').addEventListener('click', init);
+    document.getElementById('over-btn').addEventListener('click', init);
+
+    init();
+})();
+</script>
+</body>
+</html>

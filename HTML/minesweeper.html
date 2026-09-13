@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫雷 - 114514ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px; margin: 30px auto; padding: 0 20px;
+        background: #f0f2f5; color: #1e1e1e;
+    }
+    h1 {
+        font-size: 28px; font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px; margin-bottom: 6px;
+    }
+    .sub { color: #57606a; font-size: 15px; margin-top: -6px; margin-bottom: 24px; }
+    .back-link {
+        display: inline-block; margin-bottom: 16px;
+        color: #0969da; text-decoration: none; font-weight: 500;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .game-wrap { display: flex; gap: 20px; flex-wrap: wrap; }
+    .board-box { background: #ffffff; border: 1px solid #d0d7de; padding: 12px; }
+    .panel { flex: 1; min-width: 190px; }
+    .panel-box {
+        background: #ffffff; border: 1px solid #d0d7de;
+        padding: 14px 16px; margin-bottom: 12px;
+    }
+    .panel-label { font-size: 13px; color: #57606a; margin-bottom: 4px; }
+    .panel-value { font-size: 22px; font-weight: 600; font-family: monospace; }
+    .key-list { font-size: 14px; color: #57606a; line-height: 1.9; }
+    button {
+        font-family: inherit; font-size: 14px; font-weight: 500;
+        padding: 8px 18px; border: 1px solid #d0d7de;
+        background: #f6f8fa; color: #24292e;
+        cursor: pointer; border-radius: 0;
+        margin-right: 8px; margin-bottom: 8px;
+    }
+    button:hover { background: #e9ecef; }
+    button.primary { background: #2da44e; border-color: #2da44e; color: #fff; }
+    button.primary:hover { background: #22863a; }
+    .msg { font-size: 14px; color: #57606a; min-height: 20px; }
+    .footer {
+        margin-top: 28px; text-align: center; font-size: 14px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        .board-box, .panel-box { background: #161b22; border-color: #30363d; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .footer { border-top-color: #30363d; color: #8b949e; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← 返回游戏列表</a>
+    <h1>扫雷</h1>
+    <div class="sub">左键翻开 · 右键插旗</div>
+
+    <div class="game-wrap">
+        <div class="board-box">
+            <canvas id="board"></canvas>
+        </div>
+
+        <div class="panel">
+            <div class="panel-box">
+                <div class="panel-label">剩余雷数</div>
+                <div class="panel-value" id="mines">40</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">状态</div>
+                <div class="msg" id="msg">进行中</div>
+            </div>
+            <div class="panel-box">
+                <div class="key-list">
+                    左键：翻开格子<br>
+                    右键：标记地雷<br>
+                    首次点击必定安全
+                </div>
+            </div>
+            <button class="primary" id="btn-new">新游戏</button>
+            <button id="btn-flag">插旗模式</button>
+        </div>
+    </div>
+
+    <div class="footer">44444448.xyz · 114514ZYHS</div>
+
+<script>
+(function () {
+    var COLS = 16, ROWS = 16, MINES = 40, CELL = 26;
+    var cv = document.getElementById('board');
+    var ctx = cv.getContext('2d');
+    cv.width = COLS * CELL;
+    cv.height = ROWS * CELL;
+
+    var grid, revealed, flagged, started, over, flagMode = false;
+    var NUM_COLORS = ['', '#1976d2', '#388e3c', '#d32f2f', '#7b1fa2', '#ff8f00', '#0097a7', '#424242', '#757575'];
+
+    function init() {
+        grid = [];
+        revealed = [];
+        flagged = [];
+        for (var r = 0; r < ROWS; r++) {
+            var g = [], v = [], f = [];
+            for (var c = 0; c < COLS; c++) { g.push(0); v.push(false); f.push(false); }
+            grid.push(g); revealed.push(v); flagged.push(f);
+        }
+        started = false;
+        over = false;
+        document.getElementById('msg').textContent = '进行中';
+        document.getElementById('mines').textContent = MINES;
+        draw();
+    }
+
+    function placeMines(safeR, safeC) {
+        var placed = 0;
+        while (placed < MINES) {
+            var r = Math.floor(Math.random() * ROWS);
+            var c = Math.floor(Math.random() * COLS);
+            if (grid[r][c] === -1) continue;
+            if (Math.abs(r - safeR) <= 1 && Math.abs(c - safeC) <= 1) continue;
+            grid[r][c] = -1;
+            placed++;
+        }
+        for (var r2 = 0; r2 < ROWS; r2++) {
+            for (var c2 = 0; c2 < COLS; c2++) {
+                if (grid[r2][c2] === -1) continue;
+                var cnt = 0;
+                for (var dr = -1; dr <= 1; dr++) {
+                    for (var dc = -1; dc <= 1; dc++) {
+                        var nr = r2 + dr, nc = c2 + dc;
+                        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
+                        if (grid[nr][nc] === -1) cnt++;
+                    }
+                }
+                grid[r2][c2] = cnt;
+            }
+        }
+    }
+
+    function draw() {
+        ctx.fillStyle = '#c0c0c0';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+
+        for (var r = 0; r < ROWS; r++) {
+            for (var c = 0; c < COLS; c++) {
+                var x = c * CELL, y = r * CELL;
+                if (revealed[r][c]) {
+                    ctx.fillStyle = '#d5d5d5';
+                    ctx.fillRect(x, y, CELL, CELL);
+                    ctx.strokeStyle = '#a0a0a0';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+                    if (grid[r][c] === -1) {
+                        ctx.fillStyle = '#d32f2f';
+                        ctx.beginPath();
+                        ctx.arc(x + CELL / 2, y + CELL / 2, CELL * 0.28, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (grid[r][c] > 0) {
+                        ctx.fillStyle = NUM_COLORS[grid[r][c]];
+                        ctx.font = 'bold 15px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(String(grid[r][c]), x + CELL / 2, y + CELL / 2 + 1);
+                    }
+                } else {
+                    ctx.fillStyle = '#bdbdbd';
+                    ctx.fillRect(x, y, CELL, CELL);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x + 1, y + CELL - 1);
+                    ctx.lineTo(x + 1, y + 1);
+                    ctx.lineTo(x + CELL - 1, y + 1);
+                    ctx.stroke();
+                    ctx.strokeStyle = '#8d8d8d';
+                    ctx.beginPath();
+                    ctx.moveTo(x + CELL - 1, y + 1);
+                    ctx.lineTo(x + CELL - 1, y + CELL - 1);
+                    ctx.lineTo(x + 1, y + CELL - 1);
+                    ctx.stroke();
+                    if (flagged[r][c]) {
+                        ctx.fillStyle = '#d32f2f';
+                        ctx.beginPath();
+                        ctx.moveTo(x + CELL * 0.32, y + CELL * 0.22);
+                        ctx.lineTo(x + CELL * 0.32, y + CELL * 0.62);
+                        ctx.lineTo(x + CELL * 0.72, y + CELL * 0.42);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(x + CELL * 0.32, y + CELL * 0.22);
+                        ctx.lineTo(x + CELL * 0.32, y + CELL * 0.8);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+    }
+
+    function reveal(r, c) {
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return;
+        if (revealed[r][c] || flagged[r][c]) return;
+        revealed[r][c] = true;
+        if (grid[r][c] === 0) {
+            for (var dr = -1; dr <= 1; dr++) {
+                for (var dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue;
+                    reveal(r + dr, c + dc);
+                }
+            }
+        }
+    }
+
+    function checkWin() {
+        var hidden = 0;
+        for (var r = 0; r < ROWS; r++) {
+            for (var c = 0; c < COLS; c++) {
+                if (!revealed[r][c]) hidden++;
+            }
+        }
+        return hidden === MINES;
+    }
+
+    function cellFromEvent(e) {
+        var rect = cv.getBoundingClientRect();
+        var sx = cv.width / rect.width, sy = cv.height / rect.height;
+        var x = (e.clientX - rect.left) * sx;
+        var y = (e.clientY - rect.top) * sy;
+        return { r: Math.floor(y / CELL), c: Math.floor(x / CELL) };
+    }
+
+    cv.addEventListener('click', function (e) {
+        if (over) return;
+        var p = cellFromEvent(e);
+        if (p.r < 0 || p.r >= ROWS || p.c < 0 || p.c >= COLS) return;
+
+        if (flagMode) {
+            if (!revealed[p.r][p.c]) {
+                flagged[p.r][p.c] = !flagged[p.r][p.c];
+                updateMineCount();
+                draw();
+            }
+            return;
+        }
+
+        if (flagged[p.r][p.c]) return;
+
+        if (!started) {
+            placeMines(p.r, p.c);
+            started = true;
+        }
+
+        if (grid[p.r][p.c] === -1) {
+            over = true;
+            for (var r = 0; r < ROWS; r++) {
+                for (var c = 0; c < COLS; c++) {
+                    if (grid[r][c] === -1) revealed[r][c] = true;
+                }
+            }
+            document.getElementById('msg').textContent = '踩到地雷，游戏结束';
+            draw();
+            return;
+        }
+
+        reveal(p.r, p.c);
+        draw();
+
+        if (checkWin()) {
+            over = true;
+            document.getElementById('msg').textContent = '全部排除，你赢了！';
+        }
+    });
+
+    cv.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        if (over) return;
+        var p = cellFromEvent(e);
+        if (p.r < 0 || p.r >= ROWS || p.c < 0 || p.c >= COLS) return;
+        if (revealed[p.r][p.c]) return;
+        if (!started) { placeMines(p.r, p.c); started = true; }
+        flagged[p.r][p.c] = !flagged[p.r][p.c];
+        updateMineCount();
+        draw();
+    });
+
+    function updateMineCount() {
+        var f = 0;
+        for (var r = 0; r < ROWS; r++) {
+            for (var c = 0; c < COLS; c++) if (flagged[r][c]) f++;
+        }
+        document.getElementById('mines').textContent = MINES - f;
+    }
+
+    document.getElementById('btn-new').addEventListener('click', init);
+    document.getElementById('btn-flag').addEventListener('click', function () {
+        flagMode = !flagMode;
+        this.textContent = flagMode ? '插旗模式（开）' : '插旗模式';
+        this.style.background = flagMode ? '#ddf4e4' : '';
+    });
+
+    init();
+})();
+</script>
+</body>
+</html>

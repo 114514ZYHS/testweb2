@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-9aa19c2a/v053389906f34/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>透明水杯 · 实时光线追踪 · 手电筒</title>
+<style>
+  :root{
+    --bg:#07080b;
+    --panel:rgba(16,18,24,.78);
+    --line:rgba(255,255,255,.10);
+    --txt:#dfe4ec;
+    --dim:#8b94a4;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--txt);}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none;}
+
+  #panel{
+    position:fixed;top:14px;right:14px;width:266px;
+    background:var(--panel);backdrop-filter:blur(14px) saturate(1.2);
+    -webkit-backdrop-filter:blur(14px) saturate(1.2);
+    border:1px solid var(--line);border-radius:14px;
+    padding:12px 14px 12px;font-size:12px;line-height:1.35;
+    box-shadow:0 12px 40px rgba(0,0,0,.55);
+    user-select:none;max-height:calc(100vh - 28px);overflow:auto;
+  }
+  #panel h1{font-size:12.5px;margin:0 0 2px;letter-spacing:.14em;font-weight:600;color:#fff;}
+  #panel .sub{font-size:10.5px;color:var(--dim);margin-bottom:10px;letter-spacing:.06em;}
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0;}
+  .row label{flex:0 0 66px;color:var(--dim);font-size:11px;}
+  .row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;
+    background:linear-gradient(90deg,#3a4452,#5a667a);outline:none;margin:0;}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#e9f2ff;border:1px solid #7f8a9c;box-shadow:0 1px 4px rgba(0,0,0,.6);cursor:pointer;}
+  .row input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#e9f2ff;border:1px solid #7f8a9c;cursor:pointer;}
+  .row .v{flex:0 0 40px;text-align:right;font-variant-numeric:tabular-nums;color:#cfd8e6;font-size:11px;}
+  .sep{height:1px;background:var(--line);margin:10px 0;}
+  .btns{display:flex;gap:8px;margin-top:4px;}
+  button{flex:1;padding:7px 0;border-radius:9px;border:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.03));
+    color:var(--txt);font-size:11.5px;cursor:pointer;font-family:inherit;transition:.15s;}
+  button:hover{background:linear-gradient(180deg,rgba(94,200,255,.22),rgba(94,200,255,.06));border-color:rgba(94,200,255,.35);}
+  button:active{transform:translateY(1px);}
+  .hint{margin-top:10px;font-size:10.5px;color:var(--dim);line-height:1.6;}
+  .hint b{color:#a9b6c8;font-weight:600;}
+  #fps{position:fixed;left:14px;bottom:12px;font-size:11px;color:#7b8596;font-variant-numeric:tabular-nums;
+       letter-spacing:.08em;user-select:none;pointer-events:none;}
+  #fps b{color:#cfd8e6;font-weight:500;}
+  #err{position:fixed;inset:0;display:none;place-items:center;background:#07080b;padding:40px;
+       font-size:13px;color:#ff9c9c;text-align:center;white-space:pre-wrap;z-index:99;}
+  @media (max-width:760px){
+    #panel{width:202px;font-size:11px;padding:10px;}
+    .row label{flex:0 0 52px;font-size:10px;}
+    .hint{display:none;}
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="panel">
+  <h1>透明水杯</h1>
+  <div class="sub">实时光线追踪 · 光子映射焦散</div>
+
+  <div class="row"><label>手电强度</label><input id="s_intensity" type="range" min="0.2" max="16" step="0.1" value="6"><span class="v" id="v_intensity">6.0</span></div>
+  <div class="row"><label>光束角</label><input id="s_cone" type="range" min="5" max="40" step="0.5" value="17"><span class="v" id="v_cone">17°</span></div>
+  <div class="row"><label>灯距</label><input id="s_ldist" type="range" min="0.25" max="0.95" step="0.01" value="0.56"><span class="v" id="v_ldist">0.56</span></div>
+
+  <div class="sep"></div>
+
+  <div class="row"><label>水位</label><input id="s_level" type="range" min="0.016" max="0.126" step="0.001" value="0.072"><span class="v" id="v_level">72</span></div>
+  <div class="row"><label>曝光</label><input id="s_exposure" type="range" min="0.2" max="3.5" step="0.05" value="1.05"><span class="v" id="v_exposure">1.05</span></div>
+  <div class="row"><label>焦散</label><input id="s_caustic" type="range" min="0" max="3" step="0.05" value="1"><span class="v" id="v_caustic">1.00</span></div>
+  <div class="row"><label>环境光</label><input id="s_env" type="range" min="0" max="3" step="0.05" value="1"><span class="v" id="v_env">1.00</span></div>
+
+  <div class="sep"></div>
+
+  <div class="row"><label>光子数</label><input id="s_photons" type="range" min="30000" max="500000" step="10000" value="160000"><span class="v" id="v_photons">16万</span></div>
+  <div class="row"><label>分辨率</label><input id="s_scale" type="range" min="0.35" max="1.6" step="0.05" value="1"><span class="v" id="v_scale">1.00</span></div>
+
+  <div class="btns">
+    <button id="btn_shake">摇一摇</button>
+    <button id="btn_calm">静置</button>
+  </div>
+
+  <div class="hint">
+    <b>移动鼠标</b> 移动手电筒<br>
+    <b>左键拖拽</b> 晃动水杯<br>
+    <b>右键拖拽</b> 旋转视角<br>
+    <b>滚轮</b> 推拉镜头 · <b>空格</b> 摇一摇
+  </div>
+</div>
+
+<div id="fps">— fps · <b id="res">—</b></div>
+<div id="err"></div>
+
+<script>
+"use strict";
+(function(){
+/* ============================================================
+   0. 基础
+   ============================================================ */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', {
+  antialias: false, alpha: false, depth: false, stencil: false,
+  powerPreference: 'high-performance', preserveDrawingBuffer: false
+});
+const errBox = document.getElementById('err');
+if (!gl) {
+  errBox.style.display = 'grid';
+  errBox.textContent = '当前浏览器不支持 WebGL2，无法运行本渲染器。\n请使用最新版 Chrome / Edge / Firefox / Safari。';
+  return;
+}
+const EXT_FLOAT = gl.getExtension('EXT_color_buffer_float');
+const HDR_FMT   = EXT_FLOAT ? gl.RGBA16F : gl.RGBA8;
+const HDR_TYPE  = EXT_FLOAT ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+// 8bit 焦散贴图需要预乘，避免量化精度丢失
+const CAUSTIC_PRE  = EXT_FLOAT ? 1.0 : 400.0;
+const CAUSTIC_POST = 1.0 / CAUSTIC_PRE;
+
+const clamp = (x,a,b)=> x<a?a:(x>b?b:x);
+
+/* ============================================================
+   1. GLSL 公共代码
+   ============================================================ */
+const GLSL_GEOM = `
+#define PI 3.141592653589793
+#define MED_AIR   0
+#define MED_GLASS 1
+#define MED_WATER 2
+#define MED_TABLE 3
+#define MED_LIGHT 4
+
+const float R_OUT     = 0.0375;   // 杯外半径 (m)
+const float R_IN      = 0.0335;   // 杯内半径
+const float GLASS_H   = 0.135;    // 杯高
+const float GLASS_BOT = 0.0085;   // 杯内底厚度
+const float CAUSTIC_HALF = 0.35;  // 焦散贴图覆盖 ±0.35m
+
+const vec3 SIGMA_W = vec3(1.15, 0.30, 0.15);  // 水的吸收 (1/m)
+const vec3 SIGMA_G = vec3(0.35, 0.10, 0.24);  // 玻璃吸收 (偏绿)
+
+uniform float uTime;
+uniform float uWaterLevel;
+uniform vec2  uTilt;
+uniform float uWaveAmp;
+uniform vec3  uLightPos;
+uniform vec3  uLightDir;
+uniform float uLightRadius;
+uniform float uCosOuter;
+uniform float uCosInner;
+
+uint hashU(uint x){
+  x ^= x >> 16u; x *= 0x7feb352du;
+  x ^= x >> 15u; x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+float rnd(inout uint s){ s = hashU(s); return float(s & 0x00ffffffu) * (1.0/16777216.0); }
+
+/* ---- 水面高度场：整体倾斜(晃动) + 两组行波 ---- */
+float waterHeight(vec2 p){
+  float t = uTime;
+  float h = uWaterLevel + uTilt.x * p.x + uTilt.y * p.y;
+  float a = uWaveAmp;
+  h += a * 0.00110 * sin(p.x*168.0 + t*6.3) * cos(p.y*137.0 - t*4.6);
+  h += a * 0.00085 * sin(p.y*207.0 - t*8.1 + p.x*57.0);
+  return h;
+}
+vec3 waterNormal(vec2 p){
+  const float e = 0.0012;
+  float hx = (waterHeight(p + vec2(e,0.0)) - waterHeight(p - vec2(e,0.0))) / (2.0*e);
+  float hz = (waterHeight(p + vec2(0.0,e)) - waterHeight(p - vec2(0.0,e))) / (2.0*e);
+  return normalize(vec3(-hx, 1.0, -hz));
+}
+
+int mediumAt(vec3 p){
+  if (uLightRadius > 1e-5){
+    vec3 d = p - uLightPos;
+    if (dot(d,d) < uLightRadius*uLightRadius) return MED_LIGHT;
+  }
+  if (p.y < 0.0) return MED_TABLE;
+  float r2 = p.x*p.x + p.z*p.z;
+  bool inOuter = (r2 < R_OUT*R_OUT) && (p.y <= GLASS_H);
+  bool inCav   = (r2 < R_IN*R_IN)  && (p.y >= GLASS_BOT);
+  if (inOuter && !inCav) return MED_GLASS;
+  if (inCav && p.y < waterHeight(p.xz)) return MED_WATER;
+  return MED_AIR;
+}
+float iorOf(int m){ return m==MED_GLASS ? 1.50 : (m==MED_WATER ? 1.333 : 1.0); }
+
+float fresnelDielectric(float cosI, float n1, float n2){
+  float r = n1/n2;
+  float s2 = r*r*(1.0 - cosI*cosI);
+  if (s2 >= 1.0) return 1.0;
+  float cosT = sqrt(1.0 - s2);
+  float rs = (n1*cosI - n2*cosT) / (n1*cosI + n2*cosT);
+  float rp = (n2*cosI - n1*cosT) / (n2*cosI + n1*cosT);
+  return 0.5*(rs*rs + rp*rp);
+}
+
+/* ---- 无限圆柱侧面 ---- */
+bool cylSide(vec3 ro, vec3 rd, float r, out float t0, out float t1){
+  float a = rd.x*rd.x + rd.z*rd.z;
+  if (a < 1e-14){ t0 = 1e30; t1 = -1e30; return false; }
+  float b = ro.x*rd.x + ro.z*rd.z;
+  float c = ro.x*ro.x + ro.z*ro.z - r*r;
+  float disc = b*b - a*c;
+  if (disc < 0.0){ t0 = 1e30; t1 = -1e30; return false; }
+  float s = sqrt(disc);
+  t0 = (-b - s)/a;
+  t1 = (-b + s)/a;
+  return true;
+}
+
+/* ---- 有限实心圆柱 [y0,y1]，返回内部区间 ---- */
+bool solidCyl(vec3 ro, vec3 rd, float r, float y0, float y1, out float t0, out float t1){
+  t0 = 1e30; t1 = -1e30;
+  float a = -1e30, b = 1e30;
+  float dxz2 = rd.x*rd.x + rd.z*rd.z;
+  if (dxz2 < 1e-14){
+    // 射线平行于轴：径向距离恒定
+    if (ro.x*ro.x + ro.z*ro.z > r*r) return false;
+  } else {
+    float c0, c1;
+    if (!cylSide(ro, rd, r, c0, c1)) return false;   // 完全错过圆柱
+    a = c0; b = c1;
+  }
+  if (abs(rd.y) > 1e-12){
+    float ta = (y0 - ro.y)/rd.y;
+    float tb = (y1 - ro.y)/rd.y;
+    a = max(a, min(ta,tb));
+    b = min(b, max(ta,tb));
+  } else if (ro.y < y0 || ro.y > y1) return false;
+  t0 = a; t1 = b;
+  return b > a;
+}
+
+/* ---- 事件登记：只在"介质真的发生改变"时接受 ---- */
+void tryEvent(vec3 ro, vec3 rd, float t, vec3 n,
+              inout float best, inout vec3 bn, inout int bm0, inout int bm1, inout bool found){
+  if (t <= 2e-5 || t >= best) return;
+  vec3 p = ro + rd*t;
+  int m0 = mediumAt(p - rd*2.0e-5);
+  int m1 = mediumAt(p + rd*2.0e-5);
+  if (m0 == m1) return;
+  best = t; bn = n; bm0 = m0; bm1 = m1; found = true;
+}
+
+/* ---- 波动水面求交（牛顿迭代） ---- */
+bool hitWaterTop(vec3 ro, vec3 rd, out float tOut){
+  tOut = 0.0;
+  if (abs(rd.y) < 1e-7) return false;
+  float t = (uWaterLevel - ro.y)/rd.y;
+  if (t < 1e-4) t = 1e-4;
+  for (int i=0;i<5;i++){
+    vec3 p = ro + rd*t;
+    float h = waterHeight(p.xz);
+    const float e = 0.0015;
+    float hx = (waterHeight(p.xz + vec2(e,0.0)) - waterHeight(p.xz - vec2(e,0.0)))/(2.0*e);
+    float hz = (waterHeight(p.xz + vec2(0.0,e)) - waterHeight(p.xz - vec2(0.0,e)))/(2.0*e);
+    float den = rd.y - (hx*rd.x + hz*rd.z);
+    if (abs(den) < 1e-7) break;
+    t -= (p.y - h)/den;
+  }
+  vec3 p = ro + rd*t;
+  if (p.x*p.x + p.z*p.z > R_IN*R_IN) return false;
+  if (p.y < GLASS_BOT || p.y > GLASS_H) return false;
+  if (t <= 2e-5) return false;
+  tOut = t;
+  return true;
+}
+
+/* ---- 场景最近可见表面 ---- */
+bool firstSurface(vec3 ro, vec3 rd, out float tOut, out vec3 nOut, out int m0Out, out int m1Out){
+  float best = 1e30;
+  vec3 bn = vec3(0.0,1.0,0.0);
+  int b0 = MED_AIR, b1 = MED_AIR;
+  bool found = false;
+  const float e = 1e-6;
+
+  // 1. 杯外壁
+  {
+    float ta, tb;
+    if (cylSide(ro, rd, R_OUT, ta, tb)){
+      vec3 pa = ro + rd*ta;
+      vec3 pb = ro + rd*tb;
+      if (pa.y > -e && pa.y < GLASS_H+e)
+        tryEvent(ro, rd, ta, normalize(vec3(pa.x,0.0,pa.z)), best,bn,b0,b1,found);
+      if (pb.y > -e && pb.y < GLASS_H+e)
+        tryEvent(ro, rd, tb, normalize(vec3(pb.x,0.0,pb.z)), best,bn,b0,b1,found);
+    }
+  }
+  // 2. 杯内壁
+  {
+    float ta, tb;
+    if (cylSide(ro, rd, R_IN, ta, tb)){
+      vec3 pa = ro + rd*ta;
+      vec3 pb = ro + rd*tb;
+      if (pa.y > GLASS_BOT-e && pa.y < GLASS_H+e)
+        tryEvent(ro, rd, ta, normalize(vec3(pa.x,0.0,pa.z)), best,bn,b0,b1,found);
+      if (pb.y > GLASS_BOT-e && pb.y < GLASS_H+e)
+        tryEvent(ro, rd, tb, normalize(vec3(pb.x,0.0,pb.z)), best,bn,b0,b1,found);
+    }
+  }
+  // 3/4. 杯口环面 与 杯底
+  if (abs(rd.y) > 1e-9){
+    float tTop = (GLASS_H - ro.y)/rd.y;
+    if (tTop > e){
+      vec3 p = ro + rd*tTop;
+      if (p.x*p.x + p.z*p.z < R_OUT*R_OUT)
+        tryEvent(ro, rd, tTop, vec3(0.0,1.0,0.0), best,bn,b0,b1,found);
+    }
+    float tBot = (0.0 - ro.y)/rd.y;
+    if (tBot > e){
+      vec3 p = ro + rd*tBot;
+      if (p.x*p.x + p.z*p.z < R_OUT*R_OUT)
+        tryEvent(ro, rd, tBot, vec3(0.0,-1.0,0.0), best,bn,b0,b1,found);
+    }
+    float tWb = (GLASS_BOT - ro.y)/rd.y;
+    if (tWb > e){
+      vec3 p = ro + rd*tWb;
+      if (p.x*p.x + p.z*p.z < R_IN*R_IN)
+        tryEvent(ro, rd, tWb, vec3(0.0,1.0,0.0), best,bn,b0,b1,found);
+    }
+  }
+  // 5. 水面
+  {
+    float t;
+    if (hitWaterTop(ro, rd, t)){
+      vec3 p = ro + rd*t;
+      tryEvent(ro, rd, t, waterNormal(p.xz), best,bn,b0,b1,found);
+    }
+  }
+  // 6. 水体侧面
+  {
+    float ta, tb;
+    if (cylSide(ro, rd, R_IN, ta, tb)){
+      vec3 pa = ro + rd*ta;
+      vec3 pb = ro + rd*tb;
+      float ha = waterHeight(pa.xz), hb = waterHeight(pb.xz);
+      if (pa.y > GLASS_BOT-e && pa.y < ha+e)
+        tryEvent(ro, rd, ta, normalize(vec3(pa.x,0.0,pa.z)), best,bn,b0,b1,found);
+      if (pb.y > GLASS_BOT-e && pb.y < hb+e)
+        tryEvent(ro, rd, tb, normalize(vec3(pb.x,0.0,pb.z)), best,bn,b0,b1,found);
+    }
+  }
+  // 7. 桌面
+  if (rd.y < -1e-9){
+    float t = -ro.y/rd.y;
+    if (t > e) tryEvent(ro, rd, t, vec3(0.0,1.0,0.0), best,bn,b0,b1,found);
+  }
+  // 8. 灯泡
+  if (uLightRadius > 1e-5){
+    vec3 oc = ro - uLightPos;
+    float b = dot(oc, rd);
+    float c = dot(oc,oc) - uLightRadius*uLightRadius;
+    float disc = b*b - c;
+    if (disc > 0.0){
+      float t = -b - sqrt(disc);
+      if (t > 2e-5){
+        vec3 p = ro + rd*t;
+        tryEvent(ro, rd, t, normalize(p - uLightPos), best,bn,b0,b1,found);
+      }
+    }
+  }
+
+  tOut = best; nOut = bn; m0Out = b0; m1Out = b1;
+  return found;
+}
+`;
+
+const GLSL_SHADE = `
+uniform vec3  uCamPos;
+uniform vec3  uLightColor;
+uniform float uLightIntensity;
+uniform float uEnvBright;
+uniform sampler2D uCaustic;
+uniform float uCausticGain;
+uniform float uCausticPost;
+
+const float CAUSTIC_RES  = 512.0;
+const float CAUSTIC_DECAY = 0.90;
+const float CAUSTIC_TEXEL = (2.0*CAUSTIC_HALF)/CAUSTIC_RES;
+const float CAUSTIC_TEXEL_AREA = CAUSTIC_TEXEL*CAUSTIC_TEXEL;
+// 点精灵权重之和 (gl_PointSize=2.6 时约 2.32)，用于能量归一化
+const float CAUSTIC_SPLAT_NORM = 0.431;
+
+/* ---- 环境（暗房 + 两块柔光板） ---- */
+vec3 envColor(vec3 d){
+  float up = clamp(d.y*0.5 + 0.5, 0.0, 1.0);
+  vec3 col = mix(vec3(0.013,0.015,0.021), vec3(0.038,0.046,0.060), up);
+  vec3 s1 = normalize(vec3(-0.55, 0.58, 0.60));
+  float k1 = max(dot(d, s1), 0.0);
+  col += vec3(0.80,0.86,1.00) * pow(k1, 24.0) * 0.75;
+  vec3 s2 = normalize(vec3(0.80, 0.30, -0.52));
+  float k2 = max(dot(d, s2), 0.0);
+  col += vec3(1.00,0.90,0.74) * pow(k2, 30.0) * 0.55;
+  col += vec3(0.050,0.040,0.032) * smoothstep(0.05, -0.40, d.y);
+  return col * uEnvBright;
+}
+
+vec3 lightEmission(){ return uLightColor * (uLightIntensity * 24.0 + 0.4); }
+
+/* ---- 桌面材质 ---- */
+float hash2(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float a = hash2(i), b = hash2(i+vec2(1.0,0.0)), c = hash2(i+vec2(0.0,1.0)), d = hash2(i+vec2(1.0,1.0));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+float fbm(vec2 p){
+  float s = 0.0, a = 0.5;
+  for (int i=0;i<4;i++){ s += a*vnoise(p); p *= 2.03; a *= 0.5; }
+  return s;
+}
+vec3 tableAlbedo(vec2 p){
+  float g = fbm(p*6.0);
+  float grain = fbm(vec2(p.x*95.0, p.y*7.0));
+  vec3 c1 = vec3(0.100,0.068,0.046);
+  vec3 c2 = vec3(0.048,0.032,0.023);
+  vec3 col = mix(c1, c2, clamp(g*1.25, 0.0, 1.0));
+  col *= 0.72 + 0.55*grain;
+  return col;
+}
+
+vec3 ggxSpec(vec3 n, vec3 v, vec3 l, float rough, vec3 f0){
+  vec3 h = normalize(v + l);
+  float NoV = max(dot(n,v), 1e-4);
+  float NoL = max(dot(n,l), 0.0);
+  float NoH = max(dot(n,h), 0.0);
+  float VoH = max(dot(v,h), 0.0);
+  float a  = max(rough*rough, 1e-3);
+  float a2 = a*a;
+  float dd = NoH*NoH*(a2-1.0) + 1.0;
+  float D  = a2/(PI*dd*dd);
+  float G  = 0.5 / max(NoL*sqrt(NoV*NoV*(1.0-a2)+a2) + NoV*sqrt(NoL*NoL*(1.0-a2)+a2), 1e-5);
+  vec3  F  = f0 + (1.0-f0)*pow(1.0-VoH, 5.0);
+  return D*G*F;
+}
+
+/* ---- 阴影：玻璃/水完全遮挡（折射光由焦散光子补回） ---- */
+bool occluded(vec3 a, vec3 b){
+  vec3 d = b - a;
+  float len = length(d);
+  if (len < 1e-6) return false;
+  d /= len;
+  float o0,o1,i0,i1;
+  if (solidCyl(a, d, R_OUT, 0.0, GLASS_H, o0, o1)){
+    o0 = max(o0, 1e-4); o1 = min(o1, len-1e-4);
+    if (o1 > o0){
+      if (!solidCyl(a, d, R_IN, GLASS_BOT, GLASS_H+0.002, i0, i1)) return true;
+      i0 = max(i0, 1e-4); i1 = min(i1, len-1e-4);
+      if (i1 <= i0) return true;
+      if (min(o1,i0) - o0 > 1e-5) return true;
+      if (o1 - max(o0,i1) > 1e-5) return true;
+    }
+  }
+  float w0,w1;
+  if (solidCyl(a, d, R_IN*0.9985, GLASS_BOT, uWaterLevel, w0, w1)){
+    w0 = max(w0, 1e-4); w1 = min(w1, len-1e-4);
+    if (w1 > w0 + 1e-5) return true;
+  }
+  return false;
+}
+
+vec3 sampleCaustic(vec2 xz){
+  vec2 uv = (xz + vec2(CAUSTIC_HALF)) / (2.0*CAUSTIC_HALF);
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec3(0.0);
+  vec3 c = texture(uCaustic, uv).rgb * uCausticPost;
+  return c * ((1.0 - CAUSTIC_DECAY)/CAUSTIC_TEXEL_AREA) * CAUSTIC_SPLAT_NORM * uCausticGain;
+}
+
+vec3 sampleLightPos(inout uint seed){
+  vec3 ax = uLightDir;
+  vec3 t1 = normalize(cross(ax, abs(ax.y) < 0.99 ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0)));
+  vec3 t2 = cross(ax, t1);
+  float r = uLightRadius * sqrt(rnd(seed));
+  float a = 6.2831853 * rnd(seed);
+  return uLightPos + (t1*cos(a) + t2*sin(a))*r;
+}
+
+vec3 shadeTable(vec3 p, vec3 n, vec3 v, bool doCaustic, int nSamp, inout uint seed){
+  vec3 alb = tableAlbedo(p.xz);
+  vec3 col = vec3(0.0);
+
+  for (int i=0;i<3;i++){
+    if (i >= nSamp) break;
+    vec3 Lp = sampleLightPos(seed);
+    vec3 ld = Lp - p;
+    float dist = length(ld);
+    ld /= max(dist, 1e-6);
+    float NoL = max(dot(n, ld), 0.0);
+    if (NoL > 0.0 && !occluded(p + n*2.5e-4, Lp)){
+      float cosA = dot(-ld, uLightDir);
+      float fall = smoothstep(uCosOuter, uCosInner, cosA);
+      if (fall > 0.0001){
+        vec3 Li = uLightColor * (uLightIntensity * fall / max(dist*dist, 0.0035));
+        col += alb/PI * Li * NoL;
+        col += ggxSpec(n, v, ld, 0.32, vec3(0.045)) * Li * NoL;
+      }
+    }
+  }
+
+  // 环境光 + 接触阴影
+  float r = length(p.xz);
+  float ao = mix(0.26, 1.0, smoothstep(R_OUT*0.72, R_OUT+0.055, r));
+  vec3 amb = (envColor(vec3(0.0,1.0,0.0)) + envColor(vec3(0.0,-1.0,0.0))) * 0.5;
+  col += alb * amb * ao * 1.7;
+
+  if (doCaustic) col += sampleCaustic(p.xz) * alb / PI;
+  return col;
+}
+
+/* ---- 单段追踪：用于镜面反射（玻璃里看到的反射像） ---- */
+vec3 traceSingle(vec3 o, vec3 d, inout uint seed){
+  float t; vec3 n; int m0, m1;
+  if (!firstSurface(o, d, t, n, m0, m1)) return envColor(d);
+  vec3 p = o + d*t;
+  if (m1 == MED_TABLE){
+    vec3 col = shadeTable(p, vec3(0.0,1.0,0.0), -d, true, 1, seed);
+    float dc = length(p - uCamPos);
+    col = mix(col, envColor(d), 1.0 - exp(-dc*1.1));
+    return col;
+  }
+  if (m1 == MED_LIGHT) return lightEmission();
+  vec3 nn = n; if (dot(nn,d) > 0.0) nn = -nn;
+  return envColor(reflect(d, nn));
+}
+`;
+
+/* ============================================================
+   2. 着色器程序
+   ============================================================ */
+const VS_FULL = `#version 300 es
+precision highp float;
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p*2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const FS_MAIN = `#version 300 es
+precision highp float;
+precision highp int;
+${GLSL_GEOM}
+${GLSL_SHADE}
+uniform vec2  uRes;
+uniform vec3  uCamFwd;
+uniform vec3  uCamRight;
+uniform vec3  uCamUp;
+uniform float uTanHalfFov;
+out vec4 fragColor;
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
+  vec3 rd = normalize(uCamFwd + (uCamRight*uv.x + uCamUp*uv.y) * (2.0*uTanHalfFov));
+  vec3 ro = uCamPos;
+  uint seed = hashU(uint(gl_FragCoord.x) + uint(gl_FragCoord.y)*1024u + 17u);
+
+  vec3 L = vec3(0.0);
+  vec3 thr = vec3(1.0);
+  vec3 o = ro, d = rd;
+
+  for (int i=0;i<12;i++){
+    float t; vec3 n; int m0, m1;
+    if (!firstSurface(o, d, t, n, m0, m1)){ L += thr * envColor(d); break; }
+    vec3 p = o + d*t;
+
+    // 介质吸收
+    if (m0 == MED_WATER) thr *= exp(-SIGMA_W*t);
+    else if (m0 == MED_GLASS) thr *= exp(-SIGMA_G*t);
+
+    if (m1 == MED_TABLE){
+      vec3 col = shadeTable(p, vec3(0.0,1.0,0.0), -d, true, 3, seed);
+      float dc = length(p - uCamPos);
+      col = mix(col, envColor(d), 1.0 - exp(-dc*1.05));
+      L += thr * col;
+      break;
+    }
+    if (m1 == MED_LIGHT){ L += thr * lightEmission(); break; }
+
+    vec3 nn = n;
+    if (dot(nn, d) > 0.0) nn = -nn;
+    float n1 = iorOf(m0), n2 = iorOf(m1);
+    float F = fresnelDielectric(clamp(dot(-d, nn), 0.0, 1.0), n1, n2);
+    vec3 rr = reflect(d, nn);
+    vec3 rt = refract(d, nn, n1/n2);
+    vec3 poR = p + rr*2.5e-4;
+
+    if (dot(rt, rt) < 1e-9){
+      // 全反射
+      L += thr * traceSingle(poR, rr, seed);
+      o = poR; d = rr;
+    } else {
+      L += thr * F * traceSingle(poR, rr, seed);
+      thr *= (1.0 - F);
+      o = p + rt*2.5e-4; d = rt;
+    }
+  }
+  fragColor = vec4(L, 1.0);
+}`;
+
+const VS_PHOTON = `#version 300 es
+precision highp float;
+precision highp int;
+${GLSL_GEOM}
+uniform float uFrame;
+uniform float uPhotonCount;
+uniform float uPhotonPower;
+uniform float uCausticPre;
+out vec3 vCol;
+void main(){
+  gl_PointSize = 2.6;
+  gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  vCol = vec3(0.0);
+
+  uint seed = hashU(uint(gl_VertexID)*2654435761u + uint(uFrame)*2246822519u + 374761393u);
+
+  vec3 ax = uLightDir;
+  vec3 t1 = normalize(cross(ax, abs(ax.y) < 0.99 ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0)));
+  vec3 t2 = cross(ax, t1);
+
+  // 锥内均匀采样 + 聚光角权重
+  float u1 = rnd(seed), u2 = rnd(seed);
+  float cosT = 1.0 - u1*(1.0 - uCosOuter);
+  float sinT = sqrt(max(0.0, 1.0 - cosT*cosT));
+  float phi = 6.2831853*u2;
+  vec3 dir = normalize(t1*(sinT*cos(phi)) + t2*(sinT*sin(phi)) + ax*cosT);
+  float fall = smoothstep(uCosOuter, uCosInner, cosT);
+  if (fall <= 0.0005) return;
+
+  // 发光面（圆盘）
+  float rr = uLightRadius*sqrt(rnd(seed));
+  float aa = 6.2831853*rnd(seed);
+  vec3 org = uLightPos + (t1*cos(aa) + t2*sin(aa))*rr + ax*(uLightRadius*1.6);
+
+  vec3 thr = vec3(uPhotonPower / max(uPhotonCount, 1.0)) * fall;
+  bool entered = false;
+  vec3 o = org, d = dir;
+
+  for (int i=0;i<7;i++){
+    float t; vec3 n; int m0, m1;
+    if (!firstSurface(o, d, t, n, m0, m1)) return;
+    vec3 p = o + d*t;
+
+    if (m1 == MED_TABLE){
+      if (!entered) return;                       // 未穿过玻璃/水 —— 直射光，避免重复计算
+      if (p.y > 2e-4 || p.y < -2e-4) return;
+      if (abs(p.x) > CAUSTIC_HALF || abs(p.z) > CAUSTIC_HALF) return;
+      vec2 uv = (p.xz + vec2(CAUSTIC_HALF)) / (2.0*CAUSTIC_HALF);
+      gl_Position = vec4(uv*2.0 - 1.0, 0.0, 1.0);
+      vCol = thr * uCausticPre;
+      return;
+    }
+    if (m1 == MED_LIGHT) return;
+
+    if (m0 == MED_WATER) thr *= exp(-SIGMA_W*t);
+    else if (m0 == MED_GLASS) thr *= exp(-SIGMA_G*t);
+
+    vec3 nn = n;
+    if (dot(nn, d) > 0.0) nn = -nn;
+    float n1 = iorOf(m0), n2 = iorOf(m1);
+    float F = fresnelDielectric(clamp(dot(-d, nn), 0.0, 1.0), n1, n2);
+    vec3 rt = refract(d, nn, n1/n2);
+    if (dot(rt, rt) < 1e-9){
+      d = reflect(d, nn);
+    } else {
+      thr *= (1.0 - F);
+      d = rt;
+      entered = true;
+    }
+    o = p + d*2.5e-4;
+  }
+}`;
+
+const FS_PHOTON = `#version 300 es
+precision highp float;
+in vec3 vCol;
+out vec4 fragColor;
+void main(){
+  vec2 c = gl_PointCoord*2.0 - 1.0;
+  float r2 = dot(c,c);
+  if (r2 > 1.0) discard;
+  float w = exp(-r2*3.2);
+  fragColor = vec4(vCol*w, 1.0);
+}`;
+
+const FS_DECAY = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+void main(){ fragColor = vec4(0.0,0.0,0.0,1.0); }`;
+
+const FS_BRIGHT = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uThreshold;
+in vec2 vUv;
+out vec4 fragColor;
+void main(){
+  vec3 c = vec3(0.0);
+  c += texture(uTex, vUv + uTexel*vec2(-1.0,-1.0)).rgb;
+  c += texture(uTex, vUv + uTexel*vec2( 1.0,-1.0)).rgb;
+  c += texture(uTex, vUv + uTexel*vec2(-1.0, 1.0)).rgb;
+  c += texture(uTex, vUv + uTexel*vec2( 1.0, 1.0)).rgb;
+  c *= 0.25;
+  float l = max(max(c.r,c.g),c.b);
+  float k = max(l - uThreshold, 0.0) / max(l, 1e-4);
+  fragColor = vec4(c*k, 1.0);
+}`;
+
+const FS_BLUR = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+in vec2 vUv;
+out vec4 fragColor;
+void main(){
+  float w[5];
+  w[0]=0.2270270270; w[1]=0.1945945946; w[2]=0.1216216216; w[3]=0.0540540541; w[4]=0.0162162162;
+  vec3 c = texture(uTex, vUv).rgb * w[0];
+  for (int i=1;i<5;i++){
+    vec2 o = uDir*float(i)*1.6;
+    c += texture(uTex, vUv + o).rgb * w[i];
+    c += texture(uTex, vUv - o).rgb * w[i];
+  }
+  fragColor = vec4(c, 1.0);
+}`;
+
+const FS_COMPOSITE = `#version 300 es
+precision highp float;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uRes;
+uniform float uExposure;
+uniform float uBloomStr;
+in vec2 vUv;
+out vec4 fragColor;
+
+vec3 aces(vec3 x){ return clamp((x*(2.51*x + 0.03)) / (x*(2.43*x + 0.59) + 0.14), 0.0, 1.0); }
+
+void main(){
+  vec3 c = texture(uScene, vUv).rgb;
+  vec3 b = texture(uBloom, vUv).rgb;
+  c += b * uBloomStr;
+  c *= uExposure;
+  c = aces(c);
+  c = pow(max(c, 0.0), vec3(1.0/2.2));
+
+  vec2 q = vUv - 0.5;
+  c *= 1.0 - 0.42*dot(q,q);
+
+  float d = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233))) * 43758.5453);
+  c += (d - 0.5)/255.0;
+
+  fragColor = vec4(c, 1.0);
+}`;
+
+/* ============================================================
+   3. 编译 / 链接
+   ============================================================ */
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    console.error(log, src.split('\n').map((l,i)=>(i+1)+': '+l).join('\n'));
+    throw new Error('Shader compile error:\n' + log);
+  }
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    const log = gl.getProgramInfoLog(p);
+    console.error(log);
+    throw new Error('Program link error:\n' + log);
+  }
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i=0;i<n;i++){
+    const info = gl.getActiveUniform(p, i);
+    const name = info.name.replace(/\[0\]$/,'');
+    u[name] = gl.getUniformLocation(p, name);
+  }
+  return { prog: p, u };
+}
+
+let progMain, progPhoton, progDecay, progBright, progBlur, progComp;
+try{
+  progMain   = program(VS_FULL, FS_MAIN);
+  progPhoton = program(VS_PHOTON, FS_PHOTON);
+  progDecay  = program(VS_FULL, FS_DECAY);
+  progBright = program(VS_FULL, FS_BRIGHT);
+  progBlur   = program(VS_FULL, FS_BLUR);
+  progComp   = program(VS_FULL, FS_COMPOSITE);
+}catch(e){
+  errBox.style.display = 'grid';
+  errBox.textContent = '渲染器初始化失败：\n' + e.message;
+  console.error(e);
+  return;
+}
+
+const emptyVAO = gl.createVertexArray();
+
+/* ============================================================
+   4. 渲染目标
+   ============================================================ */
+const CAUSTIC_RES = 512;
+function makeTex(w, h, internal, type){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function makeFB(tex){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (st !== gl.FRAMEBUFFER_COMPLETE) throw new Error('Framebuffer incomplete: 0x'+st.toString(16));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return f;
+}
+
+let causticTex, causticFB;
+let sceneTex, sceneFB, bloomA, bloomB, bloomFA, bloomFB;
+let sceneW = 0, sceneH = 0, bloomW = 0, bloomH = 0;
+
+function createTargets(){
+  if (causticTex) gl.deleteTexture(causticTex);
+  if (causticFB) gl.deleteFramebuffer(causticFB);
+  causticTex = makeTex(CAUSTIC_RES, CAUSTIC_RES, HDR_FMT, HDR_TYPE);
+  causticFB = makeFB(causticTex);
+
+  if (sceneTex){ gl.deleteTexture(sceneTex); gl.deleteFramebuffer(sceneFB); }
+  if (bloomA){ gl.deleteTexture(bloomA); gl.deleteTexture(bloomB); gl.deleteFramebuffer(bloomFA); gl.deleteFramebuffer(bloomFB); }
+
+  sceneTex = makeTex(sceneW, sceneH, HDR_FMT, HDR_TYPE);
+  sceneFB = makeFB(sceneTex);
+  bloomW = Math.max(1, sceneW >> 2);
+  bloomH = Math.max(1, sceneH >> 2);
+  bloomA = makeTex(bloomW, bloomH, HDR_FMT, HDR_TYPE);
+  bloomB = makeTex(bloomW, bloomH, HDR_FMT, HDR_TYPE);
+  bloomFA = makeFB(bloomA);
+  bloomFB = makeFB(bloomB);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, causticFB);
+  gl.viewport(0,0,CAUSTIC_RES,CAUSTIC_RES);
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+/* ============================================================
+   5. 状态
+   ============================================================ */
+let needResize = true;   // 必须在 UI 绑定之前声明（bindSlider 会立即执行回调）
+
+const S = {
+  waterLevel: 0.072,
+  tiltX: 0, tiltZ: 0, velX: 0, velZ: 0, waveAmp: 0.15,
+  az: 0.55, el: 0.17, camDist: 0.62,
+  pointerX: 0.5, pointerY: 0.46,
+  lightDist: 0.56, coneDeg: 17, intensity: 6.0,
+  exposure: 1.05, causticGain: 1.0, envBright: 1.0,
+  photons: 160000, renderScale: 1.0, bloomStr: 0.55,
+  autoQuality: true
+};
+
+const camTarget = [0, 0.072, 0];
+const lightTarget = [0, 0.078, 0];
+let camPos = [0,0,0], camFwd = [0,0,-1], camRight = [1,0,0], camUp = [0,1,0];
+let lightPos = [0,0,0], lightDir = [0,0,-1];
+const FOV = 32 * Math.PI/180;
+const TAN_HALF = Math.tan(FOV/2);
+
+function norm3(v){ const l = Math.hypot(v[0],v[1],v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l]; }
+function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function cross3(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+
+function updateCamera(){
+  const ce = Math.cos(S.el), se = Math.sin(S.el);
+  const ca = Math.cos(S.az), sa = Math.sin(S.az);
+  camPos = [
+    camTarget[0] + S.camDist*ce*sa,
+    camTarget[1] + S.camDist*se,
+    camTarget[2] + S.camDist*ce*ca
+  ];
+  camFwd = norm3(sub3(camTarget, camPos));
+  camRight = norm3(cross3(camFwd, [0,1,0]));
+  camUp = cross3(camRight, camFwd);
+}
+
+function updateLight(){
+  // 手电围绕水杯公转：鼠标左右控制方位，上下控制高度，始终在水面之上
+  const az = S.az + 1.15 + (S.pointerX - 0.5) * 2.4;
+  const el = clamp(1.15 - S.pointerY * 1.03, 0.09, 1.25);
+  const ce = Math.cos(el), se = Math.sin(el);
+  lightPos = [
+    lightTarget[0] + S.lightDist*ce*Math.sin(az),
+    lightTarget[1] + S.lightDist*se,
+    lightTarget[2] + S.lightDist*ce*Math.cos(az)
+  ];
+  lightDir = norm3(sub3(lightTarget, lightPos));
+}
+
+function maxTilt(){
+  const up   = (0.135 - 0.006 - S.waterLevel);
+  const down = (S.waterLevel - 0.0085 - 0.0035);
+  return Math.max(0.02, Math.min(0.42, up/0.0335, down/0.0335));
+}
+
+function updateSim(dt){
+  dt = Math.min(dt, 1/30);
+  const k = 190.0;
+  const c = 2.0 * 0.055 * Math.sqrt(k);
+  S.velX += (-k*S.tiltX - c*S.velX) * dt;
+  S.velZ += (-k*S.tiltZ - c*S.velZ) * dt;
+  S.tiltX += S.velX * dt;
+  S.tiltZ += S.velZ * dt;
+
+  const mt = maxTilt();
+  const mag = Math.hypot(S.tiltX, S.tiltZ);
+  if (mag > mt){
+    const s = mt/mag;
+    S.tiltX *= s; S.tiltZ *= s;
+    S.velX *= 0.5; S.velZ *= 0.5;
+  }
+  const sp = Math.hypot(S.velX, S.velZ);
+  const target = clamp(0.12 + sp*0.42 + Math.hypot(S.tiltX,S.tiltZ)*0.7, 0.12, 1.15);
+  S.waveAmp += (target - S.waveAmp) * Math.min(1, dt*8);
+}
+
+function impulse(wx, wz, amount){
+  const l = Math.hypot(wx, wz) || 1;
+  S.velX = clamp(S.velX + wx/l*amount, -6, 6);
+  S.velZ = clamp(S.velZ + wz/l*amount, -6, 6);
+  S.waveAmp = Math.min(1.15, S.waveAmp + 0.25);
+}
+
+/* ============================================================
+   6. 交互
+   ============================================================ */
+let dragging = false, orbiting = false, lastPX = 0, lastPY = 0;
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  lastPX = e.clientX; lastPY = e.clientY;
+  if (e.button === 2 || e.shiftKey){ orbiting = true; }
+  else {
+    dragging = true;
+    impulse(Math.random()-0.5, Math.random()-0.5, 1.4);
+  }
+});
+
+canvas.addEventListener('pointerup', e => {
+  dragging = false; orbiting = false;
+  try{ canvas.releasePointerCapture(e.pointerId); }catch(_){}
+});
+
+canvas.addEventListener('pointermove', e => {
+  const r = canvas.getBoundingClientRect();
+  const nx = (e.clientX - r.left)/r.width;
+  const ny = (e.clientY - r.top)/r.height;
+
+  if (dragging){
+    const dx = e.clientX - lastPX;
+    const dy = e.clientY - lastPY;
+    const mpp = (2*S.camDist*TAN_HALF) / Math.max(1, r.height);
+    const wx = (camRight[0]*dx + camUp[0]*(-dy)) * mpp;
+    const wz = (camRight[2]*dx + camUp[2]*(-dy)) * mpp;
+    const m = Math.hypot(wx, wz);
+    if (m > 1e-6) impulse(wx, wz, clamp(m*70.0, 0.0, 2.2));
+  } else if (orbiting){
+    const dx = e.clientX - lastPX;
+    const dy = e.clientY - lastPY;
+    S.az -= dx*0.006;
+    S.el = clamp(S.el + dy*0.005, 0.015, 1.25);
+  }
+
+  lastPX = e.clientX; lastPY = e.clientY;
+  S.pointerX = clamp(nx, -0.4, 1.4);
+  S.pointerY = clamp(ny, -0.4, 1.4);
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  S.camDist = clamp(S.camDist * Math.exp(e.deltaY*0.0009), 0.22, 1.6);
+}, {passive:false});
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space'){
+    e.preventDefault();
+    const a = Math.random()*Math.PI*2;
+    impulse(Math.cos(a), Math.sin(a), 2.2);
+  }
+});
+
+document.getElementById('btn_shake').onclick = () => {
+  const a = Math.random()*Math.PI*2;
+  impulse(Math.cos(a), Math.sin(a), 2.6);
+};
+document.getElementById('btn_calm').onclick = () => {
+  S.velX = S.velZ = 0; S.tiltX = S.tiltZ = 0; S.waveAmp = 0.12;
+};
+
+/* ---- UI ---- */
+function bindSlider(id, valId, fn, fmt){
+  const el = document.getElementById(id);
+  const v = document.getElementById(valId);
+  const apply = () => { fn(parseFloat(el.value)); v.textContent = fmt(parseFloat(el.value)); };
+  el.addEventListener('input', apply);
+  apply();
+}
+bindSlider('s_intensity','v_intensity', x=>S.intensity=x, x=>x.toFixed(1));
+bindSlider('s_cone','v_cone', x=>S.coneDeg=x, x=>x.toFixed(0)+'°');
+bindSlider('s_ldist','v_ldist', x=>S.lightDist=x, x=>x.toFixed(2));
+bindSlider('s_level','v_level', x=>S.waterLevel=x, x=>(x*1000).toFixed(0));
+bindSlider('s_exposure','v_exposure', x=>S.exposure=x, x=>x.toFixed(2));
+bindSlider('s_caustic','v_caustic', x=>S.causticGain=x, x=>x.toFixed(2));
+bindSlider('s_env','v_env', x=>S.envBright=x, x=>x.toFixed(2));
+bindSlider('s_photons','v_photons', x=>S.photons=x|0, x=> (x>=10000? (x/10000).toFixed(0)+'万' : x));
+bindSlider('s_scale','v_scale', x=>{S.renderScale=x; S.autoQuality=false; needResize=true;}, x=>x.toFixed(2));
+
+/* ============================================================
+   7. 尺寸
+   ============================================================ */
+const fpsEl = document.getElementById('fps');
+const resEl = document.getElementById('res');
+
+function resize(force){
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const cw = Math.max(2, Math.floor(window.innerWidth * dpr));
+  const ch = Math.max(2, Math.floor(window.innerHeight * dpr));
+  if (canvas.width !== cw || canvas.height !== ch){
+    canvas.width = cw; canvas.height = ch;
+    needResize = true;
+  }
+  if (!needResize && !force) return;
+  needResize = false;
+  const sw = Math.max(2, Math.round(canvas.width * S.renderScale));
+  const sh = Math.max(2, Math.round(canvas.height * S.renderScale));
+  if (sw !== sceneW || sh !== sceneH){
+    sceneW = sw; sceneH = sh;
+    createTargets();
+  }
+  resEl.textContent = sceneW + '×' + sceneH;
+}
+window.addEventListener('resize', () => { needResize = true; });
+
+/* ============================================================
+   8. 主循环
+   ============================================================ */
+let lastT = performance.now();
+let time = 0, frame = 0;
+let fpsAcc = 0, fpsN = 0, fpsT = 0;
+
+function drawFullscreen(){ gl.bindVertexArray(emptyVAO); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+
+function render(now){
+  requestAnimationFrame(render);
+  const dt = Math.min(0.05, (now - lastT)/1000);
+  lastT = now;
+  time += dt; frame++;
+
+  updateSim(dt);
+  updateCamera();
+  updateLight();
+  resize(false);
+
+  /* ---------- A. 光子映射焦散 ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, causticFB);
+  gl.viewport(0, 0, CAUSTIC_RES, CAUSTIC_RES);
+  gl.disable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+
+  // 衰减
+  gl.blendFunc(gl.ZERO, gl.CONSTANT_COLOR);
+  gl.blendColor(0.90, 0.90, 0.90, 1.0);
+  gl.useProgram(progDecay.prog);
+  drawFullscreen();
+
+  // 发射光子
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(progPhoton.prog);
+  {
+    const u = progPhoton.u;
+    const outer = S.coneDeg * Math.PI/180;
+    const cosOuter = Math.cos(outer);
+    const cosInner = Math.cos(outer*0.55);
+    const omega = 2*Math.PI*(1 - cosOuter);
+    gl.uniform1f(u.uTime, time);
+    gl.uniform1f(u.uWaterLevel, S.waterLevel);
+    gl.uniform2f(u.uTilt, S.tiltX, S.tiltZ);
+    gl.uniform1f(u.uWaveAmp, S.waveAmp);
+    gl.uniform3fv(u.uLightPos, lightPos);
+    gl.uniform3fv(u.uLightDir, lightDir);
+    gl.uniform1f(u.uLightRadius, 0.013);
+    gl.uniform1f(u.uCosOuter, cosOuter);
+    gl.uniform1f(u.uCosInner, cosInner);
+    gl.uniform1f(u.uFrame, frame % 4096);
+    gl.uniform1f(u.uPhotonCount, S.photons);
+    gl.uniform1f(u.uPhotonPower, S.intensity * omega);
+    gl.uniform1f(u.uCausticPre, CAUSTIC_PRE);
+  }
+  gl.bindVertexArray(emptyVAO);
+  gl.drawArrays(gl.POINTS, 0, S.photons);
+  gl.disable(gl.BLEND);
+
+  /* ---------- B. 主光线追踪 ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFB);
+  gl.viewport(0, 0, sceneW, sceneH);
+  gl.useProgram(progMain.prog);
+  {
+    const u = progMain.u;
+    const outer = S.coneDeg * Math.PI/180;
+    gl.uniform2f(u.uRes, sceneW, sceneH);
+    gl.uniform1f(u.uTime, time);
+    gl.uniform1f(u.uWaterLevel, S.waterLevel);
+    gl.uniform2f(u.uTilt, S.tiltX, S.tiltZ);
+    gl.uniform1f(u.uWaveAmp, S.waveAmp);
+    gl.uniform3fv(u.uCamPos, camPos);
+    gl.uniform3fv(u.uCamFwd, camFwd);
+    gl.uniform3fv(u.uCamRight, camRight);
+    gl.uniform3fv(u.uCamUp, camUp);
+    gl.uniform1f(u.uTanHalfFov, TAN_HALF);
+    gl.uniform3fv(u.uLightPos, lightPos);
+    gl.uniform3fv(u.uLightDir, lightDir);
+    gl.uniform3f(u.uLightColor, 1.0, 0.965, 0.92);
+    gl.uniform1f(u.uLightIntensity, S.intensity);
+    gl.uniform1f(u.uLightRadius, 0.013);
+    gl.uniform1f(u.uCosOuter, Math.cos(outer));
+    gl.uniform1f(u.uCosInner, Math.cos(outer*0.55));
+    gl.uniform1f(u.uEnvBright, S.envBright);
+    gl.uniform1f(u.uCausticGain, S.causticGain);
+    gl.uniform1f(u.uCausticPost, CAUSTIC_POST);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, causticTex);
+    gl.uniform1i(u.uCaustic, 0);
+  }
+  drawFullscreen();
+
+  /* ---------- C. Bloom ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFA);
+  gl.viewport(0, 0, bloomW, bloomH);
+  gl.useProgram(progBright.prog);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.uniform1i(progBright.u.uTex, 0);
+  gl.uniform2f(progBright.u.uTexel, 1/sceneW, 1/sceneH);
+  gl.uniform1f(progBright.u.uThreshold, 1.0);
+  drawFullscreen();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFB);
+  gl.useProgram(progBlur.prog);
+  gl.bindTexture(gl.TEXTURE_2D, bloomA);
+  gl.uniform1i(progBlur.u.uTex, 0);
+  gl.uniform2f(progBlur.u.uDir, 1/bloomW, 0);
+  drawFullscreen();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFA);
+  gl.bindTexture(gl.TEXTURE_2D, bloomB);
+  gl.uniform1i(progBlur.u.uTex, 0);
+  gl.uniform2f(progBlur.u.uDir, 0, 1/bloomH);
+  drawFullscreen();
+
+  /* ---------- D. 合成到屏幕 ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(progComp.prog);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.uniform1i(progComp.u.uScene, 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, bloomA);
+  gl.uniform1i(progComp.u.uBloom, 1);
+  gl.uniform2f(progComp.u.uRes, canvas.width, canvas.height);
+  gl.uniform1f(progComp.u.uExposure, S.exposure);
+  gl.uniform1f(progComp.u.uBloomStr, S.bloomStr);
+  drawFullscreen();
+  gl.activeTexture(gl.TEXTURE0);
+
+  /* ---------- E. 性能自适应 ---------- */
+  if ((frame & 15) === 0) document.documentElement.dataset.frames = String(frame);
+  fpsAcc += dt; fpsN++;
+  if (now - fpsT > 500){
+    const fps = fpsN / Math.max(1e-3, fpsAcc);
+    fpsEl.innerHTML = fps.toFixed(0) + ' fps · <b id="res">' + sceneW + '×' + sceneH + '</b>';
+    if (S.autoQuality && fps < 45 && S.renderScale > 0.36){
+      S.renderScale = Math.max(0.35, S.renderScale - (fps < 28 ? 0.14 : 0.07));
+      needResize = true;
+      document.getElementById('s_scale').value = S.renderScale.toFixed(2);
+      document.getElementById('v_scale').textContent = S.renderScale.toFixed(2);
+    }
+    if (S.autoQuality && fps < 26 && S.photons > 60000){
+      S.photons = Math.max(60000, S.photons - 30000);
+      document.getElementById('s_photons').value = S.photons;
+      document.getElementById('v_photons').textContent = (S.photons/10000).toFixed(0) + '万';
+    }
+    fpsAcc = 0; fpsN = 0; fpsT = now;
+  }
+}
+
+/* 初始轻晃一下 */
+impulse(1.0, 0.35, 1.6);
+resize(true);
+requestAnimationFrame(render);
+
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a419f589ecdfa5',t:'MTc4OTI3MDUyMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><!-- source: deepdemos.top | author: BIT | title: 一杯水 -->
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/alien-ark-cf893452/vefad2757ab65/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>异星孤舟 · ALIEN ARK</title>
+<link rel="stylesheet" href="./styles.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+
+<!-- ============ 3D 画布 ============ -->
+<canvas id="gl"></canvas>
+<div id="vignette"></div>
+<div id="damage-flash"></div>
+<div id="fade"></div>
+
+<!-- ============ 游戏 HUD ============ -->
+<div id="hud" class="hidden">
+
+  <div id="crosshair"><span></span><span></span></div>
+  <div id="mine-ring"><svg viewBox="0 0 44 44"><circle id="mine-ring-bg" cx="22" cy="22" r="18"/><circle id="mine-ring-fg" cx="22" cy="22" r="18"/></svg></div>
+
+  <!-- 左上：状态条 -->
+  <div id="stats">
+    <div class="stat-row">
+      <div class="stat-ico">❤</div>
+      <div class="bar"><div id="bar-hp" class="bar-fill hp"></div><span id="txt-hp" class="bar-txt">100</span></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-ico">🛡</div>
+      <div class="bar"><div id="bar-ap" class="bar-fill ap"></div><span id="txt-ap" class="bar-txt">0</span></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-ico">🫧</div>
+      <div class="bar"><div id="bar-ox" class="bar-fill ox"></div><span id="txt-ox" class="bar-txt">100</span></div>
+    </div>
+  </div>
+
+  <!-- 右上：时间 / 天数 -->
+  <div id="clock">
+    <div id="clock-day">第 1 天</div>
+    <div id="clock-phase">☀ 白天</div>
+    <div id="clock-bar"><div id="clock-fill"></div></div>
+    <div id="clock-storm">风暴倒计时 10 天</div>
+  </div>
+
+  <!-- 右侧：任务目标 -->
+  <div id="objectives">
+    <div class="obj-title">◈ 逃离计划</div>
+    <ul id="obj-list"></ul>
+    <div id="obj-hint"></div>
+  </div>
+
+  <!-- 左下：矿物探测器 -->
+  <div id="scanner" class="hidden">
+    <div class="scan-title">矿物探测器</div>
+    <div id="scan-body">未扫描</div>
+  </div>
+
+  <!-- 底部：快捷栏 -->
+  <div id="hotbar-wrap">
+    <div id="hotbar"></div>
+    <div id="held-name"></div>
+  </div>
+
+  <!-- Boss 血条 -->
+  <div id="boss-bar" class="hidden">
+    <div class="boss-name">◤ 星球守卫 ◢</div>
+    <div class="boss-track"><div id="boss-fill"></div></div>
+  </div>
+
+  <div id="toasts"></div>
+  <div id="interact-hint"></div>
+  <div id="lock-hint" class="hidden">点击画面 · 开始游戏</div>
+</div>
+
+<!-- ============ 物品栏面板 ============ -->
+<div id="panel-inventory" class="panel hidden">
+  <div class="panel-head"><span>物品栏</span><button class="x" data-close>✕</button></div>
+  <div class="panel-body">
+    <div class="inv-toolbar">
+      <span class="inv-title">背包（27 格）</span>
+      <button id="btn-sort" class="mini">⇅ 整理</button>
+    </div>
+    <div class="inv-grid" id="inv-grid"></div>
+    <div class="inv-grid hot" id="inv-hotbar"></div>
+    <div class="inv-tip">
+      左键 拿起／放下　·　右键 拆一半／放 1 个　·　<b>Shift+左键 快速在快捷栏↔背包之间移动</b><br>
+      悬停槽位按 <b>1~9</b> 快速换到对应快捷栏位　·　<b>Q 丢弃</b>　·　E 关闭
+    </div>
+  </div>
+</div>
+
+<!-- ============ 合成面板 ============ -->
+<div id="panel-craft" class="panel hidden">
+  <div class="panel-head"><span>合成 · 工作台</span><button class="x" data-close>✕</button></div>
+  <div class="panel-body craft-body">
+    <div id="craft-list" class="craft-list"></div>
+    <div id="craft-detail" class="craft-detail">
+      <div class="cd-empty">← 选择一个配方</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 熔炉面板 ============ -->
+<div id="panel-furnace" class="panel wide hidden">
+  <div class="panel-head"><span>熔炉</span><button class="x" data-close>✕</button></div>
+  <div class="panel-body">
+    <div class="fz-cols">
+      <div class="fz-left">
+        <div class="fz-step">① 选择熔炼配方</div>
+        <div id="fz-recipes" class="craft-list"></div>
+      </div>
+      <div class="fz-right">
+        <div class="fz-step">② 提供原料 · ③ 开始加工</div>
+        <div id="fz-detail" class="craft-detail"><div class="cd-empty">← 左边选一个配方</div></div>
+      </div>
+    </div>
+
+    <div class="fz-status-box">
+      <div class="fz-row">
+        <span class="fz-lbl">加工进度</span>
+        <div class="fz-bar"><div id="fz-prog-fill"></div></div>
+        <span id="fz-status" class="fz-val">未点火</span>
+      </div>
+      <div class="fz-row">
+        <span class="fz-lbl">燃料</span>
+        <div class="fz-bar heat"><div id="fz-burn-fill"></div></div>
+        <span id="fz-fuel-txt" class="fz-val">无</span>
+        <button id="fz-fuel-btn" class="mini">加燃料</button>
+      </div>
+      <div class="fz-row">
+        <span class="fz-lbl">炉内原料</span>
+        <span id="fz-input-txt" class="fz-val">空</span>
+        <span class="fz-lbl">待取产物</span>
+        <span id="fz-output-txt" class="fz-val">空</span>
+        <button id="fz-collect" class="mini">取出产物</button>
+      </div>
+    </div>
+
+    <div class="inv-tip">原料和燃料都<b>直接从背包扣除</b>，不需要手动拖进格子。加工好的产物会堆在炉里，点「取出产物」收进背包。</div>
+  </div>
+</div>
+
+<!-- ============ 火箭装配面板 ============ -->
+<div id="panel-rocket" class="panel wide hidden">
+  <div class="panel-head"><span>火箭装配台</span><button class="x" data-close>✕</button></div>
+  <div class="panel-body">
+    <div id="rocket-parts" class="rocket-parts"></div>
+    <div id="rocket-status" class="rocket-status"></div>
+  </div>
+</div>
+
+<!-- ============ 开始菜单 ============ -->
+<div id="menu" class="overlay">
+  <div class="menu-box">
+    <h1>异星孤舟</h1>
+    <div class="sub">ALIEN ARK · 一款第一人称体素生存撤离游戏</div>
+    <div class="menu-story">
+      你的飞船坠毁在一颗被晶体覆盖的陌生星球上。大气可以呼吸，但地下的矿脉在夜里会召来东西。<br>
+      恒星风暴 <b id="m-days">10</b> 天后将横扫这颗星球。唯一的活路：<b>挖矿、熔炼、造出火箭、装上 4 个部件、击败星球守卫、发射升空。</b><br>
+      <span style="color:#8fa6b8">只想安心建造？选 <b style="color:#4df0d0">☮ 和平</b>：没有怪物、没有黑夜、天数无限。<br>
+      想随便飞、随便造？选 <b style="color:#ffd166">🛠 创造</b>：飞行 · 无敌 · 无限资源。</span>
+    </div>
+    <div class="menu-row">
+      <label>世界种子</label>
+      <input id="seed-input" type="text" placeholder="留空 = 随机">
+      <button id="btn-random" class="mini">随机</button>
+    </div>
+    <div class="menu-row">
+      <label>难度</label>
+      <div class="seg" id="diff-seg">
+        <button data-diff="0" title="没有怪物、没有昼夜循环、天数无限">☮ 和平</button>
+        <button data-diff="1">轻松</button>
+        <button data-diff="2" class="on">标准</button>
+        <button data-diff="3">残酷</button>
+        <button data-diff="4" title="飞行 / 无敌 / 无限资源">🛠 创造</button>
+      </div>
+    </div>
+    <div id="diff-desc" class="diff-desc">标准生存体验，风暴 10 天后抵达。</div>
+    <div class="menu-btns">
+      <button id="btn-new" class="big">开始新一局</button>
+      <button id="btn-continue" class="big ghost" disabled>继续存档</button>
+    </div>
+    <div class="menu-keys">
+      <b>操作</b>：WASD 移动 · 空格 跳跃 · Shift 疾跑 · 鼠标左键 挖掘/攻击 · 右键 放置/交互 · 滚轮 切换物品 · E 背包 · C 合成 · ESC 暂停
+    </div>
+    <div id="glerror" class="glerror hidden"></div>
+  </div>
+</div>
+
+<!-- ============ 暂停 / 结算 ============ -->
+<div id="pause" class="overlay hidden">
+  <div class="menu-box small">
+    <h1 id="pause-title">已暂停</h1>
+    <div id="pause-sub" class="sub"></div>
+    <div id="pause-stats" class="pstats"></div>
+    <div class="menu-btns col">
+      <button id="btn-resume" class="big">继续游戏</button>
+      <button id="btn-save" class="big ghost">保存进度</button>
+      <button id="btn-quit" class="big ghost">回到主菜单</button>
+    </div>
+    <div class="menu-keys">
+      <b>快捷键</b>：E 背包 · C 合成 · F 手电 · <b>V 自动跳跃开关</b> · T/G 使用道具 · Q 丢弃 · R 装填炮塔 · F5 快速存档 · F9 快速读档
+    </div>
+  </div>
+</div>
+
+<div id="victory" class="overlay hidden">
+  <div class="menu-box small vbox">
+    <div id="vic-rank" class="rank">A</div>
+    <h1 id="vic-title">🚀 逃离成功</h1>
+    <div id="vic-sub" class="sub"></div>
+    <div id="vic-stats" class="pstats"></div>
+    <div id="vic-quote" class="vquote"></div>
+    <div class="menu-btns">
+      <button id="btn-again" class="big">再来一局</button>
+      <button id="btn-copy-seed" class="big ghost">复制种子</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 通关 CG 过场 ============ -->
+<div id="cine" class="hidden">
+  <div class="cine-bar top"></div>
+  <div class="cine-bar bot"></div>
+  <div id="cine-title"></div>
+  <div id="cine-sub"></div>
+  <div id="cine-skip">按任意键 / 点击跳过 ▸▸</div>
+</div>
+
+<div id="loading" class="overlay hidden">
+  <div class="load-box">
+    <div class="load-spin"></div>
+    <div id="load-text">正在生成星球…</div>
+    <div class="load-track"><div id="load-fill"></div></div>
+  </div>
+</div>
+
+<div id="tooltip" class="hidden"></div>
+<div id="cursor-ghost" class="hidden"></div>
+<div id="selftest" style="position:fixed;left:-9999px;top:-9999px;white-space:pre"></div>
+
+<script>window.__STANDALONE = false; /* 打包单文件版时会被改成 true */</script>
+<script>
+  window.__errs = [];
+  window.addEventListener('error', function (e) {
+    window.__errs.push(String(e.message) + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+    var el = document.getElementById('glerror');
+    if (el) {
+      el.classList.remove('hidden');
+      el.innerHTML = '⚠ 运行出错：<br>' + window.__errs.slice(-4).map(function (s) { return '· ' + s; }).join('<br>');
+    }
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var m = (e.reason && e.reason.message) ? e.reason.message : String(e.reason);
+    window.__errs.push('Promise: ' + m);
+    var el = document.getElementById('glerror');
+    if (el) { el.classList.remove('hidden'); el.innerHTML = '⚠ 运行出错：<br>· ' + m; }
+  });
+  if (location.protocol === 'file:' && !window.__STANDALONE) {
+    document.getElementById('glerror').classList.remove('hidden');
+    document.getElementById('glerror').innerHTML =
+      '⚠ 你正在用 file:// 直接打开<b>源码版</b>，浏览器会禁止加载 ES 模块。<br><br>' +
+      '三个办法任选其一：<br>' +
+      '1. 改开同目录下的 <b>异星孤舟-单文件版.html</b>（双击即玩，不需要任何环境）<br>' +
+      '2. 运行 <b>start.cmd</b>（需要 Node.js）<br>' +
+      '3. 命令行执行 <b>node serve.cjs</b> 后访问 http://127.0.0.1:8123';
+  }
+</script>
+<script type="module" src="./src/game.js"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a41589f8439f9f',t:'MTc4OTI3MDM0MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<!-- source: deepdemos.top | author: public | title: 异星孤舟 · ALIEN ARK -->
+</body>
+</html>

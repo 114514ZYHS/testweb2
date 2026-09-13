@@ -1,0 +1,3249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/ds0908-0838d859/v53a5aab1d29b/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Morris–Thorne 可穿越虫洞 · 逐像素测地线光线追踪</title>
+<style>
+  :root{
+    --bg:#04060c; --fg:#c8dcff; --dim:#7f8ea6; --acc:#5ee0b0;
+    --warn:#ffb454; --bad:#ff6b6b;
+    --pane:rgba(6,10,18,.80); --line:rgba(120,160,220,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden}
+  body{font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,"Cascadia Mono","Noto Sans Mono CJK SC",monospace;
+       -webkit-font-smoothing:antialiased}
+  canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  canvas#gl.drag{cursor:grabbing}
+
+  .pane{position:fixed;background:var(--pane);border:1px solid var(--line);border-radius:10px;
+        padding:9px 11px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+        box-shadow:0 8px 28px rgba(0,0,0,.5)}
+  .pane h2{margin:0 0 4px;font-size:12px;font-weight:600;color:#eaf3ff;letter-spacing:.02em}
+  .dim{color:var(--dim)}
+  .acc{color:var(--acc)}
+  .warn{color:var(--warn)}
+  .bad{color:var(--bad)}
+
+  /* ---------- 左上：标题 / 状态 ---------- */
+  #hud{left:12px;top:12px;max-width:min(346px, calc(50vw - 22px))}
+  #hud .sub{color:var(--dim);font-size:10.5px}
+  #hud .stat{margin-top:6px;color:var(--acc);font-size:10.5px;white-space:pre-wrap}
+  #hud .hint{margin-top:5px;color:var(--dim);font-size:10px;line-height:1.45}
+
+  /* ---------- 参数面板（现在位于右列内部，见下方 #rightcol） ---------- */
+  #ctl .row{display:flex;align-items:center;gap:8px;margin:8px 0 0}
+  #ctl .row label{flex:0 0 104px;color:var(--dim)}
+  #ctl .row .val{flex:0 0 52px;text-align:right;color:var(--acc)}
+  #ctl .sect{margin:10px 0 2px;padding-top:8px;border-top:1px solid var(--line);
+             color:#9fb3cc;font-size:10.5px;letter-spacing:.03em}
+  #ctl input[type=range]{flex:1 1 auto;min-width:0;width:100%;height:14px;accent-color:#5ee0b0;background:transparent}
+  #ctl .btns{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  #ctl button{flex:1 1 0;min-width:66px;cursor:pointer;color:var(--fg);background:rgba(90,140,210,.14);
+              border:1px solid var(--line);border-radius:7px;padding:5px 6px;font:inherit}
+  #ctl button:hover{background:rgba(90,140,210,.26)}
+  #ctl button.on{background:rgba(94,224,176,.20);border-color:rgba(94,224,176,.45);color:#bff6e3}
+  #ctl .chks{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:9px;color:var(--dim)}
+  #ctl .chks label{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:10.5px}
+  #ctl .chks input{accent-color:#5ee0b0;margin:0}
+
+  /* ---------- 左下：自检 ---------- */
+  #chk{left:12px;bottom:12px;max-width:min(560px, calc(52vw - 18px));max-height:44vh;overflow:auto}
+  #chk pre{margin:4px 0 0;font:inherit;font-size:10.5px;line-height:1.55;white-space:pre;color:#b9cde8}
+
+  /* ---------- 右下：参数 + 光线路径 + 近似说明（同一列，自动分高） ----------
+     以前参数面板单独 position:fixed 在右上，右列只留了固定的 190px 顶部空间；
+     参数一多就会顶到右列下面、被后绘制的右列盖住。
+     现在三者放进同一个 flex 列：参数按内容高度、说明面板吃掉剩余高度并自己滚动。 */
+  #rightcol{position:fixed;right:12px;top:12px;bottom:12px;width:min(416px, calc(48vw - 18px));
+            display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .pane.flow{position:static;pointer-events:auto}
+  #ctl{width:100%;flex:0 0 auto;max-height:46vh;overflow:auto}
+  #raypane{flex:0 0 auto;max-height:36vh;overflow:auto}
+  #raycv{display:block;width:100%;height:auto;margin-top:5px;border-radius:6px;
+         background:#04070e;border:1px solid var(--line)}
+  #rayinfo{margin-top:4px;font-size:10px;line-height:1.5}
+  #note{flex:1 1 auto;min-height:0;overflow:auto;max-height:none}
+  #note p{margin:5px 0 0;color:#9fb3cf;font-size:10.5px;line-height:1.55}
+  #note b{color:#dfe9f8;font-weight:600}
+  #note .tag{color:var(--warn)}
+
+  /* ---------- 致命错误提示 ---------- */
+  #fail{left:50%;top:50%;transform:translate(-50%,-50%);width:min(680px,calc(100vw - 40px));
+        display:none;border-color:rgba(255,107,107,.45)}
+  #fail h2{color:#ff9c9c}
+  #fail p{margin:6px 0 0;line-height:1.6}
+  #fail pre{margin:8px 0 0;padding:8px;background:#120a0a;border:1px solid rgba(255,107,107,.3);
+            border-radius:6px;max-height:220px;overflow:auto;font-size:10.5px;color:#ffb0b0;white-space:pre-wrap}
+  #fail ul{margin:6px 0 0;padding-left:18px;line-height:1.7}
+
+  /* ---------- UI 侧边栏开关 ---------- */
+  #uiToggle{
+    position:fixed; right:10px; top:50%; transform:translateY(-50%);
+    z-index:60; width:26px; height:66px; padding:0; border-radius:8px 0 0 8px;
+    background:rgba(90,140,210,.18); border:1px solid var(--line); color:var(--fg);
+    font:inherit; font-size:13px; line-height:66px; text-align:center; cursor:pointer;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    transition:right .18s ease, background .18s ease;
+  }
+  #uiToggle:hover{ background:rgba(90,140,210,.32); }
+  body.ui-hidden #uiToggle{ right:0; }
+  /* 面板滑出/滑入；#fail 不参与（致命错误必须可见） */
+  #hud, #rightcol, #chk{ transition:opacity .18s ease, transform .18s ease, visibility .18s; }
+  body.ui-hidden #hud{ opacity:0; visibility:hidden; transform:translateX(-18px); }
+  body.ui-hidden #rightcol{ opacity:0; visibility:hidden; transform:translateX(26px); }
+  body.ui-hidden #chk{ opacity:0; visibility:hidden; transform:translateY(18px); }
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<!-- ============================ UI 侧边栏开关 ============================ -->
+<button id="uiToggle" title="隐藏面板（H）" aria-label="隐藏面板（H）">▶</button>
+
+<!-- ============================ 左上：状态 ============================ -->
+<div id="hud" class="pane">
+  <h2>Morris–Thorne 可穿越虫洞</h2>
+  <div class="sub">b(r) = b₀²/r，Φ ≡ 0 · 逐像素 RK4 数值积分零测地线</div>
+  <div class="stat" id="hudStat">初始化…</div>
+  <div class="hint">
+    中央圆盘 = 喉部（r = b₀），透过它看到的是<b>对面区域</b>的星场；
+    圆盘外是被虫洞引力偏折的本侧星场。<br>
+    <b>拖动</b> 转头 · <b>滚轮</b> 沿轴推进 · <b>WASD</b> 平移（Q/E 上下）·
+    <b>空格</b> 自由飞行 ⇄ 自动穿越
+  </div>
+</div>
+
+<!-- ============================ 右下：参数 + 光线路径 + 说明 ============================ -->
+<div id="rightcol">
+  <div id="ctl" class="pane flow">
+    <h2>参数（实时生效）</h2>
+
+    <div class="row">
+      <label>喉部半径 b₀</label>
+      <input id="sB0" type="range" min="0.20" max="4.00" step="0.01" value="1.00">
+      <span class="val" id="vB0">1.00</span>
+    </div>
+
+    <div class="row">
+      <label>积分步长 h</label>
+      <input id="sStep" type="range" min="0.010" max="0.400" step="0.005" value="0.080">
+      <span class="val" id="vStep">0.080</span>
+    </div>
+
+    <div class="row">
+      <label>相机速度 v/c</label>
+      <input id="sSpeed" type="range" min="0.00" max="0.95" step="0.01" value="0.55">
+      <span class="val" id="vSpeed">0.55</span>
+    </div>
+
+    <div class="row">
+      <label>相机距离 l</label>
+      <input id="sDist" type="range" min="-6.0" max="6.0" step="0.02" value="3.00">
+      <span class="val" id="vDist">3.00</span>
+    </div>
+
+    <div class="row">
+      <label>星场密度</label>
+      <input id="sDens" type="range" min="0.05" max="2.00" step="0.01" value="0.35">
+      <span class="val" id="vDens">0.35</span>
+    </div>
+
+    <div class="sect">两侧差异（A = l&gt;0，B = l&lt;0）</div>
+
+    <div class="row">
+      <label>侧 B 密度比</label>
+      <input id="sDensB" type="range" min="0.20" max="1.50" step="0.01" value="0.55">
+      <span class="val" id="vDensB">0.55</span>
+    </div>
+
+    <div class="row">
+      <label>侧 A 色温</label>
+      <input id="sTempA" type="range" min="0.00" max="1.00" step="0.01" value="0.75">
+      <span class="val" id="vTempA">0.75</span>
+    </div>
+
+    <div class="row">
+      <label>侧 B 色温</label>
+      <input id="sTempB" type="range" min="0.00" max="1.00" step="0.01" value="0.12">
+      <span class="val" id="vTempB">0.12</span>
+    </div>
+
+    <div class="row">
+      <label>侧 A 星云</label>
+      <input id="sNebA" type="range" min="0.00" max="1.00" step="0.01" value="0.15">
+      <span class="val" id="vNebA">0.15</span>
+    </div>
+
+    <div class="row">
+      <label>侧 B 星云</label>
+      <input id="sNebB" type="range" min="0.00" max="1.00" step="0.01" value="0.85">
+      <span class="val" id="vNebB">0.85</span>
+    </div>
+
+    <div class="row">
+      <label>步数上限</label>
+      <input id="sCap" type="range" min="96" max="400" step="4" value="260">
+      <span class="val" id="vCap">260</span>
+    </div>
+
+    <div class="row">
+      <label>曝光</label>
+      <input id="sExp" type="range" min="0.20" max="3.00" step="0.02" value="0.85">
+      <span class="val" id="vExp">0.85</span>
+    </div>
+
+    <div class="row">
+      <label>泛光强度</label>
+      <input id="sBloom" type="range" min="0.00" max="1.50" step="0.01" value="0.35">
+      <span class="val" id="vBloom">0.35</span>
+    </div>
+
+    <div class="btns">
+      <button id="bFly" class="on">穿越飞行</button>
+      <button id="bReset">重置视角</button>
+      <button id="bPause">暂停</button>
+    </div>
+
+    <div class="btns" id="presets">
+      <button id="qAuto" class="on">自动</button>
+      <button id="qPerf">性能</button>
+      <button id="qBal">均衡</button>
+      <button id="qCine">电影</button>
+    </div>
+    <div class="btns" id="fpsTargets">
+      <button id="fps60">60fps</button>
+      <button id="fps120" class="on">120fps</button>
+      <button id="fps144">144fps</button>
+    </div>
+    <div class="btns" id="resTargets">
+      <button id="rAuto" class="on">自动</button>
+      <button id="r480">480p</button>
+      <button id="r720">720p</button>
+      <button id="r1080">1080p</button>
+      <button id="r2k">2K</button>
+    </div>
+    <div class="chks">
+      <label><input id="cAA" type="checkbox" checked> 临界带超采样</label>
+      <label><input id="cCube" type="checkbox" checked> 星场烘焙贴图</label>
+      <label><input id="cAutoExp" type="checkbox" checked> 自动曝光（视觉适应）</label>
+      <label><input id="cTurn" type="checkbox" checked> 平滑转身（穿越飞行）</label>
+      <label><input id="cFwd" type="checkbox" checked> 朝前看（自由飞行）</label>
+      <label><input id="cSph" type="checkbox" checked> 参照天体</label>
+    </div>
+  </div>
+
+  <div id="raypane" class="pane flow">
+    <h2>嵌入图上的光线路径 <span class="dim">（鼠标位置）</span></h2>
+    <canvas id="raycv" width="392" height="212"></canvas>
+    <div id="rayinfo" class="dim">把鼠标移到画面上</div>
+  </div>
+
+  <!-- ============================ 右下：近似说明 ============================ -->
+  <div id="note" class="pane flow">
+    <h2>方法 · 近似 · 偏差来源</h2>
+    <p><b>没有用</b>屏幕空间畸变、极坐标扭曲、有效折射率或几何光学近似：每像素都在积分
+       <span class="acc">d²l/dσ² = J²l/(l²+b₀²)²， dψ/dσ = J/(l²+b₀²)</span>
+       （RK4 + 自适应步长 + 第一积分投影）。</p>
+    <p><span class="tag">近似 1（数值）</span> RK4 定步长积分，误差 O(h⁵) 每步；
+       步长滑块即此项的控制量。每步后用第一积分
+       (dl/dσ)² + J²/r² = 1 做投影，消除振幅漂移，只留相位误差。
+       自检面板用 h 与 h/2 跑同一条光线，直接给出渐近方向的角偏差。</p>
+    <p><span class="tag">近似 2（截断）</span> 光线在 r &gt; r_esc = 200 b₀ 处被判定"逃逸"，
+       取该处方向作为渐近方向，方向误差 O((b₀/r_esc)²) ≈ 2.5×10⁻⁵ rad（约 0.02 像素）。</p>
+    <p><span class="tag">近似 3（步数上限）</span> 步数耗尽的光线按"未解出"渲染成近黑色。
+       该区域在方向空间只有 ~10⁻⁷·b₀ 宽（自检面板给出采样中的最大步数佐证）。</p>
+    <p><span class="tag">近似 4（星场贴图）</span> 开启烘焙后，星场来自 <b>2048²/面</b>（显存不足时
+       逐级回退 1536²/1024²；优先 RGBA16F 线性 HDR，不支持时回退 RGBA8 伽马编码）的立方体贴图，
+       角分辨率 ≈ 0.77 mrad（1080p、60° 视场下一个像素约 1.0 mrad，故纹素比像素更细）；
+       自检面板给出「贴图 vs 程序化」的平均绝对差（默认约 0.005–0.023，随内部分辨率/星场密度变化；
+       主要是星点尺寸与采样差异，不是相位差）。</p>
+    <p><span class="tag">星点尺寸</span> 星点角半径基准压到 <b>0.90–1.15 像素</b>，再乘 0.85–1.15
+       亮度因子（实际约 0.77–1.32 像素；真实点源
+       就是衍射极限点，亮度不该改变角尺寸），亮度全部由峰值承担。之前亮星层半径达
+       2.6 mrad ≈ 3.6 像素、再乘 1.35 倍亮度因子，直径近 9 像素，看着就是一团糊。
+       代价是移动时星点更容易闪烁（没有运动模糊；静态时靠 TAA 累积消除）。</p>
+    <p><span class="tag">星场密度</span> 默认 0.35× ≈ 5.4 万颗（全天），比肉眼夜空（约 9 千颗）
+       密约 6 倍，是为了让喉部窗口与爱因斯坦环在静帧里可辨认；滑到 0.15× 左右即接近真实
+       肉眼密度，代价是缠绕结构变得很难看出。全天星数由生成器解析计数给出（自检面板第 8 项），
+       不是估计值。</p>
+    <p><span class="tag">两侧差异</span> 面板里 5 个滑块控制 A / B 两侧的星场"性格"：
+       <b>密度比</b>（默认 0.55×）、<b>色温参数</b>（0 = 红矮星为主 2600–5200 K，
+       1 = 蓝巨星为主 8000–20000 K）、<b>星云形态</b>（0 = 大团块 + 宽银河带，
+       1 = 细丝 + 窄带）。只换哈希种子的话两侧只是"同一种星空的两次抽样"，
+       人眼记不住随机星场，所以穿越时感觉不到换地方；改成统计特征不同（疏密、
+       色相、结构）才真正一眼可辨。这些参数只在烘焙时生效，运行时零成本。</p>
+    <p><span class="tag">速度剖面</span> 自动穿越在两端各留一段 ramp，用 smoothstep 把 |v|
+       平滑压到 0 再反向。原先是恒速 + 瞬时反号，需要无穷大加速度，会让 D⁴ 前灯效应
+       （0.95c 时迎面/背向相差 230 万倍）在端点处跳变；现在 v 连续过 0 ⇒ D 连续过 1。
+       现实里更慢：0.95c 下 1g 减速要约一年。</p>
+    <p><span class="tag">A 平滑转身（自动穿越，可开关）</span> 亮度因子 D = γ(1+v·cosθ) 里，
+       端点翻转的是 v 的符号，而**穿喉部时翻转的是 cosθ**——相机"盯着喉部看"，
+       而喉部是极小曲面，径向方向在此反向，于是视线在 l=0 处会瞬间转身 180°。
+       开启时让相机绕视线的切向轴平滑转过 θ(l) = π(1−tanh(l/λ))/2（λ = 0.45 b₀）：
+       D 连续经过 γ(1+v) → γ → γ(1−v)，亮度不再跳变；关掉则全程朝前看，不转身。</p>
+    <p><span class="tag">B 朝前看（自由飞行，可开关）</span> 开启时相机基存在 ∂_l 系里
+       （而不是渐近平坦系），物理视线方向穿过喉部时是连续的：一直朝前飞、朝前看，
+       喉部从身后掠过，对面世界在前方打开——cosθ 根本不会翻转。关掉则回到"始终面向喉部"
+       的行为（在 ê_r 意义下），穿喉部时会翻 180°（这里用 0.25 s 一阶跟踪做了缓冲）。</p>
+    <p><span class="tag">C 自动曝光（自动穿越，可开关）</span> 对 1/D_center⁴ 做 τ = 0.45 s
+       一阶低通后乘进场景辐射亮度，模拟相机自动光圈 / 人眼亮适应。它只改显示映射
+       （增益在泛光阈值提取之前施加，所以泛光也跟着适应），不改物理亮度；自由模式下
+       增益平滑回到 1。</p>
+    <p><span class="tag">参照天体</span> 4 个有限距离的小球体（半径 0.14–0.45 b₀，分布在
+       l = +2.4 … −6.0、离轴 17°–30°），不是画在天空上的贴纸：它们参与逐像素的
+       测地线积分，光线在平面内与球体做真实相交测试，因此会被虫洞正常透镜——
+       掠过喉部时同一个天体可能出现多重像，靠近时因视差迅速变大，这就是"感知穿越"的
+       参照物。它们同样受 D⁴ 前灯效应影响。代价是每步多了 4 次球体测试（约 +20% 开销），
+       不需要时可用复选框关掉。</p>
+    <p><span class="tag">近似 5（TAA）</span> 静止时用 Halton 亚像素抖动累积多帧做运行平均
+       （在线性 HDR 空间，浮点靶下无量化损失）。<b>运动时也继续累积</b>：历史帧在
+       resolve pass 里被本帧 3×3 邻域的颜色范围钳制，alpha 固定 0.12（≈6 帧平均）——
+       没有运动矢量、不做重投影，所以靠邻域钳制来抑制拖影，代价是快速平移时高对比
+       边缘可能有轻微重影。只有参数变化和相机跳跃（位移 &gt; 1.5b₀ / 转身 &gt; 34° /
+       朝向变化 &gt; 20°）才硬重置。对饱和区不敏感。</p>
+    <p><span class="tag">后处理</span> 场景以线性 HDR 写入 RGBA16F（无
+       <code>EXT_color_buffer_float</code> 时回退 RGBA8 并按 ×1/4 压缩存储），
+       再做亮度阈值提取 → 1/2·1/4·1/8 三级可分离高斯模糊 → ACES 色调映射。
+       这一层只影响显示，不参与任何光线计算。</p>
+    <p><span class="tag">不是近似</span> Φ ≡ 0 时 dt = dσ，零测地线的空间投影<b>严格</b>是空间度规
+       h 的测地线（Fermat 原理），且 h 球对称 ⇒ 测地线严格落在过原点的平面内。所以
+       "平面化 + 空间测地线"是精确性质，不是简化。</p>
+    <p><span class="tag">能量条件</span> 本度规要求 ρ = −b₀²/(8πr⁴) &lt; 0，径向零矢量下
+       ρ + p_r = −b₀²/(4πr⁴) &lt; 0 —— <b>NEC 被处处违反</b>。这是纯理论构造，
+       没有任何观测证据支持负能量密度物质；详见自检面板第 6 项。</p>
+    <p><span class="tag">未建模</span> 星场是程序化生成的（非真实星表）；星云的谱型未建模，
+       其多普勒色温偏移用参考黑体近似；无引力透镜时间延迟可视化（Φ ≡ 0 也无引力红移）。</p>
+  </div>
+</div>
+
+<!-- ============================ 左下：自检 ============================ -->
+<div id="chk" class="pane">
+  <h2>自检 <span class="dim">（与着色器同一套方程 / 同一积分器）</span></h2>
+  <pre id="chkText">…</pre>
+</div>
+
+<!-- ============================ 致命错误 ============================ -->
+<div id="fail" class="pane">
+  <h2 id="failTitle">无法运行</h2>
+  <p id="failMsg"></p>
+  <pre id="failLog" style="display:none"></pre>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Morris–Thorne 可穿越虫洞 · 逐像素测地线光线追踪
+   ----------------------------------------------------------------------------
+   本文件零外部依赖、零网络请求，双击即可运行。下面是从度规出发的完整推导，
+   着色器与自检面板中的每一个方程都对应这里的某一步。
+   ============================================================================
+
+   ────────────────────────────────────────────────────────────────────────────
+   1. 度规与形状函数的选取
+   ────────────────────────────────────────────────────────────────────────────
+   Morris–Thorne 可穿越虫洞度规（Morris & Thorne, Am. J. Phys. 56, 395 (1988)）:
+
+       ds² = −e^{2Φ(r)} dt² + dr²/(1 − b(r)/r) + r²(dθ² + sin²θ dφ²)
+
+   r 是面积半径（areal radius，球面 r = const 的面积恒为 4πr²），
+   b(r) 是形状函数，Φ(r) 是红移函数。
+
+   本实现取
+       Φ(r) ≡ 0                      （零潮汐力 / 无红移的"最简"可穿越虫洞）
+       b(r) = b₀²/r                  （b(r) 中最常用的解析形式）
+
+   两个必要条件都满足：
+       b(b₀) = b₀                    喉部：最小面积半径 r = b₀
+       b′(b₀) = −b₀²/b₀² = −1 < 1    flare-out 条件（喉部张开）
+   注意：flare-out 条件与"必须违反零能量条件"是同一件事的两种说法，
+   代价是负能量密度 —— 完整推导与数值见第 6 节，这是本页最需要说清楚的部分。
+
+   Φ ≡ 0 是一个实质性的物理选择，它带来一个后面要反复用到的关键性质：
+   度规是静态且 g_tt = −1，于是零测地线满足 dt² = h_ij dx^i dx^j，
+   其中 h_ij 是空间度规
+       h = dr²/(1 − b₀²/r²) + r²(dθ² + sin²θ dφ²)。
+   即：光线的空间轨迹是空间度规 h 的测地线（Fermat 原理 ∫dt = ∫dσ）。
+   这是 Φ ≡ 0 静态时空下零测地线的**精确**性质，不是几何光学近似。
+
+   ────────────────────────────────────────────────────────────────────────────
+   2. 嵌入图 z(r) 的推导（自检面板第 1 项）
+   ────────────────────────────────────────────────────────────────────────────
+   取 t = const、θ = π/2 的赤道切片，空间度规退化为二维
+       dl² = dr²/(1 − b₀²/r²) + r² dφ² ,     r ≥ b₀
+   把它等距嵌入三维欧氏空间的旋转面 (ρ, z)：由于面积半径 r 就是柱半径，
+   取 ρ = r，则要求
+       dρ² + dz² + ρ²dφ² = dr²/(1 − b₀²/r²) + r²dφ²
+   即 1 + (dz/dr)² = 1/(1 − b₀²/r²)，于是
+       dz/dr = ± 1/√(r²/b₀² − 1) = ± b₀/√(r² − b₀²)
+   积分（z(b₀) = 0）得闭式
+       z(r) = ± b₀ · arccosh(r/b₀)
+   这就是两个在 r = b₀ 处粘合的"漏斗"。注意 dz/dr → ∞ 当 r → b₀，
+   喉部在嵌入图上是切向的——穿越正发生在这里。
+
+   沿径向的固有距离（= 嵌入面上沿 ρ 方向的弧长，因为嵌入是等距的）：
+       l(r) = ±∫_{b₀}^{r} dr′/√(1 − b₀²/r′²) = ±√(r² − b₀²)
+   注意 z ≠ l：z = b₀·arccosh(r/b₀)，l = √(r² − b₀²)。自检面板同时给出两者。
+
+   以 l 为坐标，空间度规变成
+       dl² + (l² + b₀²)(dθ² + sin²θ dφ²) ,    l ∈ (−∞, +∞)
+   关键：l 是**有符号**的。l > 0 与 l < 0 是喉部连接的两个区域（两个"宇宙"），
+   l = 0 处度规完全正则。本可视化里光线就是在 l 上真正穿过 0 的。
+
+   ────────────────────────────────────────────────────────────────────────────
+   3. 光线方程（着色器每像素积分的方程）
+   ────────────────────────────────────────────────────────────────────────────
+   h 球对称 ⇒ 任一测地线落在"过原点、由初始位置与初始速度张成"的平面内
+   （对该平面反射是对称操作，把初始数据映到自身，故轨道必须落在平面内）。
+   取该平面内的极坐标 (r, ψ)，以空间弧长 σ 为参数，两个第一积分是
+       守恒角动量   J = r² dψ/dσ
+       归一化       1 = (dr/dσ)²/(1 − b₀²/r²) + r²(dψ/dσ)²
+   用 l 改写（r² = l² + b₀²，dl/dσ = (dr/dσ)/√(1 − b₀²/r²)）：
+       (dl/dσ)² = 1 − J²/(l² + b₀²)                    … (A)
+       dψ/dσ    = J/(l² + b₀²)                          … (B)
+   把 (A) 对 σ 求导：2w·w′ = −J²·d/dσ[(l²+b₀²)^{-1}] = 2J²l·w/(l²+b₀²)²，
+   得光滑的二阶方程（喉部 l = 0 处无奇点，这是选 l 而不选 r 的原因）：
+       d²l/dσ² = J² l / (l² + b₀²)²                     … (C)
+   (C) 与 (B) 就是着色器与自检面板实际积分的方程；(A) 作为约束每步复位。
+
+   临界碰撞参数：由 (A)，当且仅当 J < b₀ 时 dl/dσ 在 l = 0 处仍非零，
+   光线能到达喉部并穿越；J > b₀ 的光线在 r = J 处折返，被弹回本侧；
+   J = b₀ 是"阴影"边缘。局部正交标架中 J = r_c·sinα，α 为光线与径向的夹角。
+
+   ────────────────────────────────────────────────────────────────────────────
+   4. 逐像素算法
+   ────────────────────────────────────────────────────────────────────────────
+   相机位于有符号固有距离 l_c（r_c = √(l_c² + b₀²)），局部正交标架
+       ê_r = √(1 − b₀²/r²) ∂_r ,  ê_θ = (1/r) ∂_θ ,  ê_φ = (1/(r sinθ)) ∂_φ
+   像素方向 d = (a, b, c) 在该标架下取为单位向量（相对论像差已在此处施加），则
+       J = r_c·√(b² + c²) ,   t = √(b² + c²)
+   注意 ê_r 与 ∂_l 相差一个 sign(l)（在 l<0 的一侧，"朝喉部"是 l 增大方向），
+   所以 dl/dσ 的初值是
+       w = a · sign(l_c)
+   这一符号若写错，飞过喉部后光线会朝远离喉部的方向走，看不到"回来的路"。
+   逃逸后的渐近方向同样带符号：δ = atan2(J, w·l)。
+   平面基（笛卡尔表示）：
+       n̂₁ = r̂_cam ,   n̂₂ = (b·ê_θ + c·ê_φ)/t   （t = 0 时平面任意，光线沿轴）
+   RK4 积分 (C)(B)，自适应步长 dσ = h·(b₀+|l|)·√((b₀+|l|)/b₀)，直到 r > r_esc = 200 b₀。
+   逃逸后的渐近方向：
+       d_∞ = cos(ψ + δ)·n̂₁ + sin(ψ + δ)·n̂₂ ,
+       δ = atan2( J , w·l )        （等价于 atan2(J/r, w·l/r)，逃逸时 w·l > 0）
+   （对直线轨道该式精确；残余误差 O((b₀/r_esc)²) 来自仍未被积完的偏折。）
+   用 d_∞ 查程序化星表；星表种子由最终 sign(l) 决定 —— 因此两侧星场不同。
+
+   ────────────────────────────────────────────────────────────────────────────
+   5. 相对论像差（相机速度参数）
+   ────────────────────────────────────────────────────────────────────────────
+   相机以局部速度 v（单位 c）沿 ±ê_r 运动。静态标架与相机瞬时静止标架之间是
+   沿 ê_r 的纯 Lorentz boost，对光子方向有标准像差公式
+       cosθ = (cosθ′ + v)/(1 + v cosθ′) ,   sinθ = sinθ′·√(1−v²)/(1 + v cosθ′)
+   反向追踪时：屏幕方向 d 给出相机系中的到达方向，光子传播方向 k′ = −d，
+   经上式 boost 到静态标架得 k，再沿 −k 反向积分。因为 Φ ≡ 0、两标架都正交归一，
+   这一步在局部切空间内是精确的。
+
+   ────────────────────────────────────────────────────────────────────────────
+   6. 物质内容与能量条件 ★ 本页最需要说清楚的部分 ★
+   ────────────────────────────────────────────────────────────────────────────
+   把度规代入爱因斯坦方程 G_μν = 8πT_μν（几何单位 G = c = 1），在静态正交
+   标架下能动张量对角化 T^μ̂ν̂ = diag(ρ, p_r, p_t, p_t)。对一般 b(r)、Φ(r)：
+
+       ρ   = b′ / (8π r²)
+       p_r = [ −b/r³ + 2(1 − b/r)·Φ′/r ] / (8π)
+       p_t = [ (b − r b′)/(2r³)
+               + (1 − b/r)( Φ″ + Φ′² + Φ′/r − (b′r − b)Φ′/(2r(r−b)) ) ] / (8π)
+
+   本页取 Φ ≡ 0、b = b₀²/r（⇒ b′ = −b₀²/r²），上式退化为闭式：
+
+       ρ(r)   = − b₀² / (8π r⁴)          ← 处处为负
+       p_r(r) = − b₀² / (8π r⁴) = ρ       （径向张力）
+       p_t(r) = + b₀² / (8π r⁴) = −ρ      （切向压力）
+
+   零能量条件（NEC）：对任意零矢量 k 必须有 T_μν k^μ k^ν ≥ 0。
+   取径向零矢量 k = (1, ±1, 0, 0) 得
+
+       ρ + p_r = − b₀² / (4π r⁴) < 0      ← NEC 被违反，而且处处违反
+
+   取切向零矢量得 ρ + p_t = 0（恰好饱和）。所以 NEC 的违反量就是
+
+       Viol(r) ≡ min_k T_μν k^μ k^ν = ρ + p_r = − b₀²/(4π r⁴) = 2ρ(r)
+
+   喉部 r = b₀ 处：ρ(b₀) = −1/(8π b₀²)，Viol(b₀) = −1/(4π b₀²)。
+   用这个语言重写 flare-out 条件：b′(b₀) < 1 ⟺ ρ + p_r < 0。
+   ——"喉部张开"与"违反 NEC"是同一件事的两种说法，不是两个独立要求。
+
+   量级换算（b₀ = 1 m；ρ_geom 乘 c⁴/G = 1.211×10⁴⁴ J/m³ 每 m⁻²）：
+       ρ(b₀) ≈ −4.8×10⁴² J/m³     （负号；绝对值约为核物质能量密度的 2.0×10⁸ 倍）
+       总奇异物质 ∫ρ dV = −(π b₀/4)·c²/G ≈ −1.06×10²⁷ kg ≈ −177 个地球质量
+   （该虫洞的 ADM 质量 M = lim_{r→∞} b(r)/2 = 0：负物质量与正引力场能相消。）
+
+   ★★ 必须明确：以上是纯理论构造。至今没有任何观测证据表明自然界存在可宏观
+      累积的负能量密度物质。卡西米尔效应确实给出负能量密度，但量级比这里小
+      40 个数量级以上，且无法用来撑开任何宏观喉部。本页演示的是"如果这种时空
+      存在，它会看起来是什么样"的数学模型，不是对真实天体的模拟，也不构成
+      该时空可实现的任何论证。
+
+   ────────────────────────────────────────────────────────────────────────────
+   7. 多普勒频移与前灯效应（相机速度参数的另一半）
+   ────────────────────────────────────────────────────────────────────────────
+   静态标架中光子能量 E = −p·∂_t 沿测地线守恒（∂_t 是 Killing 矢量），且 Φ ≡ 0
+   时没有引力红移，故频率在传播途中不变，只有观测者运动带来频移。
+   观测者四速 u_obs = γ(∂_t + v ∂_l)，测得 ν_obs = −p·u_obs：
+
+       ν_obs / ν_em = γ ( 1 − v·cosθ_prop ) = γ ( 1 + v·cosθ_app )
+
+   其中 cosθ_app = d̂·ê_v 是"到达方向"（即反向追踪方向 d_∞）与速度方向的夹角。
+   迎面光源（cosθ_app = +1）得 D ≡ γ(1+v) > 1 → 蓝移；背离得 D < 1 → 红移。
+
+   亮度：比强度不变量 I_ν/ν³ 给出 I_obs(ν_obs) = D³·I_em(ν_em)，而玻尔兹曼
+   （全频段）强度按 I_bol ∝ D⁴ 缩放 —— 这就是"前灯效应"。
+   色温：黑体源被运动观测者看到仍是黑体，T_obs = D·T_em，据此做色温偏移。
+   本页对星点做逐星黑体色温位移 + D⁴ 亮度缩放；星云只做 D⁴ 亮度缩放
+   （未建模其谱型，其色温偏移属于近似）。
+   ============================================================================ */
+
+
+/* ============================================================================
+   Part A. 启动 / WebGL2 检测
+   ============================================================================ */
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('gl');
+
+  function fail(title, msg, log) {
+    $('fail').style.display = 'block';
+    $('failTitle').textContent = title;
+    $('failMsg').innerHTML = msg;
+    if (log) {
+      const el = $('failLog');
+      el.style.display = 'block';
+      el.textContent = log;
+    }
+    canvas.style.display = 'none';
+  }
+
+  let gl = null;
+  try {
+    gl = canvas.getContext('webgl2', {
+      antialias: false, alpha: false, depth: false, stencil: false,
+      premultipliedAlpha: false, preserveDrawingBuffer: false,
+      powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false
+    });
+  } catch (e) { gl = null; }
+
+  if (!gl) {
+    fail('此页面需要 WebGL2，但浏览器未能创建 WebGL2 上下文。',
+      '本可视化逐像素数值积分测地线，必须使用 WebGL2（GLSL ES 3.00）的浮点运算与' +
+      '动态循环。检测到 <b>没有可用的 WebGL2 上下文</b>，因此不渲染任何图像——' +
+      '这不是"性能不足"，而是根本无法执行。<br><br>可能原因与处理：' +
+      '<ul><li>浏览器版本过旧：请用 Chrome / Edge 56+、Firefox 51+、Safari 15+。</li>' +
+      '<li>GPU 被列入黑名单或驱动过旧：在地址栏打开 <code>chrome://gpu</code> 查看 ' +
+      'WebGL2 状态，或更新显卡驱动。</li>' +
+      '<li>浏览器设置里禁用了硬件加速 / WebGL：在设置中重新开启后重启浏览器。</li>' +
+      '<li>运行在无 GPU 的远程桌面或虚拟机中：尝试开启软件渲染（' +
+      '<code>chrome://flags</code> 中启用 SwiftShader）。</li></ul>');
+    return;
+  }
+
+  canvas.addEventListener('webglcontextlost', function (e) {
+    e.preventDefault();
+    fail('WebGL 上下文丢失', 'GPU 上下文被系统回收（通常是显存不足或驱动重置）。' +
+      '请刷新页面重试。', null);
+  }, false);
+
+
+/* ============================================================================
+   Part B. 着色器
+   ============================================================================ */
+
+  const VS = `#version 300 es
+layout(location = 0) in vec2 aPos;
+out vec2 vUv;
+void main(){
+  vUv = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+  /* --------------------------------------------------------------------------
+     星场 / 星云 / 黑体色的共享 GLSL 片段。
+     实时渲染与立方体烘焙共用同一份源码 —— 保证"贴图路径"与"程序化路径"
+     在数学上逐位同源，自检面板里的差异统计才有意义。
+     -------------------------------------------------------------------------- */
+  const SKY = `
+precision highp float;
+precision highp int;
+#define SPH_N 5
+
+uniform vec2  uRes;              // 本次渲染分辨率
+uniform vec3  uF, uR, uU;        // 相机基（局部正交标架 ê_r, ê_θ, ê_φ 下的坐标）
+uniform float uTanHalf, uAspect;
+uniform float uB0, uStep;        // 喉部半径 b₀、积分步长 h
+uniform int   uMaxSteps;         // 步数上限
+uniform float uCamL, uRC, uREsc; // 相机有符号 l、r_c、逃逸半径
+uniform vec3  uN1, uEth, uEph;   // r̂_cam、ê_θ、ê_φ 的笛卡尔表示
+uniform float uSeedA, uSeedB;    // 两侧星场种子（必须不同）
+uniform vec3  uTintA, uTintB;    // 两侧星云色调
+uniform vec3  uBandA, uBandB;    // 两侧星云带方向
+uniform float uPixAng;           // 一个内部像素的角尺寸（弧度），用于临界带 AA 阈值
+uniform float uStarPixAng;       // 一个"屏幕像素"的角尺寸（弧度），星点尺寸/贴图采样用
+uniform float uV;                // 相机 dl/dt（有符号，单位 c）
+uniform int   uStatMode;         // 1 = 步数统计；2 = 贴图/程序化星场差异统计
+uniform float uHdrScale;         // HDR 缓冲的存储缩放：浮点靶 = 1，8 位回退 = 1/4
+uniform float uStarDens;         // 星场密度倍率（只缩放网格，不缩放星点尺寸）
+uniform vec2  uSideDens;         // 两侧星场密度比（A, B）
+uniform vec2  uSideTemp;         // 两侧色温参数（0 红矮星 ↔ 1 蓝巨星）
+uniform vec2  uSideNeb;          // 两侧星云形态（0 大团块 ↔ 1 细丝）
+uniform float uAutoExp;           // 自动曝光增益（模拟相机自动光圈/人眼亮适应）
+uniform vec4  uSphA[SPH_N];       // 参照天体：(l_s, r_s, R_s, 启用)
+uniform vec3  uSphDir[SPH_N];     // 参照天体的方向（平坦系单位向量）
+uniform vec3  uSphCol[SPH_N];     // 参照天体的基色
+uniform vec3  uSphAxis[SPH_N];    // 条纹行星的自转轴（平坦系单位向量）
+uniform float uSphStyle[SPH_N];   // 0 = 纯色球，1 = 条纹行星
+uniform vec2  uJitter;           // TAA 亚像素抖动（像素单位）
+uniform int   uAA;               // 1 = 临界带 2×2 超采样
+uniform int   uUseCube;          // 1 = 用预烘焙立方体贴图
+uniform samplerCube uCubeA;      // 侧 A 星场贴图
+uniform samplerCube uCubeB;      // 侧 B 星场贴图
+uniform float uCubeGamma;        // 贴图解码指数：HDR 烘焙 = 1.0，RGBA8 伽马编码 = 2.2
+uniform float uBakeSide;         // 烘焙哪一侧：0 = A，1 = B
+uniform float uBakePixAng;       // 烘焙用的角分辨率（星点尺寸下限）
+
+out vec4 fragColor;
+
+/* ---------------- 黑体色温 → 线性 RGB（Tanner Helland 近似，亮度归一化） ----------------
+   用于多普勒色温偏移：黑体源被运动观测者看到仍是黑体，只是 T_obs = D·T_em。 */
+vec3 bbColor(float T){
+  float t = clamp(T, 1000.0, 40000.0) / 100.0;
+  float r, g, b;
+  if (t <= 66.0) {
+    r = 255.0;
+    g = 99.4708025861 * log(t) - 161.1195681661;
+  } else {
+    r = 329.698727446 * pow(t - 60.0, -0.1332047592);
+    g = 288.1221695283 * pow(t - 60.0, -0.0755148492);
+  }
+  if (t >= 66.0) b = 255.0;
+  else if (t <= 19.0) b = 0.0;
+  else b = 138.5177312231 * log(t - 10.0) - 305.0447927307;
+  vec3 c = clamp(vec3(r, g, b) / 255.0, 0.0, 1.0);
+  return c / max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
+}
+
+/* ---------------- 哈希 / 噪声 ---------------- */
+vec3 hash33(vec3 p){
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.xxy + p.yxx) * p.zyx);
+}
+float hash13(vec3 p){
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+float vnoise(vec3 p){
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash13(i + vec3(0.0,0.0,0.0));
+  float n100 = hash13(i + vec3(1.0,0.0,0.0));
+  float n010 = hash13(i + vec3(0.0,1.0,0.0));
+  float n110 = hash13(i + vec3(1.0,1.0,0.0));
+  float n001 = hash13(i + vec3(0.0,0.0,1.0));
+  float n101 = hash13(i + vec3(1.0,0.0,1.0));
+  float n011 = hash13(i + vec3(0.0,1.0,1.0));
+  float n111 = hash13(i + vec3(1.0,1.0,1.0));
+  return mix(mix(mix(n000,n100,f.x), mix(n010,n110,f.x), f.y),
+             mix(mix(n001,n101,f.x), mix(n011,n111,f.x), f.y), f.z);
+}
+
+/* ---------------- 程序化星场：立方体面网格 + 格内抖动 ----------------
+   每个立方体面上的格子最多放一颗星；星的三维方向由面号与格内抖动反推，
+   再用 dot 得到角距 ⇒ 星点大小在球面上均匀（不受面畸变影响）。
+   dop = 多普勒因子 D：星的观测色温取 T_obs = D·T_em（黑体色温位移）。
+   pixAng = 星点尺寸下限所用的角分辨率（实时渲染用 uPixAng，烘焙用 uBakePixAng）。
+   densScale = 该侧的密度比（让虫洞两端星场密度不同）。
+   tempC = 该侧的色温参数 0…1：0 = 以红矮星为主，1 = 以蓝巨星为主。 */
+vec3 starLayer(vec3 dir, float dop, float dens, float seed, float sizeFrac, float bright,
+               float pixAng, float densScale, float tempC, vec3 bandDir, float bandW){
+  vec3 ad = abs(dir);
+  float m = max(ad.x, max(ad.y, ad.z));
+  vec3 n = dir / m;
+
+  vec2 uv; float fid;
+  if (ad.x >= ad.y && ad.x >= ad.z) { uv = vec2(n.y, n.z); fid = dir.x > 0.0 ? 0.0 : 1.0; }
+  else if (ad.y >= ad.z)            { uv = vec2(n.x, n.z); fid = dir.y > 0.0 ? 2.0 : 3.0; }
+  else                              { uv = vec2(n.x, n.y); fid = dir.z > 0.0 ? 4.0 : 5.0; }
+
+  /* 网格密度被 uStarDens（全局）与 densScale（每侧）缩放，而星点大小仍按未缩放的
+     基础密度算 —— 否则减少星星会同时把它们画大，看起来不像是变稀而是变糊。 */
+  float gdens = dens * uStarDens * densScale;
+  vec2 g = uv * gdens;
+  vec2 cell = floor(g);
+  vec2 fr = g - cell;
+
+  vec3 h = hash33(vec3(cell, fid * 53.0 + seed));
+  vec2 sp = vec2(0.28 + 0.44 * h.x, 0.28 + 0.44 * h.y);   // 格内抖动（留出边距避免截断）
+  vec2 uvg = (cell + sp) / gdens;                         // 星点在该立方体面上的全局 uv
+
+  vec3 sd;
+  if      (fid < 0.5) sd = vec3( 1.0, uvg.x, uvg.y);
+  else if (fid < 1.5) sd = vec3(-1.0, uvg.x, uvg.y);
+  else if (fid < 2.5) sd = vec3(uvg.x,  1.0, uvg.y);
+  else if (fid < 3.5) sd = vec3(uvg.x, -1.0, uvg.y);
+  else if (fid < 4.5) sd = vec3(uvg.x, uvg.y,  1.0);
+  else                sd = vec3(uvg.x, uvg.y, -1.0);
+
+  /* 银河带内星密度增强：沿银道面 |dot(sd,bandDir)| 越小越密（最高 ~2.3×）。
+     用「格子的存在概率」而不是「网格密度」来调制，否则格子边界会随方向漂移、星点撕裂。 */
+  float bd = abs(dot(normalize(sd), bandDir));
+  float boost = 1.0 + 1.3 * (1.0 - smoothstep(0.0, bandW, bd));
+  if (h.z > clamp(0.36 * boost, 0.0, 0.92)) return vec3(0.0);   // 基础约 36% 格子有星
+
+  float cs = dot(dir, sd) * inversesqrt(dot(sd, sd));
+  float ang2 = max(0.0, 2.0 - 2.0 * cs);             // ≈ 角距²
+
+  vec3 h2 = hash33(vec3(cell, fid * 53.0 + seed + 7.0));
+  float mag = h2.x * h2.x * h2.x;                    // 亮度分布：暗星居多
+  /* 星点角半径：一律压到"一个像素量级"（真实点源就是衍射极限点，
+     亮度不该改变它的角尺寸）。以前按 sizeFrac/dens 算，亮星层半径达 2.6 mrad
+     ≈ 3.6 像素，再乘亮度因子最大 1.35 倍 —— 直径 9 像素的一团，看着就是糊的。
+     下限 0.90·pixAng 保证烘焙贴图时每颗星至少覆盖约一个纹素，否则会漏星/闪烁。 */
+  float rad = clamp(sizeFrac * 2.0 / dens, 0.90 * pixAng, 1.15 * pixAng)
+            * (0.85 + 0.30 * sqrt(mag));
+  float x = ang2 / (rad * rad);
+  if (x >= 1.0) return vec3(0.0);
+  float prof = 1.0 - x; prof *= prof;
+
+  /* 本征色温：由该侧的 tempC 决定分布范围与偏置（0 = 红矮星为主，1 = 蓝巨星为主）；
+     观测色温再被多普勒因子乘一次。bbColor 按亮度归一化，所以改色温不改总亮度。 */
+  float Tmin = mix(2600.0, 8000.0, tempC);
+  float Tmax = mix(5200.0, 20000.0, tempC);
+  float bias = mix(2.0, 0.8, tempC);
+  vec3 col = bbColor(mix(Tmin, Tmax, pow(h2.y, bias)) * dop);
+  return col * (prof * bright * (0.14 + 0.86 * mag));
+}
+
+vec3 starField(vec3 dir, float dop, float seed, float pixAng, float densScale, float tempC,
+               vec3 bandDir, float bandW){
+  vec3 c = vec3(0.0);
+  /* 三层只区分"密度 + 亮度"，角尺寸一律由 starLayer 压到像素量级。
+     振幅比之前提高（星点变细后单颗能量随半径平方下降），让亮星核心能过泛光阈值。 */
+  c += starLayer(dir, dop,  46.0, seed +  0.0, 0.060, 2.20, pixAng, densScale, tempC, bandDir, bandW);
+  c += starLayer(dir, dop,  96.0, seed + 11.0, 0.050, 0.75, pixAng, densScale, tempC, bandDir, bandW);
+  c += starLayer(dir, dop, 200.0, seed + 23.0, 0.045, 0.30, pixAng, densScale, tempC, bandDir, bandW);
+  return c;
+}
+
+/* 银河带宽度（morph 0…1）：星密度增强与星云带共用同一宽度 */
+float bandWidth(float morph){ return mix(0.44, 0.20, morph); }
+
+/* ---------------- 星云（多尺度噪声 + 银河带 + 暗尘带） ---------------- */
+vec3 nebula(vec3 dir, vec3 tint, vec3 bandDir, float seed, float morph, float bw){
+  /* morph 0…1 控制形态：0 = 大团块 + 宽银河带；1 = 细丝 + 窄带、对比更强。
+     所有参数都在烘焙时插值一次，运行时零成本。 */
+  float s0 = mix(1.5, 3.0, morph), s1 = mix(3.8, 7.2, morph);
+  float s2 = mix(9.0, 15.0, morph), s3 = mix(22.0, 34.0, morph);
+  float w0 = mix(0.48, 0.26, morph), w1 = mix(0.30, 0.32, morph);
+  float w2 = mix(0.15, 0.24, morph), w3 = mix(0.07, 0.18, morph);
+  float t0 = mix(0.38, 0.52, morph), t1 = mix(0.92, 0.97, morph);
+  float d = dot(dir, bandDir);
+  /* 沿银道面拉伸噪声坐标 → 丝状/纤维结构 */
+  vec3 stretch = dir + bandDir * d * mix(0.5, 1.4, morph);
+  float n1 = vnoise(stretch * s0 + vec3(seed * 0.71));
+  float n2 = vnoise(stretch * s1 + vec3(seed * 0.31 + 11.0));
+  float n3 = vnoise(stretch * s2 + vec3(seed * 0.17 + 23.0));
+  float n4 = vnoise(stretch * s3 + vec3(seed * 0.11 + 37.0));
+  float n = n1 * w0 + n2 * w1 + n3 * w2 + n4 * w3;
+  n = smoothstep(t0, t1, n);
+  /* 银河带：宽带 + 中心亮脊 + 暗尘带 + 团块 */
+  float band = 1.0 - smoothstep(0.0, bw, abs(d));
+  float ridge = exp(-d * d / max(1e-4, 0.5 * bw * bw));
+  float dust = exp(-d * d / max(1e-4, 0.02 * bw * bw));
+  float clump = smoothstep(0.42, 0.82, n1) * band;
+  float bb = mix(1.25, 0.55, morph);
+  n *= (0.16 + bb * band + 1.15 * ridge + 0.85 * clump);
+  n *= (1.0 - 0.72 * dust);
+  vec3 col = tint * n;
+  col += vec3(0.85, 0.80, 0.68) * (n * ridge * 0.55);   // 银心偏暖白
+  return col;
+}
+
+/* ---------------- 天空颜色（程序化路径；实时与烘焙共用） ----------------
+   两侧的差异通过 uniform 传入：密度比 uSideDens、色温参数 uSideTemp、
+   星云形态 uSideNeb，索引 0 = 侧 A（l>0），1 = 侧 B（l<0）。 */
+vec3 skyColor(vec3 dir, int side, float dop, float pixAng){
+  bool isA = (side == 1);
+  float sd  = isA ? uSeedA : uSeedB;
+  vec3 tint = isA ? uTintA : uTintB;
+  vec3 band = isA ? uBandA : uBandB;
+  float dScale = isA ? uSideDens.x : uSideDens.y;
+  float tempC  = isA ? uSideTemp.x : uSideTemp.y;
+  float morph  = isA ? uSideNeb.x  : uSideNeb.y;
+  float bw = bandWidth(morph);
+  vec3 c = starField(dir, dop, sd, pixAng, dScale, tempC, band, bw)
+         + nebula(dir, tint, band, sd, morph, bw);
+  /* 两侧额外的整体色调差异，让"两边不同"一眼可见 */
+  return c * (isA ? vec3(1.00, 1.00, 1.00) : vec3(1.08, 0.94, 0.85));
+}
+`;
+
+  /* --------------------------------------------------------------------------
+     主着色器：每像素积分一条零测地线，取回渐近方向，再查星表。
+     所有符号与文件顶部推导一一对应。
+     -------------------------------------------------------------------------- */
+  const FS = `#version 300 es
+` + SKY + `
+
+/* ---------------- 测地线积分 ----------------
+   RK4 积分 d²l/dσ² = J²l/(l²+b₀²)² , dψ/dσ = J/(l²+b₀²)
+   自适应步长 dσ = h(b₀+|l|)√((b₀+|l|)/b₀)：喉部附近细、远处粗。
+   每步后用第一积分 (dl/dσ)² = 1 − J²/r² 做投影。
+   返回：0 = 步数耗尽（未解出），1 = 落在 l>0 侧，2 = 落在 l<0 侧，
+         3+k = 命中第 k 个有限距离参照天体（outDir 回传其表面法向）。 */
+int trace(vec3 dloc, out vec3 outDir, out float steps){
+  float a  = dloc.x;                 // ê_r 方向分量
+  float t  = length(dloc.yz);        // 切向分量大小
+  float J  = uRC * t;                // 守恒角动量 = 碰撞参数
+  float b2 = uB0 * uB0;
+  float l  = uCamL;                  // 有符号固有距离
+  /* ê_r 与 ∂_l 相差 sign(l)：在 l<0 的一侧，"朝喉部"对应 l 增大。
+     所以 dl/dσ 的初值是 a·sign(l)，不能直接取 a。 */
+  float w  = a * (uCamL < 0.0 ? -1.0 : 1.0);
+  float psi = 0.0;
+
+  /* 平面基 n̂₂：光线所在的平面由 r̂_cam 与光线方向张成 */
+  vec3 n2;
+  if (t > 1e-7) {
+    n2 = (dloc.y * uEth + dloc.z * uEph) / t;
+  } else {
+    /* 纯径向光线：J = 0，轨道始终沿轴，n̂₂ 任取一个与 n̂₁ 垂直的方向 */
+    vec3 ref = abs(uN1.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    n2 = normalize(cross(uN1, ref));
+  }
+
+  /* ---- 有限距离参照天体：把每个球投影到这条光线的平面内 ----
+     球心 (l_s, n̂_s)，光线平面法向 ŝ = n̂₁ × n̂₂，垂距 h = r_s·(n̂_s·ŝ)。
+     平面内用坐标 (l, r·ψ)：球心 (l_s, r_s·ψ_s)，于是
+        三维距离² = (Δl)² + (rΔψ)² + h²
+     只要 h² < R²，该球才可能被这条光线击中（sQ ≥ 0 表示活跃）。 */
+  vec3 sHat = cross(uN1, n2);
+  float sL[SPH_N], sPsi[SPH_N], sH[SPH_N], sR[SPH_N], sQ[SPH_N];
+  for (int k = 0; k < SPH_N; k++) {
+    vec3 nd = uSphDir[k];
+    float rs = uSphA[k].y;
+    float R  = uSphA[k].z;
+    float hh = rs * dot(nd, sHat);
+    sL[k] = uSphA[k].x; sR[k] = R; sH[k] = hh;
+    sPsi[k] = atan(dot(nd, n2), dot(nd, uN1));
+    float q = R * R - hh * hh;
+    sQ[k] = (uSphA[k].w > 0.5 && q > 0.0) ? q : -1.0;
+  }
+
+  bool escaped = false;
+  int i = 0;
+  /* B4：把"步长收紧"与"球体命中测试"合并成一个循环（原来每步跑两遍 SPH_N）。
+     命中测试用上一步的线段 [lPrev..l]，所以循环开头同时做两件事。 */
+  float lPrev = l, psiPrev = psi, rPrev = sqrt(l * l + b2);
+  for (i = 0; i < uMaxSteps; ++i) {
+    float r2 = l * l + b2;
+    if (r2 > uREsc * uREsc) { escaped = true; break; }
+
+    /* 自适应步长：dσ = h·(b₀+|l|)·√((b₀+|l|)/b₀)
+       喉部附近 ≈ h·b₀（细），远处按 l^1.5 增长（粗）。
+       用 l^1.5 而非 l 增长：远处 ∫dl/l^1.5 收敛，使 r_esc 可以取得很大
+       （200 b₀）而几乎不增加步数，同时不会跳过任何拐点——
+       视野内可见光线的折返点都在 r = J ≤ r_c 附近，仍由 h·b₀ 量级的细步覆盖。 */
+    float ds = uStep * (uB0 + abs(l)) * sqrt((uB0 + abs(l)) / uB0);
+
+    /* 合并循环：
+       - 用当前 l 收紧下一步步长（靠近参照天体时 ds ≤ 0.35R）；
+       - 用上一段 [lPrev..l] 做球体命中测试（步长已 ≤0.35R，粗筛 1.5R 足够）。 */
+    for (int k = 0; k < SPH_N; k++) {
+      if (sQ[k] < 0.0) continue;
+      if (abs(l - sL[k]) < 2.0 * sR[k] + 0.15) ds = min(ds, 0.35 * sR[k]);
+      if (abs(l - sL[k]) > 1.5 * sR[k]) continue;
+      float ax = lPrev, ay = rPrev * psiPrev;
+      float bx = l,     by = sqrt(r2) * psi;
+      float cx = sL[k], cy = uSphA[k].y * sPsi[k];
+      float vx = bx - ax, vy = by - ay;
+      float wx = cx - ax, wy = cy - ay;
+      float vv = vx * vx + vy * vy;
+      float tt = vv > 1e-12 ? clamp((wx * vx + wy * vy) / vv, 0.0, 1.0) : 0.0;
+      float px = ax + tt * vx - cx, py = ay + tt * vy - cy;
+      if (px * px + py * py + sH[k] * sH[k] < sR[k] * sR[k]) {
+        vec3 tHat = -sin(psi) * uN1 + cos(psi) * n2;
+        vec3 rHat = cos(psi) * uN1 + sin(psi) * n2;
+        float drdl = l / sqrt(r2);
+        vec3 off = px * drdl * rHat + py * tHat + sH[k] * sHat;
+        outDir = normalize(off);
+        steps = float(i);
+        return 3 + k;
+      }
+    }
+
+    /* 保存本步起点（供下一步命中测试） */
+    float lStep0 = l, psiStep0 = psi, rStep0 = sqrt(r2);
+
+    /* ---- RK4（每级只用一次除法，靠倒数复用） ---- */
+    float i1 = 1.0 / r2;
+    float k1l = w;
+    float k1w = J * J * l * i1 * i1;
+    float k1p = J * i1;
+
+    float l2 = l + 0.5 * ds * k1l, w2 = w + 0.5 * ds * k1w;
+    float r2b = l2 * l2 + b2;
+    float i2 = 1.0 / r2b;
+    float k2l = w2;
+    float k2w = J * J * l2 * i2 * i2;
+    float k2p = J * i2;
+
+    float l3 = l + 0.5 * ds * k2l, w3 = w + 0.5 * ds * k2w;
+    float r2c = l3 * l3 + b2;
+    float i3 = 1.0 / r2c;
+    float k3l = w3;
+    float k3w = J * J * l3 * i3 * i3;
+    float k3p = J * i3;
+
+    float l4 = l + ds * k3l, w4 = w + ds * k3w;
+    float r2d = l4 * l4 + b2;
+    float i4 = 1.0 / r2d;
+    float k4l = w4;
+    float k4w = J * J * l4 * i4 * i4;
+    float k4p = J * i4;
+
+    l   += ds * (k1l + 2.0 * k2l + 2.0 * k3l + k4l) / 6.0;
+    w   += ds * (k1w + 2.0 * k2w + 2.0 * k3w + k4w) / 6.0;
+    psi += ds * (k1p + 2.0 * k2p + 2.0 * k3p + k4p) / 6.0;
+
+    /* 投影回第一积分，消除振幅漂移（保留相位误差） */
+    float rr2 = l * l + b2;
+    w = (w < 0.0 ? -1.0 : 1.0) * sqrt(max(1.0 - J * J / rr2, 0.0));
+
+    /* 本步起点已保存为 lStep0/psiStep0/rStep0，供下一步的命中测试使用 */
+    lPrev = lStep0; psiPrev = psiStep0; rPrev = rStep0;
+  }
+  steps = float(i);
+  if (!escaped) return 0;
+
+  /* 笛卡尔渐近方向：角度增量 δ = atan2( (J/r) , w·(l/r) ) = atan2(J, w·l)。
+     逃逸时 w·l > 0 恒成立（两侧各自向外），故 δ ∈ [0, π/2)。 */
+  float delta = atan(J, w * l);
+  float ang = psi + delta;
+  outDir = cos(ang) * uN1 + sin(ang) * n2;
+  return (l >= 0.0) ? 1 : 2;
+}
+
+/* ---------------- 相对论像差 + 多普勒因子 ----------------
+   输入输出都在局部正交标架坐标下。返回静态标架中的反向追踪方向；
+   dop = ν_obs/ν_em = γ(1 + v·cosθ_app)，cosθ_app = d̂·ê_v。 */
+vec3 aberrateDoppler(vec3 d, out float dop){
+  dop = 1.0;
+  /* uV 已经就是"沿 ê_r 的有符号速度"（JS 的 signedV() 算好并带了 sign(l)），
+     这里**不能**再乘一次 sign(uCamL)：那样在 l<0 一侧速度方向会被反号，
+     多普勒与像差整体反向（亮度相位错乱，且与 CPU 侧光线面板不一致）。 */
+  float vv = uV;
+  if (abs(vv) < 1e-5) return d;
+  float v = min(abs(vv), 0.999);
+  vec3 ev = vec3(vv < 0.0 ? -1.0 : 1.0, 0.0, 0.0);
+  vec3 k = -d;                                  // 光子传播方向（相机系）
+  float kpar = dot(k, ev);
+  vec3 kper = k - kpar * ev;
+  float sp = length(kper);
+  float den = 1.0 + v * kpar;
+  float cth = (kpar + v) / den;
+  float sth = sp * sqrt(1.0 - v * v) / den;
+  vec3 ks = cth * ev + (sp > 1e-8 ? (sth / sp) * kper : vec3(0.0));
+  vec3 ds = -ks;                                // 反向追踪方向（静态标架）
+  dop = inversesqrt(1.0 - v * v) * (1.0 + v * dot(ds, ev));
+  return ds;
+}
+
+/* 单条光线的着色。返回 rgb；side/steps/dop 通过 out 参数回传。 */
+vec3 traceColor(vec2 ndc, out int side, out float steps, out float dop){
+  vec3 dl = normalize(uF + ndc.x * uTanHalf * uAspect * uR + ndc.y * uTanHalf * uU);
+  dl = aberrateDoppler(dl, dop);
+  vec3 outDir;
+  side = trace(dl, outDir, steps);
+  if (side == 0) return vec3(0.016, 0.008, 0.022);   // 步数耗尽（近临界光线）
+
+  /* ---- 参照天体：Lambert + 边缘光。法向由 trace() 回传（outDir） ---- */
+  if (side >= 3) {
+    int k = side - 3;
+    vec3 base = uSphCol[k];
+    /* 条纹行星：用表面法向在自转轴上的投影当纬度做程序化条带 + 一个椭圆风暴斑。
+       条纹只依赖法向，不需要额外的 G-buffer。 */
+    if (uSphStyle[k] > 0.5) {
+      vec3 ax = normalize(uSphAxis[k]);
+      float lat = dot(outDir, ax);
+      float band = 0.5 + 0.5 * sin(lat * 11.0 + 1.7 * sin(lat * 4.3 + 0.8));
+      vec3 dark = base * 0.42 + vec3(0.05, 0.035, 0.025);
+      base = mix(base, dark, band);
+      vec3 eq = normalize(cross(ax, abs(ax.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+      float u = dot(outDir, eq), v = dot(outDir, cross(ax, eq));
+      float spot = exp(-((u - 0.35) * (u - 0.35) * 16.0 + (v - 0.18) * (v - 0.18) * 44.0));
+      base += vec3(0.55, 0.24, 0.12) * spot * 0.85;
+    }
+    vec3 L = normalize(vec3(0.62, 0.42, 0.66));      // 平坦系里的固定光方向
+    float lam = max(0.0, dot(outDir, L));
+    float rim = pow(1.0 - abs(dot(outDir, dl)), 3.0); // dl = 静态视线方向
+    vec3 c = base * (0.06 + 1.05 * lam) + base * rim * 0.85;
+    float d4 = dop * dop; d4 *= d4;
+    return c * d4;                                   // 同样受前灯效应影响
+  }
+
+  vec3 c;
+  if (uUseCube == 1) {
+    /* 贴图路径：贴图烘的是"本征"星场（dop = 1）。
+       多普勒色温偏移无法逐星重算，用参考黑体 6000 K 的比值近似。 */
+    /* 4-tap 旋转网格：按屏幕像素足迹预过滤，减少低分辨率档星点欠采样导致的闪烁。
+       （立方体贴图只有 LINEAR、没有 mipmap；星点 <1 像素时单点采样会闪。） */
+    vec3 t1 = normalize(cross(outDir, abs(outDir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 t2 = cross(outDir, t1);
+    float e = uStarPixAng * 0.5;
+    vec3 c4 = vec3(0.0);
+    for (int ti = 0; ti < 4; ti++) {
+      vec2 o = (ti == 0) ? vec2(-0.375, -0.125)
+             : (ti == 1) ? vec2( 0.125, -0.375)
+             : (ti == 2) ? vec2( 0.375,  0.125)
+                         : vec2(-0.125,  0.375);
+      vec3 sd = normalize(outDir + (t1 * o.x + t2 * o.y) * e);
+      c4 += (side == 1) ? texture(uCubeA, sd).rgb : texture(uCubeB, sd).rgb;
+    }
+    c = c4 * 0.25;
+    c = max(c, 0.0);
+    if (uCubeGamma > 1.001) c = pow(c, vec3(uCubeGamma));   // HDR(1.0) 时省掉 3 次 pow
+    if (abs(dop - 1.0) > 1e-4) {
+      /* 参考黑体 6000 K 在 D 前后的颜色比值（编译期会把 bbColor(6000) 折叠成常量） */
+      c *= bbColor(6000.0 * dop) / bbColor(6000.0);
+    }
+  } else {
+    c = skyColor(outDir, side, dop, uStarPixAng);
+  }
+
+  /* ---- 透镜放大率（切向）----
+     点源的像被切向拉长时，总通量守恒 ⇒ 峰值亮度按 1/μ_t 下降。
+     不做这一步，强透镜区会把"被压缩了十几倍的天空"以全亮度铺满画面，
+     看起来就是一片鬼影般的密集星点（相机静止时尤其明显）。
+     μ_t = sin θ_源 / sin θ_像，其中 θ_像 = asin(J/r_c) 是像素的离轴角，
+     θ_源 = 逃逸方向与轴的夹角。小角处用下限保护，避免 0/0。 */
+  {
+    float Jc = uRC * length(dl.yz);
+    float sImg = max(clamp(Jc / uRC, 0.0, 1.0), 1e-3);          // sin(asin(x)) = x
+    float cSrc = clamp(dot(outDir, uN1), -1.0, 1.0);
+    float sSrc = max(sqrt(max(0.0, 1.0 - cSrc * cSrc)), 1e-3);  // sin(acos(x)) = sqrt(1-x²)
+    c *= clamp(sSrc / sImg, 0.05, 4.0);
+  }
+
+  /* 前灯效应：玻尔兹曼强度 ∝ D⁴（不做自动曝光，高速时前向会自然过曝）。
+     D⁴ 用三次乘法而不是 pow()：逐像素省一次超越函数。 */
+  float d4 = dop * dop; d4 *= d4;
+  c *= d4;
+  return c;
+}
+
+void main(){
+  vec2 px = 2.0 / uRes;                       // 一个像素在 NDC 下的尺寸
+  vec2 ndc = ((gl_FragCoord.xy + uJitter) / uRes) * 2.0 - 1.0;
+
+  /* ---- 统计模式 1：步数 / 未解出 / 对面侧 ---- */
+  if (uStatMode == 1) {
+    /* 步数用 R(高字节)+G(低字节) 16 位编码，不随 uMaxSteps 饱和：
+         R = floor(steps/256)/255  → 读回后 R 的字节值就是 floor(steps/256)
+         G = mod(steps,256)/255    → 读回后 G 的字节值就是 mod(steps,256)
+       B 的低两位是标志：bit0 = 未解出，bit1 = 最终落点与相机所在侧相反。
+       第 2 项按 uCamL 的符号动态判定，而不是把 l<0 硬编码成"对面"。 */
+    int side; float steps, dop;
+    vec3 dl = normalize(uF + ndc.x * uTanHalf * uAspect * uR + ndc.y * uTanHalf * uU);
+    dl = aberrateDoppler(dl, dop);
+    vec3 outDir;
+    side = trace(dl, outDir, steps);
+    float s = clamp(steps, 0.0, 65535.0);
+    /* side ≥ 3 表示命中参照天体，既不算未解出也不算"对面"，只统计步数 */
+    float flags = (side == 0 ? 1.0 : 0.0) +
+                  ((side == 1 || side == 2)
+                     ? ((side != ((uCamL >= 0.0) ? 1 : 2)) ? 2.0 : 0.0)
+                     : 0.0);
+    fragColor = vec4(floor(s / 256.0) / 255.0, mod(s, 256.0) / 255.0, flags / 255.0, 1.0);
+    return;
+  }
+
+  /* ---- 统计模式 2：立方体贴图 vs 程序化星场的逐像素差异 ---- */
+  if (uStatMode == 2) {
+    int side; float steps, dop;
+    vec3 dl = normalize(uF + ndc.x * uTanHalf * uAspect * uR + ndc.y * uTanHalf * uU);
+    dl = aberrateDoppler(dl, dop);
+    vec3 outDir;
+    side = trace(dl, outDir, steps);
+    vec3 a = (side == 1) ? texture(uCubeA, outDir).rgb : texture(uCubeB, outDir).rgb;
+    a = pow(max(a, 0.0), vec3(uCubeGamma));   // 与烘焙格式一致，否则差异统计会失真
+    vec3 b = (side == 0) ? vec3(0.0) : skyColor(outDir, side, 1.0, uStarPixAng);
+    float diff = abs(dot(a - b, vec3(0.2126, 0.7152, 0.0722)));
+    fragColor = vec4(clamp(diff * 8.0, 0.0, 1.0), 0.0, 0.0, 1.0);
+    return;
+  }
+
+  /* ---- 临界带抗锯齿 ----
+     J = b₀ 是喉部窗口的边界（内侧穿越、外侧折返），在屏幕上是硬边。
+     |dJ/dpixel| ≤ r_c·pixAng，故当 |J − b₀| 小于约两个像素的变化量时，
+     用 2×2 抖动超采样取平均。步数耗尽(side==0)的区域宽 ~1e-7·b₀，
+     本身不可见，AA 主要作用在这条窗口边界上。 */
+  vec3 col;
+  if (uAA == 1) {
+    float dopC;
+    vec3 dlC = aberrateDoppler(
+      normalize(uF + ndc.x * uTanHalf * uAspect * uR + ndc.y * uTanHalf * uU), dopC);
+    float Jc = uRC * length(dlC.yz);
+    if (abs(Jc - uB0) < 1.8 * uRC * uPixAng) {
+      int s0; float st0, d0;
+      col  = traceColor(ndc + vec2(-0.25, -0.25) * px, s0, st0, d0);
+      col += traceColor(ndc + vec2( 0.25, -0.25) * px, s0, st0, d0);
+      col += traceColor(ndc + vec2(-0.25,  0.25) * px, s0, st0, d0);
+      col += traceColor(ndc + vec2( 0.25,  0.25) * px, s0, st0, d0);
+      col *= 0.25;
+    } else {
+      int s0; float st0, d0;
+      col = traceColor(ndc, s0, st0, d0);
+    }
+  } else {
+    int s0; float st0, d0;
+    col = traceColor(ndc, s0, st0, d0);
+  }
+  /* ---- 线性 HDR 输出 ----
+     场景 pass 不再做伽马编码：颜色以线性 HDR 写入浮点靶（无浮点扩展时按 uHdrScale
+     压缩进 8 位），色调映射（ACES）与伽马在最后的合成 pass 里统一做。
+     uAutoExp 在这里乘进去（而不是在合成里），这样泛光的阈值提取也工作在
+     曝光适应后的亮度上，否则高速穿越时整帧都会触发泛光。 */
+  fragColor = vec4(max(col, 0.0) * uHdrScale * uAutoExp, 1.0);
+}`;
+
+  /* 立方体烘焙用的顶点着色器：把 2D 全屏四边形映射到立方体面方向。
+     方向推导自 GL 立方体贴图的 (s,t) 约定，必须与采样端一致，
+     否则会在面与面之间出现接缝（自检面板的差异统计就是用来抓这个的）。 */
+  const VS_BAKE = `#version 300 es
+layout(location = 0) in vec2 aPos;
+uniform int uFace;
+out vec3 vBakeDir;
+void main(){
+  float u = aPos.x, v = aPos.y;
+  vec3 d;
+  if      (uFace == 0) d = vec3( 1.0, -v, -u);   // +X
+  else if (uFace == 1) d = vec3(-1.0, -v,  u);   // -X
+  else if (uFace == 2) d = vec3(   u, 1.0,  v);  // +Y
+  else if (uFace == 3) d = vec3(   u,-1.0, -v);  // -Y
+  else if (uFace == 4) d = vec3(   u, -v, 1.0);  // +Z
+  else                 d = vec3(  -u, -v,-1.0);  // -Z
+  vBakeDir = d;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+  const FS_BAKE = `#version 300 es
+` + SKY + `
+uniform float uBakeGamma;   // 1.0 = HDR 线性；1/2.2 = RGBA8 伽马编码
+in vec3 vBakeDir;
+void main(){
+  vec3 dir = normalize(vBakeDir);
+  int bs = (uBakeSide < 0.5) ? 1 : 2;
+  /* 按伽马编码存储：8 位线性在星云这种暗部梯度上会有可见断层。
+     RGBA16F 时不编码（gamma = 1），星核峰值 >1 才能保留下来给泛光用。 */
+  fragColor = vec4(pow(max(skyColor(dir, bs, 1.0, uBakePixAng), 0.0), vec3(uBakeGamma)), 1.0);
+}`;
+
+  /* --------------------------------------------------------------------------
+     后处理：阈值提取 → 多级高斯模糊 → ACES 色调映射
+     -------------------------------------------------------------------------- */
+
+  /* ---------------- 邻域钳制 TAA（resolve） ----------------
+     本帧原始采样 + 上一帧累积 → 新的累积。
+     历史帧按"本帧 3×3 邻域的颜色范围"钳制：相机运动时（没有运动矢量、不做重投影）
+     历史像素落在当前局部色域之外的部分会被拉回来，于是既保留了多帧平均
+     （消除星点频闪），又不会拖出明显鬼影。
+     alpha = 1 时直接采用本帧（跳跃/参数变化后的硬重置）。 */
+  const FS_RESOLVE = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uCur, uHist;
+uniform vec2 uTexel;
+uniform float uAlpha;
+uniform float uClampMix;   // 0 = 不钳制（静止时允许收敛），1 = 完全钳制（运动时防鬼影）
+out vec4 fragColor;
+void main(){
+  vec2 uv = gl_FragCoord.xy * uTexel;
+  vec3 c = texture(uCur, uv).rgb;
+  /* 本帧 3×3 邻域的 AABB */
+  vec3 mn = c, mx = c;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec3 s = texture(uCur, uv + vec2(float(x), float(y)) * uTexel).rgb;
+      mn = min(mn, s);
+      mx = max(mx, s);
+    }
+  }
+  vec3 h = texture(uHist, uv).rgb;
+  /* 静止时必须关掉钳制：否则运行均值每帧都被当前帧的局部范围剪一刀，
+     永远收敛不了（画面会持续闪噪）。 */
+  h = mix(h, clamp(h, mn, mx), uClampMix);
+  fragColor = vec4(mix(h, c, uAlpha), 1.0);
+}`;
+
+  /* 亮度阈值提取 + 2×2 降采样（一次 pass 同时完成）。输出仍带 uHdrScale 存储缩放。 */
+  const FS_BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2  uTexel;      // 1/源尺寸
+uniform float uThresh;     // 线性 HDR 阈值
+uniform float uKnee;       // 软膝宽
+uniform float uInvHdr;     // 1/uHdrScale
+uniform float uHdrScale;   // 存储缩放
+out vec4 fragColor;
+void main(){
+  vec3 c = (texture(uTex, vUv + uTexel * vec2(-0.5, -0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2( 0.5, -0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2(-0.5,  0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2( 0.5,  0.5)).rgb) * (0.25 * uInvHdr);
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  /* 软膝：低于阈值的完全丢弃，阈值附近平滑过渡，避免泛光边界出现硬边 */
+  float soft = clamp(lum - uThresh + uKnee, 0.0, 2.0 * uKnee);
+  soft = soft * soft / (4.0 * uKnee + 1e-4);
+  float w = max(soft, lum - uThresh) / max(lum, 1e-5);
+  fragColor = vec4(c * w * uHdrScale, 1.0);
+}`;
+
+  const FS_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;         // 纹素步长 × 方向
+out vec4 fragColor;
+void main(){
+  /* 9 抽头可分离高斯，σ ≈ 2.2 纹素；线性过滤使 4 个抽头等效 8 个 */
+  const float w0 = 0.227027, w1 = 0.1945946, w2 = 0.1216216, w3 = 0.054054, w4 = 0.016216;
+  vec3 c = texture(uTex, vUv).rgb * w0;
+  c += (texture(uTex, vUv + uDir * 1.0).rgb + texture(uTex, vUv - uDir * 1.0).rgb) * w1;
+  c += (texture(uTex, vUv + uDir * 2.0).rgb + texture(uTex, vUv - uDir * 2.0).rgb) * w2;
+  c += (texture(uTex, vUv + uDir * 3.0).rgb + texture(uTex, vUv - uDir * 3.0).rgb) * w3;
+  c += (texture(uTex, vUv + uDir * 4.0).rgb + texture(uTex, vUv - uDir * 4.0).rgb) * w4;
+  fragColor = vec4(c, 1.0);
+}`;
+
+  /* 纯 2×2 降采样（给下一级模糊用，不做阈值） */
+  const FS_DOWN = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+out vec4 fragColor;
+void main(){
+  vec3 c = (texture(uTex, vUv + uTexel * vec2(-0.5, -0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2( 0.5, -0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2(-0.5,  0.5)).rgb +
+            texture(uTex, vUv + uTexel * vec2( 0.5,  0.5)).rgb) * 0.25;
+  fragColor = vec4(c, 1.0);
+}`;
+
+  /* 合成：场景 + 泛光 → 曝光 → ACES → 伽马 → 抖动 → 暗角 */
+  const FS_COMP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene, uBloom0, uBloom1, uBloom2;
+uniform float uBloomStr, uExposure, uInvHdr, uFrameSeed;
+out vec4 fragColor;
+
+/* ACES 拟合（Narkowicz 2015）：输入线性 HDR，输出 [0,1] 显示线性 */
+vec3 aces(vec3 x){
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+/* 交错梯度噪声（IGN）：低成本蓝噪声近似，比 sin-hash 白噪声更不易被看到 */
+float dither(vec2 p, float seed){
+  p += vec2(seed * 0.7548776662, seed * 0.5698402909);
+  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+/* 线性 → sRGB 分段传输（比 gamma 2.2 更准，暗部尤其明显） */
+vec3 lin2srgb(vec3 c){
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+void main(){
+  vec3 s = texture(uScene, vUv).rgb * uInvHdr;
+  /* 三级泛光按权重叠加：越粗的级别权重越低，形成宽而柔的光晕 */
+  vec3 b = texture(uBloom0, vUv).rgb
+         + texture(uBloom1, vUv).rgb * 0.50
+         + texture(uBloom2, vUv).rgb * 0.25;
+  b *= uInvHdr;
+  vec3 c = s + b * uBloomStr;
+  c *= uExposure;
+  c = aces(c);
+  c = lin2srgb(max(c, 0.0));                    // 线性 → sRGB（分段）
+  c += (dither(gl_FragCoord.xy, uFrameSeed) - 0.5) / 255.0; // IGN 抖动：压掉暗部条带
+  vec2 q = vUv - 0.5;
+  c *= 1.0 - 0.20 * dot(q, q);                  // 轻微暗角
+  fragColor = vec4(c, 1.0);
+}`;
+
+  /* --------------------------------------------------------------------------
+     FSR1 风格上采样：EASU 思路（4×4 Catmull-Rom + 边缘/振铃抑制）
+     --------------------------------------------------------------------------
+     低分辨率 TAA 输出 → 屏幕分辨率。原实现是合成 pass 里一次 LINEAR 采样，
+     0.5~0.8 档会明显发糊；这里换成 16-tap 双三次 + 局部 min/max 钳制。
+     说明：离线环境没有 AMD FSR1 源码，未逐字节复制其 LUT；算法族相同
+     （边缘自适应重采样 + 抗振铃），视觉目标一致。 */
+  const FS_EASU = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uInRes, uOutRes;
+out vec4 fragColor;
+
+float crW(float x){                     // Catmull-Rom 核
+  x = abs(x);
+  if (x < 1.0) return 1.5 * x * x * x - 2.5 * x * x + 1.0;
+  if (x < 2.0) return -0.5 * x * x * x + 2.5 * x * x - 4.0 * x + 2.0;
+  return 0.0;
+}
+void main(){
+  vec2 ip = vUv * uInRes - 0.5;
+  vec2 base = floor(ip);
+  vec2 f = ip - base;
+  vec3 col = vec3(0.0);
+  float wsum = 0.0;
+  vec3 mn = vec3(1e9), mx = vec3(-1e9);
+  for (int y = -1; y <= 2; y++) {
+    for (int x = -1; x <= 2; x++) {
+      vec2 sp = base + vec2(float(x), float(y));
+      vec2 cl = clamp(sp, vec2(0.0), uInRes - 1.0);
+      vec3 s = texelFetch(uTex, ivec2(cl), 0).rgb;
+      mn = min(mn, s); mx = max(mx, s);
+      float w = crW(f.x - float(x)) * crW(f.y - float(y));
+      col += s * w; wsum += w;
+    }
+  }
+  col /= max(wsum, 1e-5);
+  col = clamp(col, mn, mx);             // 抗振铃（星点/高对比边缘）
+  fragColor = vec4(col, 1.0);
+}`;
+
+  /* --------------------------------------------------------------------------
+     RCAS 风格锐化：局部对比度自适应 + 边缘钳制（不会产生振铃）
+     -------------------------------------------------------------------------- */
+  const FS_RCAS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uSharp;
+out vec4 fragColor;
+void main(){
+  vec3 a = texture(uTex, vUv).rgb;
+  vec3 b = texture(uTex, vUv + vec2(0.0, uTexel.y)).rgb;
+  vec3 c = texture(uTex, vUv - vec2(0.0, uTexel.y)).rgb;
+  vec3 d = texture(uTex, vUv + vec2(uTexel.x, 0.0)).rgb;
+  vec3 e = texture(uTex, vUv - vec2(uTexel.x, 0.0)).rgb;
+  vec3 mn = min(min(min(b, c), min(d, e)), a);
+  vec3 mx = max(max(max(b, c), max(d, e)), a);
+  vec3 blur = (b + c + d + e) * 0.25;
+  vec3 contrast = clamp((mx - mn) * 4.0, 0.0, 1.0);   // 平坦区少锐化，避免噪声过冲
+  vec3 res = a + (a - blur) * (uSharp * 4.0 * contrast);
+  fragColor = vec4(clamp(res, mn, mx), 1.0);
+}`;
+
+
+/* ============================================================================
+   Part C. 编译 / 链接 / 资源
+   ============================================================================ */
+
+  function compile(type, src, name) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(s) || '(无日志)';
+      fail('着色器编译失败：' + name, 'GPU 驱动拒绝了本页的着色器。请把下面的日志反馈。', log);
+      throw new Error('shader compile failed: ' + name + '\n' + log);
+    }
+    return s;
+  }
+
+  function link(vs, fs, name) {
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      const log = gl.getProgramInfoLog(p) || '(无日志)';
+      fail('着色器链接失败：' + name, '请把下面的日志反馈。', log);
+      throw new Error('link failed: ' + name + '\n' + log);
+    }
+    return p;
+  }
+
+  function uniforms(prog) {
+    const o = {};
+    const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) {
+      const info = gl.getActiveUniform(prog, i);
+      o[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(prog, info.name);
+    }
+    return o;
+  }
+
+  const vsMain = compile(gl.VERTEX_SHADER, VS, 'VS');
+  const vsBake = compile(gl.VERTEX_SHADER, VS_BAKE, 'VS-bake');
+  const progScene = link(vsMain, compile(gl.FRAGMENT_SHADER, FS, 'FS-scene'), 'scene');
+  const progResolve = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_RESOLVE, 'FS-resolve'), 'resolve');
+  const progBright = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_BRIGHT, 'FS-bright'), 'bright');
+  const progBlur = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_BLUR, 'FS-blur'), 'blur');
+  const progDown = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_DOWN, 'FS-down'), 'down');
+  const progComp = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_COMP, 'FS-comp'), 'comp');
+  const progEasu = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_EASU, 'FS-easu'), 'easu');
+  const progRcas = link(vsMain, compile(gl.FRAGMENT_SHADER, FS_RCAS, 'FS-rcas'), 'rcas');
+  const progBake = link(vsBake, compile(gl.FRAGMENT_SHADER, FS_BAKE, 'FS-bake'), 'bake');
+  const uScene = uniforms(progScene);
+  const uResolve = uniforms(progResolve);
+  const uBright = uniforms(progBright);
+  const uBlur = uniforms(progBlur);
+  const uDown = uniforms(progDown);
+  const uComp = uniforms(progComp);
+  const uEasu = uniforms(progEasu);
+  const uRcas = uniforms(progRcas);
+  const uBake = uniforms(progBake);
+
+  /* ---- HDR 靶格式：优先 RGBA16F（需要 EXT_color_buffer_float），否则退回 RGBA8 ----
+     退回时把线性颜色压缩 uHdrScale = 1/4 存进 8 位（[0,1] 映射到 [0,4] 的 HDR 范围），
+     合成 pass 再乘回来。自检面板会如实报出用的是哪种。 */
+  const extCBF = gl.getExtension('EXT_color_buffer_float');
+  let HDR_FMT = gl.RGBA8, HDR_TYPE = gl.UNSIGNED_BYTE, HDR_SCALE = 0.25, hdrFloat = false;
+  if (extCBF) { HDR_FMT = gl.RGBA16F; HDR_TYPE = gl.HALF_FLOAT; HDR_SCALE = 1.0; hdrFloat = true; }
+
+  /* 全屏四边形 */
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  function makeTarget(w, h, fmt, type) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fmt, w, h, 0, gl.RGBA, type, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!ok) throw new Error('framebuffer incomplete');
+    return { tex, fbo, w, h };
+  }
+
+  /* 场景靶：HDR 浮点优先；若驱动声称支持却在建靶时失败，就地回退到 8 位。 */
+  function makeSceneTarget(w, h) {
+    try {
+      return makeTarget(w, h, HDR_FMT, HDR_TYPE);
+    } catch (e) {
+      HDR_FMT = gl.RGBA8; HDR_TYPE = gl.UNSIGNED_BYTE; HDR_SCALE = 0.25; hdrFloat = false;
+      return makeTarget(w, h, HDR_FMT, HDR_TYPE);
+    }
+  }
+  function killTarget(t) {
+    if (!t) return;
+    gl.deleteTexture(t.tex);
+    gl.deleteFramebuffer(t.fbo);
+  }
+
+  /* ---------------- 星场立方体贴图（启动时烘焙一次） ----------------
+     三层程序化星场 + 星云在运行时每像素要做 ~16 次哈希；烘到立方体贴图后
+     只需一次采样。代价是角分辨率被贴图尺寸限制，自检面板里的
+     「贴图 vs 程序化 差异」会如实报出这个损失。 */
+  /* 2048²/面 ≈ 2.6′/纹素，与 1080p 内部渲染时一个像素的角尺寸同量级。
+     优先 RGBA16F 线性 HDR（星核峰值 2.6~3.2 不再被 1.0 截断，泛光阈值 1.60 才够得着）；
+     显存不够/驱动拒绝时逐级回退：尺寸 2048→1536→1024，格式 RGBA16F→RGBA8 伽马编码，
+     全失败则退回逐像素程序化路径。显存参考：2048² RGBA16F ×6 面 ×2 侧 ≈ 402MB。 */
+  const BAKE_SIZES = [2048, 1536, 1024]
+    .filter((s) => s <= gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE));
+  let cubeA = null, cubeB = null, cubeOK = false, cubeHDR = false, bakeSize = 0;
+
+  function makeCube(size, fmt, type) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+    for (let f = 0; f < 6; f++) {
+      gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, fmt, size, size, 0,
+                    gl.RGBA, type, null);
+    }
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  function tryMakeCubePair(size, fmt, type) {
+    const a = makeCube(size, fmt, type);
+    const b = makeCube(size, fmt, type);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                            gl.TEXTURE_CUBE_MAP_POSITIVE_X, a, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    if (!ok) { gl.deleteTexture(a); gl.deleteTexture(b); throw new Error('cube fbo incomplete'); }
+    return [a, b];
+  }
+
+  function bakeCubes() {
+    if (!state.useCube) return;
+    try {
+      if (!cubeA) {
+        let made = null;
+        for (const size of BAKE_SIZES) {
+          const fmts = hdrFloat ? [HDR_FMT, gl.RGBA8] : [gl.RGBA8];
+          for (const fmt of fmts) {
+            try {
+              made = tryMakeCubePair(size, fmt,
+                        fmt === gl.RGBA16F ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE);
+              cubeHDR = (fmt === gl.RGBA16F);
+              bakeSize = size;
+              break;
+            } catch (e) { made = null; }
+          }
+          if (made) break;
+        }
+        if (!made) throw new Error('no cube format available');
+        cubeA = made[0]; cubeB = made[1];
+      }
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.viewport(0, 0, bakeSize, bakeSize);
+      gl.disable(gl.BLEND);
+      gl.useProgram(progBake);
+      gl.bindVertexArray(vao);
+      /* 烘焙星点尺寸与运行时"屏幕像素"对齐（取两者较大值，保证贴图内每颗星至少 ~1 纹素），
+         这样贴图路径与程序化路径的星点物理角尺寸一致。 */
+      const bakeTexelAng = (Math.PI / 2) / bakeSize;
+      const bakeScreenAng = 2 * TAN_HALF / Math.max(2, canvas.height);
+      gl.uniform1f(uBake.uBakePixAng, Math.max(bakeTexelAng, bakeScreenAng));
+      gl.uniform1f(uBake.uBakeGamma, cubeHDR ? 1.0 : 1.0 / 2.2);
+      gl.uniform1f(uBake.uStarDens, state.starDens);
+      gl.uniform2f(uBake.uSideDens, 1.0, state.densB);
+      gl.uniform2f(uBake.uSideTemp, state.tempA, state.tempB);
+      gl.uniform2f(uBake.uSideNeb, state.nebA, state.nebB);
+      gl.uniform1f(uBake.uSeedA, 0.0);
+      gl.uniform1f(uBake.uSeedB, 1.0);
+      gl.uniform3f(uBake.uTintA, 0.045, 0.070, 0.150);
+      gl.uniform3f(uBake.uTintB, 0.150, 0.072, 0.045);
+      gl.uniform3f(uBake.uBandA, 0.100, 0.860, -0.500);
+      gl.uniform3f(uBake.uBandB, -0.120, 0.620, 0.780);
+      for (let side = 0; side < 2; side++) {
+        gl.uniform1f(uBake.uBakeSide, side);
+        const tex = side === 0 ? cubeA : cubeB;
+        for (let f = 0; f < 6; f++) {
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                                  gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, tex, 0);
+          gl.uniform1i(uBake.uFace, f);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+      }
+      gl.bindVertexArray(null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fbo);
+      cubeOK = true;
+    } catch (e) {
+      cubeOK = false;
+      state.useCube = false;
+    }
+  }
+
+  /* 统计采样：临界环带在方向空间只有 ~0.06° 宽，采样太粗会整条漏掉。
+     256×256 每 400ms 只跑一次（约 65k 像素），相对主 pass 的开销 <1%。 */
+  /* 统计采样分辨率：128×128 = 16384 个样本，足够算平均步数/对面占比，
+     回读量比 256² 小 4 倍（回读是唯一会强制 GPU→CPU 同步、拉低帧率的操作）。 */
+  const STAT_N = 128;
+  /* 渲染靶：curTarget 放本帧的原始采样，acc[0]/acc[1] 做累积的乒乓。
+     邻域钳制 TAA 需要同时读"本帧邻域"和"上一帧累积"，所以至少要三张。 */
+  let curTarget = null;
+  let accTargets = [null, null];
+  let accLatest = 0;          // accTargets[accLatest] 是最新的累积结果
+  let upTarget = null;        // EASU 上采样输出（屏幕分辨率）
+  let rcasTarget = null;      // RCAS 锐化输出（屏幕分辨率）
+  const statTarget = makeTarget(STAT_N, STAT_N, gl.RGBA8, gl.UNSIGNED_BYTE);
+  const statPixels = new Uint8Array(STAT_N * STAT_N * 4);
+
+  /* TAA 状态 */
+  let accCount = 0;
+  let wasMoving = false;      // 上一帧是否在运动（用于"运动→静止"瞬间重置累积）
+  let ditherSeed = 0;         // 最终合成抖动的逐帧种子（IGN）
+  let lastSig = '';
+  let lastCamL = 0, lastThetaTurn = 0, lastFw = [0, 0, 0], haveLastCam = false;
+  let taaResetReason = 'init';
+  function halton(i, b) {
+    let f = 1, r = 0;
+    while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); }
+    return r;
+  }
+
+
+/* ============================================================================
+   Part D. 相机 / 场景状态
+   ============================================================================ */
+
+  const FOV = 60 * Math.PI / 180;
+  const TAN_HALF = Math.tan(FOV * 0.5);
+
+  const state = {
+    b0: 1.00,
+    step: 0.080,
+    speed: 0.55,        // 自动穿越的峰值速度 dl/dt，单位 c
+    vEff: 0.0,          // 本帧的实际有符号 dl/dt（端部平滑减速后），像差/多普勒用它
+    camL: 3.00,         // 有符号固有距离
+    lMax: 3.00,         // 往返范围
+    flyDir: -1,
+    flying: true,
+    paused: false,
+    theta: Math.PI / 2,   // 相机位置方向（球面角）
+    phi: 0.0,
+    /* 相机基（∂_l 系分量：径向轴 = ∂_l，不是 ê_r）。
+       初始：朝喉部看 F = −∂_l，上方 U = −ê_θ，右方 R = ê_φ。三者恒正交，R = F × U。
+       存 ∂_l 系而不是 ê_r 系，是因为 ê_r = sign(l)·∂_l 在喉部反向：
+       存 ê_r 系会让相机在穿过喉部时物理上瞬间转身 180°（亮度突变 230 万倍）。 */
+    Fw: [-1, 0, 0], Uw: [0, 0, 1], Rw: [0, 1, 0],
+    thetaTurn: 0,       // 视线绕切向轴的转角（A / 喉部锁定的统一实现）
+    turnSmooth: true,   // 自动穿越：是否平滑转身（关掉 = 一直朝前看）
+    lookForward: true,  // 自由飞行：是否朝前看（关掉 = 转头盯住喉部，穿喉部时瞬间转身）
+    autoExp: 1,         // C：自动曝光当前增益
+    autoExposure: true, // 是否启用自动曝光（视觉适应）
+    aa: true,           // 临界带 2×2 超采样
+    useCube: true,      // 星场用预烘焙立方体贴图
+    starDens: 0.35,     // 星场密度倍率（1.0 = 全密度 ≈ 44 万颗；0.35 ≈ 5.4 万颗）
+    densB: 0.55,        // 侧 B 相对侧 A 的密度比（让两端星场疏密不同）
+    tempA: 0.75,        // 侧 A 色温参数（0 红矮星 ↔ 1 蓝巨星）
+    tempB: 0.12,        // 侧 B 色温参数
+    nebA: 0.15,         // 侧 A 星云形态（0 大团块 ↔ 1 细丝）
+    nebB: 0.85,         // 侧 B 星云形态
+    showSpheres: true,  // 有限距离参照天体
+    cap: 260,           // 每像素步数上限（用户设定）
+    exposure: 0.85,     // 曝光（线性 HDR 乘子，ACES 之前）
+    bloom: 0.35         // 泛光强度
+  };
+
+  /* ---- 有限距离参照天体 ----
+     位置用 (l_s, 方向 n̂_s) 给出。轴 = 相机初始角位置 x̂（平坦系），
+     n̂_s = cosα·x̂ + sinα·(cosβ·ŷ + sinβ·ẑ)：α 是离轴角，β 是绕轴方位。
+     半径以 b₀ 为单位；它们会被逐像素的光线积分真实相交，因此自然被虫洞透镜
+     （靠近临界环时会出现多重像）。 */
+  const SPHERES = [
+    { l:  2.4, a: 30, b:  40, r: 0.22, col: [0.88, 0.62, 0.42] },  // 起步就在视野里，飞过时迅速变大
+    { l:  0.8, a: 17, b: 150, r: 0.14, col: [0.55, 0.76, 0.96] },  // 贴近喉部：强透镜/多重像
+    { l: -2.2, a: 22, b: 250, r: 0.18, col: [0.94, 0.80, 0.56] },
+    { l: -6.0, a: 30, b: 330, r: 0.45, col: [0.72, 0.62, 0.88] },  // 对面远端，大而慢
+    /* 大行星：侧面、条纹、半径 1.05 b₀ —— 视差/多重像/昼夜线/D⁴ 前灯效应的"主角" */
+    { l: -4.0, a: 22, b: 210, r: 1.05, col: [0.74, 0.60, 0.46], style: 1, axis: [0.18, 0.92, 0.35] }
+  ];
+  const sphA = new Float32Array(SPHERES.length * 4);
+  const sphDir = new Float32Array(SPHERES.length * 3);
+  const sphCol = new Float32Array(SPHERES.length * 3);
+  const sphAxis = new Float32Array(SPHERES.length * 3);
+  const sphStyle = new Float32Array(SPHERES.length);
+  function updateSphereArrays() {
+    for (let i = 0; i < SPHERES.length; i++) {
+      const s = SPHERES[i];
+      const al = s.a * Math.PI / 180, be = s.b * Math.PI / 180;
+      const sa = Math.sin(al), ca = Math.cos(al);
+      sphDir[i * 3 + 0] = ca;                       // 沿轴（x̂）
+      sphDir[i * 3 + 1] = sa * Math.cos(be);        // ŷ
+      sphDir[i * 3 + 2] = sa * Math.sin(be);        // ẑ
+      const rs = Math.sqrt(s.l * s.l + state.b0 * state.b0);
+      sphA[i * 4 + 0] = s.l;
+      sphA[i * 4 + 1] = rs;
+      sphA[i * 4 + 2] = s.r * state.b0;             // 半径随 b₀ 缩放
+      sphA[i * 4 + 3] = state.showSpheres ? 1 : 0;
+      sphCol[i * 3 + 0] = s.col[0];
+      sphCol[i * 3 + 1] = s.col[1];
+      sphCol[i * 3 + 2] = s.col[2];
+      const ax = s.axis || [0, 1, 0];
+      const axl = Math.hypot(ax[0], ax[1], ax[2]) || 1;
+      sphAxis[i * 3 + 0] = ax[0] / axl;
+      sphAxis[i * 3 + 1] = ax[1] / axl;
+      sphAxis[i * 3 + 2] = ax[2] / axl;
+      sphStyle[i] = s.style || 0;
+    }
+  }
+
+  /* 星场密度 → 全天星数（生成器的解析计数，用于自检面板）：
+     每面格子 (2·dens·starDens)²，基础约 36% 的格子有星，6 个面。
+     银河带内存在概率最高 +130%，球面平均增强 ≈ 1 + 1.3·bw/2（bw = bandWidth）。 */
+  function starCount(densScale, bandW) {
+    const d = densScale;
+    const base = 6 * 0.36 * (Math.pow(2 * 46 * d, 2) + Math.pow(2 * 96 * d, 2) + Math.pow(2 * 200 * d, 2));
+    return base * (1 + 0.65 * (bandW || 0));
+  }
+  const bandWidthJS = (morph) => 0.44 + (0.20 - 0.44) * morph;
+  /* 色温参数 → 该侧的本征色温范围（与着色器里的 mix 保持一致） */
+  function tempRange(c) {
+    const lo = 2600 + (8000 - 2600) * c, hi = 5200 + (20000 - 5200) * c;
+    return Math.round(lo) + '–' + Math.round(hi) + ' K';
+  }
+
+  /* 自动降采样的分辨率阶梯。下限 0.20：再低星场会糊成一片，宁可掉帧也不糊。 */
+  const SCALES = [1, 0.8, 0.65, 0.5, 0.4, 0.32, 0.25, 0.2];
+  let scaleI = 1;              // 默认 0.80 档起步（原为 3 = 0.50，开局就藏掉一半画质）
+  /* 分辨率降到底仍达不到目标帧率时，再按这个阶梯缩步数上限 */
+  const STEP_MULT = [1.0, 0.85, 0.7, 0.55, 0.4];
+  let stepI = 0;
+  let emaFrameMs = 16.7;
+  let lastAdapt = 0;
+  let lastStats = 0;
+  let lastQualityChange = 0;   // 上一次画质档位调整的时刻（冷却用）
+  let qualityLock = false;     // 预设/调试句柄锁定画质时置位，关掉自适应
+  let fpsSkipFrames = 0;       // 统计 pass 帧不计入帧率估计（含回读同步）
+  let lowCount = 0, highCount = 0;
+
+  /* 自适应参数（预设会改 TARGET_FPS，所以必须是 let） */
+  let TARGET_FPS = 120;        // 当前目标帧率（自动档默认 120，可在 UI 里切 60/120/144）
+  let autoTarget = 120;        // 自动档记住的目标帧率（切到手动预设再切回来时恢复）
+  let renderH = 0;             // 0 = 自动（用 SCALES[scaleI]）；>0 = 固定内部渲染高度（480/720/1080/1440）
+  const UP_STREAK = 3;         // 连续 N 次满足条件才升档
+  const UP_COOLDOWN = 1500;    // 升档冷却 ms
+  const DOWN_STREAK = 3;       // 连续 N 次低于阈值才降档
+  const DOWN_COOLDOWN = 1000;  // 降档冷却 ms
+
+  /* 首帧标定：开局前几帧测真实成本，直接跳到合适档位 */
+  let calibFrames = 0, calibTimes = [], calibDone = false;
+  const CALIB_N = 8;
+
+  let gpuAvgSteps = 0;
+  let gpuUnresolved = 0;
+  let gpuUnresCount = 0;
+  let gpuMaxSeen = 0;
+  let gpuFarSide = 0;
+  let cubeDiff = 0;
+  let fpsNow = 60;
+
+  /* ---------- 小工具 ---------- */
+  const v3 = (x, y, z) => [x, y, z];
+  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const scl = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross3 = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0]
+  ];
+  const norm3 = (a) => {
+    const m = Math.hypot(a[0], a[1], a[2]) || 1;
+    return [a[0] / m, a[1] / m, a[2] / m];
+  };
+
+  /* ---------- 尺寸 ---------- */
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(2, Math.round(canvas.clientWidth * dpr));
+    const h = Math.max(2, Math.round(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+  }
+  window.addEventListener('resize', resize, false);
+
+
+/* ============================================================================
+   Part E. 渲染
+   ============================================================================ */
+
+  /* 相机几何：位置标架、相机基、半径、逃逸半径。
+     setSceneUniforms 与鼠标拾取共用，保证两者看到的相机完全一致。 */
+  function cameraBasis() {
+    const b0 = state.b0;
+    const lc = state.camL;
+    const rc = Math.sqrt(lc * lc + b0 * b0);
+    const rEsc = Math.max(200 * b0, 2.2 * rc);
+
+    const th = state.theta, ph = state.phi;
+    const st = Math.sin(th), ct = Math.cos(th), sp = Math.sin(ph), cp = Math.cos(ph);
+    const n1 = v3(st * cp, st * sp, ct);          // r̂ = 位置方向
+    const eth = v3(ct * cp, ct * sp, -st);        // ê_θ
+    const eph = v3(-sp, cp, 0);                   // ê_φ
+
+    /* ---- A：自动穿越的"平滑转身" ----
+       相机沿轴穿过喉部时，"朝喉部看"这个要求会强制视线方向在 l=0 处翻 180°。
+       存在 ê_r 系里就会变成瞬间转身，D⁴ 前灯效应一帧内从 1521 掉到 6.6e-4。
+       这里改成：绕视线的**切向分量**轴，把整个相机基平滑转过
+       θ(l) = π·(1 − tanh(l/λ))/2 —— 远处仍是 0（照旧朝喉部看），
+       喉部处为 π/2（视线与轴垂直），另一侧为 π（转过身来看向喉部）。
+       于是 D = γ(1+v·cosθ) 连续经过 γ(1+v) → γ → γ(1−v)，不再跳变。 */
+    let Fw = state.Fw, Uw = state.Uw, Rw = state.Rw;
+    if (Math.abs(state.thetaTurn) > 1e-7) {
+      const dF = dot3(Fw, n1);
+      let t = [Fw[0] - n1[0] * dF, Fw[1] - n1[1] * dF, Fw[2] - n1[2] * dF];
+      let tl = Math.hypot(t[0], t[1], t[2]);
+      if (tl < 1e-6) {                       // 纯径向视线：改用相机上方的切向分量做轴
+        const dU = dot3(Uw, n1);
+        t = [Uw[0] - n1[0] * dU, Uw[1] - n1[1] * dU, Uw[2] - n1[2] * dU];
+        tl = Math.hypot(t[0], t[1], t[2]);
+      }
+      if (tl > 1e-6) {
+        const axis = [t[0] / tl, t[1] / tl, t[2] / tl];
+        Fw = rotAxis(Fw, axis, state.thetaTurn);
+        Uw = rotAxis(Uw, axis, state.thetaTurn);
+        Rw = rotAxis(Rw, axis, state.thetaTurn);
+      }
+    }
+
+    /* ---- B：∂_l 系 → 着色器用的 ê_r 系 ----
+       相机基存在 ∂_l 系里（径向轴 = ∂_l），而着色器内部用 ê_r，
+       两者相差 sign(l)。乘上它之后，物理视线方向在穿过喉部时**连续**：
+       自由模式下就是"一直朝前飞、朝前看"，喉部自然从身后掠过。 */
+    const sgn = lc < 0 ? -1 : 1;
+    const F = v3(dot3(Fw, n1) * sgn, dot3(Fw, eth), dot3(Fw, eph));
+    const R = v3(dot3(Rw, n1) * sgn, dot3(Rw, eth), dot3(Rw, eph));
+    const U = v3(dot3(Uw, n1) * sgn, dot3(Uw, eth), dot3(Uw, eph));
+    return { b0, lc, rc, rEsc, n1, eth, eph, F, R, U };
+  }
+
+  /* 相机沿 ê_r 的有符号速度（用于像差与多普勒）。
+     ê_r = sign(l)·∂_l，所以 ê_r 分量 = (dl/dt)·sign(l) = state.vEff·sign(l)。
+     注意 state.vEff 是**端部平滑减速后的实际速度**，不是滑块值。 */
+  function signedV() {
+    if (!state.flying || state.paused) return 0;
+    return state.vEff * (state.camL < 0 ? -1 : 1);
+  }
+
+  /* 把局部标架坐标下的方向做像差变换（与着色器同式），返回 [方向, D] */
+  function aberrate(d) {
+    const vv = signedV();
+    if (Math.abs(vv) < 1e-5) return [d, 1];
+    const v = Math.min(Math.abs(vv), 0.999);
+    const s = vv < 0 ? -1 : 1;
+    const k = [-d[0], -d[1], -d[2]];
+    const kpar = k[0] * s;                       // ê_v = (s,0,0)
+    const kper = [k[0] - kpar * s, k[1], k[2]];
+    const sp = Math.hypot(kper[0], kper[1], kper[2]);
+    const den = 1 + v * kpar;
+    const cth = (kpar + v) / den;
+    const sth = sp * Math.sqrt(1 - v * v) / den;
+    const ks = [cth * s + (sp > 1e-8 ? (sth / sp) * kper[0] : 0),
+                (sp > 1e-8 ? (sth / sp) * kper[1] : 0),
+                (sp > 1e-8 ? (sth / sp) * kper[2] : 0)];
+    const ds = [-ks[0], -ks[1], -ks[2]];
+    const dop = (1 / Math.sqrt(1 - v * v)) * (1 + v * (ds[0] * s));
+    return [ds, dop];
+  }
+
+  function setSceneUniforms(resW, resH, pixAng, aspect) {
+    const cb = cameraBasis();
+    const { b0, lc, rc, rEsc, n1, eth, eph, F, R, U } = cb;
+
+    gl.useProgram(progScene);
+    gl.uniform2f(uScene.uRes, resW, resH);
+    gl.uniform3f(uScene.uF, F[0], F[1], F[2]);
+    gl.uniform3f(uScene.uR, R[0], R[1], R[2]);
+    gl.uniform3f(uScene.uU, U[0], U[1], U[2]);
+    gl.uniform1f(uScene.uTanHalf, TAN_HALF);
+    /* 注意：aspect 必须由调用方显式给出。统计 pass 用正方形 RT，
+       若从 resW/resH 推导会得到 1.0，采样到的水平视场就比屏幕窄。 */
+    gl.uniform1f(uScene.uAspect, aspect);
+    gl.uniform1f(uScene.uB0, b0);
+    gl.uniform1f(uScene.uStep, state.step);
+    gl.uniform1i(uScene.uMaxSteps, effMaxSteps());
+    gl.uniform1f(uScene.uCamL, lc);
+    gl.uniform1f(uScene.uRC, rc);
+    gl.uniform1f(uScene.uREsc, rEsc);
+    gl.uniform3f(uScene.uN1, n1[0], n1[1], n1[2]);
+    gl.uniform3f(uScene.uEth, eth[0], eth[1], eth[2]);
+    gl.uniform3f(uScene.uEph, eph[0], eph[1], eph[2]);
+    gl.uniform1f(uScene.uSeedA, 0.0);
+    gl.uniform1f(uScene.uSeedB, 1.0);
+    gl.uniform3f(uScene.uTintA, 0.045, 0.070, 0.150);   // 侧 A：冷蓝
+    gl.uniform3f(uScene.uTintB, 0.150, 0.072, 0.045);   // 侧 B：暖橙
+    gl.uniform3f(uScene.uBandA, 0.100, 0.860, -0.500);
+    gl.uniform3f(uScene.uBandB, -0.120, 0.620, 0.780);
+    gl.uniform1f(uScene.uPixAng, pixAng);
+    /* 星点尺寸锚定"屏幕像素"而不是内部渲染像素：低分辨率档星点仍是 ~1 屏幕像素，
+       既不会因为内部像素变大而变糊，也不会因为内部像素变小而欠采样。 */
+    gl.uniform1f(uScene.uStarPixAng, 2 * TAN_HALF / Math.max(2, canvas.height));
+    gl.uniform1f(uScene.uV, signedV());
+    gl.uniform1f(uScene.uHdrScale, HDR_SCALE);
+    gl.uniform1f(uScene.uStarDens, state.starDens);
+    gl.uniform2f(uScene.uSideDens, 1.0, state.densB);
+    gl.uniform2f(uScene.uSideTemp, state.tempA, state.tempB);
+    gl.uniform2f(uScene.uSideNeb, state.nebA, state.nebB);
+    gl.uniform1f(uScene.uAutoExp, state.autoExp);
+    updateSphereArrays();
+    gl.uniform4fv(uScene.uSphA, sphA);
+    gl.uniform3fv(uScene.uSphDir, sphDir);
+    gl.uniform3fv(uScene.uSphCol, sphCol);
+    gl.uniform3fv(uScene.uSphAxis, sphAxis);
+    gl.uniform1fv(uScene.uSphStyle, sphStyle);
+    gl.uniform1i(uScene.uUseCube, (state.useCube && cubeOK) ? 1 : 0);
+    gl.uniform1f(uScene.uCubeGamma, cubeHDR ? 1.0 : 2.2);
+    if (cubeOK) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeA);
+      gl.uniform1i(uScene.uCubeA, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeB);
+      gl.uniform1i(uScene.uCubeB, 1);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    return { rc, rEsc };
+  }
+
+  /* 有效步数上限 = 用户设定 × 自动降级系数（分辨率降到底后的最后手段） */
+  function effMaxSteps() {
+    return Math.max(64, Math.round(state.cap * STEP_MULT[stepI]));
+  }
+  function maxStepsFor(h) {
+    /* 与 GPU 同源：CPU 自检必须跑与着色器完全相同的步数预算 */
+    return effMaxSteps();
+  }
+
+  /* 有效渲染比例：固定分辨率模式按画布高度换算（上限 1.0，不做超采样）；
+     否则用自适应档位 SCALES[scaleI]。 */
+  function currentScale() {
+    return renderH > 0 ? Math.min(1, renderH / Math.max(2, canvas.height)) : SCALES[scaleI];
+  }
+
+  function drawScene(now) {
+    const cw = canvas.width, ch = canvas.height;
+    const sc = currentScale();
+    const rw = Math.max(2, Math.round(cw * sc));
+    const rh = Math.max(2, Math.round(ch * sc));
+
+    if (!curTarget || curTarget.w !== rw || curTarget.h !== rh) {
+      killTarget(curTarget); killTarget(accTargets[0]); killTarget(accTargets[1]);
+      curTarget = makeSceneTarget(rw, rh);
+      accTargets = [makeSceneTarget(rw, rh), makeSceneTarget(rw, rh)];
+      accLatest = 0;
+      accCount = 0;        // 靶被重建（内容丢失），累积必须从头开始
+      lastSig = '';
+      haveLastCam = false;
+      taaResetReason = 'target';
+    }
+    /* EASU/RCAS 靶：始终是屏幕分辨率（与内部分辨率无关），随画布尺寸重建。 */
+    if (!upTarget || upTarget.w !== cw || upTarget.h !== ch) {
+      killTarget(upTarget); killTarget(rcasTarget);
+      upTarget = makeSceneTarget(cw, ch);
+      rcasTarget = makeSceneTarget(cw, ch);
+    }
+    ensureBloom(rw, rh);
+
+    const pixAng = 2 * TAN_HALF / rh;
+    const screenAspect = cw / ch;
+
+    /* --- 累积策略（邻域钳制 TAA） ---
+       只有"参数变化"或"相机跳跃"才硬重置；相机**平滑运动**时继续累积
+       （alpha 固定 0.12 左右），历史帧在 resolve 里被本帧 3×3 邻域钳制，
+       所以既能靠多帧平均压掉星点频闪，又不会拖出鬼影。
+       自适应画质档位不在签名里：档位变化只是内部调整，不该清零累积。 */
+    const sig = [state.b0, state.step, state.cap, cw, ch,
+                 (state.useCube && cubeOK) ? 1 : 0, state.aa ? 1 : 0].join(',');
+    if (sig !== lastSig) { lastSig = sig; accCount = 0; haveLastCam = false; taaResetReason = 'sig'; }
+
+    const dL = haveLastCam ? Math.abs(state.camL - lastCamL) : 0;
+    const dTh = haveLastCam ? Math.abs(state.thetaTurn - lastThetaTurn) : 0;
+    const dF = haveLastCam
+      ? Math.hypot(state.Fw[0] - lastFw[0], state.Fw[1] - lastFw[1], state.Fw[2] - lastFw[2]) : 0;
+    const moving = dL > 1e-4 || dTh > 1e-4 || dF > 1e-5;
+    /* 运动→静止的瞬间重置累积：否则静止后 alpha=1/(accCount+1) 会带着运动期间的
+       历史帧慢慢衰减（accCount 可达 512，拖影要好几秒才散）。 */
+    if (wasMoving && !moving) { accCount = 0; taaResetReason = 'stop'; }
+    wasMoving = moving;
+    /* 跳跃判定（与帧率无关地只看"单帧变化量"）：位移 > 1.5b₀、转身 > 34°、
+       朝向变化 > 20° 才算瞬移（拖滑块/复位/换模式）。阈值必须留够余量——
+       自动穿越在低帧率下每帧本来就可能转过十几度，太紧会每帧都重置。 */
+    if (dL > 1.5 * state.b0 || dTh > 0.60 || dF > 0.35) { accCount = 0; taaResetReason = 'jump'; }
+    lastCamL = state.camL; lastThetaTurn = state.thetaTurn;
+    lastFw = state.Fw.slice(); haveLastCam = true;
+
+    /* alpha：静止时 1/(n+1)（收敛到超采样平均），运动时固定 0.12（≈6 帧平均） */
+    const alpha = accCount === 0 ? 1.0 : (moving ? 0.12 : 1 / (accCount + 1));
+
+    /* --- 场景 pass：本帧原始采样（单样本 + 亚像素抖动），写入 curTarget --- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, curTarget.fbo);
+    gl.viewport(0, 0, rw, rh);
+    gl.disable(gl.BLEND);
+    gl.useProgram(progScene);
+    setSceneUniforms(rw, rh, pixAng, rw / rh);
+    gl.uniform1i(uScene.uStatMode, 0);
+    gl.uniform1i(uScene.uAA, state.aa ? 1 : 0);
+    gl.uniform2f(uScene.uJitter, halton(accCount, 2) - 0.5, halton(accCount, 3) - 0.5);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    /* --- resolve pass：本帧 + 上一帧累积（钳制）→ 新的累积 --- */
+    {
+      const dst = accTargets[1 - accLatest];
+      const src = accTargets[accLatest];
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, curTarget.tex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      pass(progResolve, dst, () => {
+        gl.uniform1i(uResolve.uCur, 0);
+        gl.uniform1i(uResolve.uHist, 1);
+        gl.uniform2f(uResolve.uTexel, 1 / rw, 1 / rh);
+        gl.uniform1f(uResolve.uAlpha, alpha);
+        gl.uniform1f(uResolve.uClampMix, moving ? 1.0 : 0.0);
+      });
+      accLatest = 1 - accLatest;
+      gl.activeTexture(gl.TEXTURE0);
+    }
+    if (accCount < 512) accCount++;
+
+    /* --- 统计 pass（STAT_N²，用于自检面板的步数 / 未解出 / 对面占比） ---
+       频率从 400ms 降到 1.2s：readPixels 会强制 GPU→CPU 同步、在管线里插一个坑，
+       太频繁会让帧率估计周期性地掉一下，进而误触发自适应降级。
+       跑统计的这两帧也不计入帧率估计（fpsSkipFrames）。 */
+    if (now - lastStats > 1200) {
+      lastStats = now;
+      fpsSkipFrames = 3;   // 本帧 + 接下来两帧的帧率样本都丢弃（fence 间隔会跨过这次回读）
+      gl.bindFramebuffer(gl.FRAMEBUFFER, statTarget.fbo);
+      gl.viewport(0, 0, STAT_N, STAT_N);
+      gl.useProgram(progScene);
+      /* 传入屏幕的宽高比，保证统计采样与真实画面覆盖同一片视场 */
+      setSceneUniforms(STAT_N, STAT_N, pixAng, screenAspect);
+      gl.uniform1i(uScene.uAA, 0);
+      gl.uniform2f(uScene.uJitter, 0, 0);
+      gl.uniform1i(uScene.uStatMode, 1);
+      gl.bindVertexArray(vao);      // resolve pass 会把 VAO 解绑，这里必须自己绑回来
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.readPixels(0, 0, STAT_N, STAT_N, gl.RGBA, gl.UNSIGNED_BYTE, statPixels);
+
+      let sum = 0, unres = 0, farSide = 0, maxSeen = 0;
+      const n = STAT_N * STAT_N;
+      for (let i = 0; i < n; i++) {
+        /* 步数：R 高字节 + G 低字节，16 位精确解码，不随 uMaxSteps 饱和 */
+        const st = statPixels[i * 4] * 256 + statPixels[i * 4 + 1];
+        sum += st;
+        if (st > maxSeen) maxSeen = st;
+        const flags = statPixels[i * 4 + 2];
+        if (flags & 1) unres++;          // bit0：步数耗尽
+        if (flags & 2) farSide++;        // bit1：落点与相机所在侧相反
+      }
+      gpuAvgSteps = sum / n;
+      gpuUnresolved = unres / n;
+      gpuUnresCount = unres;
+      gpuMaxSeen = maxSeen;
+      gpuFarSide = farSide / n;
+
+      /* 贴图 vs 程序化星场的差异（验证烘焙约定与分辨率损失） */
+      if (cubeOK && state.useCube) {
+        gl.uniform1i(uScene.uStatMode, 2);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.readPixels(0, 0, STAT_N, STAT_N, gl.RGBA, gl.UNSIGNED_BYTE, statPixels);
+        let d = 0;
+        for (let i = 0; i < n; i++) d += statPixels[i * 4] / 255;
+        cubeDiff = d / n;
+      }
+    }
+
+    gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { rw, rh, sc };
+  }
+
+  /* ---------------- 泛光缓冲链（随内部分辨率变化时重建） ----------------
+     三级：1/2、1/4、1/8 分辨率，每级一个靶 + 一个临时靶做可分离模糊的乒乓。 */
+  const BLOOM_THRESH = 1.60;   // 线性 HDR 亮度阈值
+  const BLOOM_KNEE = 0.50;     // 软膝宽度
+  let bloom = null;      // { levels:[{a,t}], w, h }
+  function ensureBloom(rw, rh) {
+    const w0 = Math.max(1, rw >> 1), h0 = Math.max(1, rh >> 1);
+    if (bloom && bloom.w === w0 && bloom.h === h0) return;
+    if (bloom) {
+      for (const L of bloom.levels) { killTarget(L.a); killTarget(L.t); }
+      bloom = null;
+    }
+    const levels = [];
+    let w = w0, h = h0;
+    for (let i = 0; i < 3; i++) {
+      levels.push({ a: makeTarget(w, h, HDR_FMT, HDR_TYPE), t: makeTarget(w, h, HDR_FMT, HDR_TYPE), w, h });
+      w = Math.max(1, w >> 1); h = Math.max(1, h >> 1);
+    }
+    bloom = { levels, w: w0, h: h0 };
+  }
+
+  /* 全屏 pass 小工具 */
+  function pass(prog, target, setup) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : null);
+    const w = target ? target.w : canvas.width;
+    const h = target ? target.h : canvas.height;
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(prog);
+    if (setup) setup(w, h);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+  }
+
+  /* ---------------- 后处理：阈值提取 → 多级高斯模糊 → ACES 合成 ---------------- */
+  function drawPost() {
+    const L = bloom.levels;
+    const acc = accTargets[accLatest];   // 累积结果（TAA 输出）
+
+    /* 1) 亮度阈值提取 + 半分辨率降采样 */
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, acc.tex);
+    pass(progBright, L[0].a, (w, h) => {
+      gl.uniform1i(uBright.uTex, 0);
+      gl.uniform2f(uBright.uTexel, 1 / acc.w, 1 / acc.h);
+      gl.uniform1f(uBright.uThresh, BLOOM_THRESH);   // 线性 HDR：只让真正过亮的部分（含多普勒前灯区）发光
+      gl.uniform1f(uBright.uKnee, BLOOM_KNEE);
+      gl.uniform1f(uBright.uInvHdr, 1 / HDR_SCALE);
+      gl.uniform1f(uBright.uHdrScale, HDR_SCALE);
+    });
+
+    /* 2) 每级：水平模糊 → 垂直模糊；下一级由上一级降采样得到 */
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, L[i - 1].a.tex);
+        pass(progDown, L[i].a, () => {
+          gl.uniform1i(uDown.uTex, 0);
+          gl.uniform2f(uDown.uTexel, 1 / L[i - 1].a.w, 1 / L[i - 1].a.h);
+        });
+      }
+      const src = L[i].a, tmp = L[i].t;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      pass(progBlur, tmp, () => {
+        gl.uniform1i(uBlur.uTex, 0);
+        gl.uniform2f(uBlur.uDir, 1 / src.w, 0);
+      });
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tmp.tex);
+      pass(progBlur, src, () => {
+        gl.uniform1i(uBlur.uTex, 0);
+        gl.uniform2f(uBlur.uDir, 0, 1 / src.h);
+      });
+    }
+
+    /* 2.5) EASU 上采样 + RCAS 锐化：低分辨率累积 → 屏幕分辨率 */
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, acc.tex);
+    pass(progEasu, upTarget, () => {
+      gl.uniform1i(uEasu.uTex, 0);
+      gl.uniform2f(uEasu.uInRes, acc.w, acc.h);
+      gl.uniform2f(uEasu.uOutRes, upTarget.w, upTarget.h);
+    });
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, upTarget.tex);
+    pass(progRcas, rcasTarget, () => {
+      gl.uniform1i(uRcas.uTex, 0);
+      gl.uniform2f(uRcas.uTexel, 1 / rcasTarget.w, 1 / rcasTarget.h);
+      gl.uniform1f(uRcas.uSharp, 0.25);
+    });
+
+    /* 3) 合成：锐化后的场景 + 泛光 → 曝光 → ACES → sRGB */
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rcasTarget.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, L[0].a.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, L[1].a.tex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, L[2].a.tex);
+    pass(progComp, null, () => {
+      gl.uniform1i(uComp.uScene, 0);
+      gl.uniform1i(uComp.uBloom0, 1);
+      gl.uniform1i(uComp.uBloom1, 2);
+      gl.uniform1i(uComp.uBloom2, 3);
+      gl.uniform1f(uComp.uBloomStr, state.bloom);
+      gl.uniform1f(uComp.uExposure, state.exposure);
+      gl.uniform1f(uComp.uInvHdr, 1 / HDR_SCALE);
+      gl.uniform1f(uComp.uFrameSeed, ditherSeed);
+    });
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+/* ============================================================================
+   Part F. 自检计算（与着色器同一套方程 / 同一积分器）
+   ============================================================================ */
+
+  /* ---- 1. 嵌入图 z(r)：数值积分 ∫ dz/dr dr ----
+     直接积 b₀/√(r²−b₀²) 在 r = b₀ 处有可积奇点，做变量替换
+         r = b₀ + t²  ⇒  dz/dt = 2b₀/√(2b₀ + t²)
+     后被积函数光滑，用 Simpson 法积分。 */
+  function zEmbedNumerical(r, b0) {
+    if (r <= b0 * (1 + 1e-12)) return 0;
+    const T = Math.sqrt(r - b0);
+    const N = 4000;
+    const dt = T / N;
+    let s = 0;
+    for (let i = 0; i <= N; i++) {
+      const t = i * dt;
+      const f = 2 * b0 / Math.sqrt(2 * b0 + t * t);
+      s += f * (i === 0 || i === N ? 1 : (i % 2 ? 4 : 2));
+    }
+    return s * dt / 3;
+  }
+  const zEmbedClosed = (r, b0) => b0 * Math.acosh(Math.max(1, r / b0));
+  const properL = (r, b0) => Math.sqrt(Math.max(0, r * r - b0 * b0));
+
+  /* ---- 2. 光线积分器：trace() 的 JS 镜像 ----
+     record = true 时同时记录 (l, ψ) 轨迹，供嵌入图面板绘图。 */
+  function integrateRay(b0, l0, w0, J, h, rEsc, maxSteps, record) {
+    let l = l0, w = w0, psi = 0, i = 0;
+    let crossings = 0;
+    let prevSign = l0 >= 0 ? 1 : -1;
+    let escaped = false;
+    const path = record ? [[l0, 0]] : null;
+    for (i = 0; i < maxSteps; i++) {
+      const r2 = l * l + b0 * b0;
+      if (r2 > rEsc * rEsc) { escaped = true; break; }
+      const ds = h * (b0 + Math.abs(l)) * Math.sqrt((b0 + Math.abs(l)) / b0);
+
+      const k1l = w, k1w = J * J * l / (r2 * r2), k1p = J / r2;
+      const l2 = l + 0.5 * ds * k1l, w2 = w + 0.5 * ds * k1w, r2b = l2 * l2 + b0 * b0;
+      const k2l = w2, k2w = J * J * l2 / (r2b * r2b), k2p = J / r2b;
+      const l3 = l + 0.5 * ds * k2l, w3 = w + 0.5 * ds * k2w, r2c = l3 * l3 + b0 * b0;
+      const k3l = w3, k3w = J * J * l3 / (r2c * r2c), k3p = J / r2c;
+      const l4 = l + ds * k3l, w4 = w + ds * k3w, r2d = l4 * l4 + b0 * b0;
+      const k4l = w4, k4w = J * J * l4 / (r2d * r2d), k4p = J / r2d;
+
+      l += ds * (k1l + 2 * k2l + 2 * k3l + k4l) / 6;
+      w += ds * (k1w + 2 * k2w + 2 * k3w + k4w) / 6;
+      psi += ds * (k1p + 2 * k2p + 2 * k3p + k4p) / 6;
+
+      const sg = l >= 0 ? 1 : -1;
+      if (sg !== prevSign) { crossings++; prevSign = sg; }
+
+      const rr2 = l * l + b0 * b0;
+      w = (w < 0 ? -1 : 1) * Math.sqrt(Math.max(0, 1 - J * J / rr2));
+      if (record) path.push([l, psi]);
+    }
+    const r = Math.sqrt(l * l + b0 * b0);
+    /* 第一积分残差 |w² + J²/r² − 1|，衡量数值质量 */
+    const resid = Math.abs(w * w + J * J / (r * r) - 1);
+    /* 平面内的渐近方向角（= 着色器里的 ψ + δ） */
+    const ang = psi + Math.atan2(J, w * l);
+    return { steps: i, l, r, w, psi, ang, escaped, crossings, resid, path };
+  }
+
+  /* ---- 2b. 步长收敛性：同一条光线用 h 与 h/2 各跑一次，比较渐近方向 ----
+     RK4 是 4 阶方法，误差(h) ≈ (16/15)·|ang(h) − ang(h/2)|（Richardson 估计）。 */
+  function convergenceCheck(b0, l0, Jr, h) {
+    const rc = Math.hypot(l0, b0);
+    const t = Math.min(1, (Jr * b0) / rc);
+    const w0 = -Math.sqrt(Math.max(0, 1 - t * t));
+    const rEsc = Math.max(200 * b0, 2.2 * rc);
+    const A = integrateRay(b0, l0, w0, Jr * b0, h, rEsc, maxStepsFor(h), false);
+    const B = integrateRay(b0, l0, w0, Jr * b0, h / 2, rEsc, maxStepsFor(h / 2), false);
+    if (!A.escaped || !B.escaped) return null;
+    const dAng = Math.abs(A.ang - B.ang);
+    return { dAng, est: dAng * 16 / 15, stepsA: A.steps, stepsB: B.steps, J: Jr * b0 };
+  }
+
+  /* ---- 3. 组装自检文本 ---- */
+  const n6 = (x, d) => (Math.abs(x) < 5e-13 ? 0 : x).toFixed(d === undefined ? 8 : d);
+
+  function buildCheckText() {
+    const b0 = state.b0;
+    const h = state.step;
+    const rEsc = Math.max(200 * b0, 12);
+    const maxSteps = maxStepsFor(h);
+    const rows = [1, 2, 4].map((k) => {
+      const r = k * b0;
+      const zN = zEmbedNumerical(r, b0);
+      const zC = zEmbedClosed(r, b0);
+      const lr = properL(r, b0);
+      const tag = k === 1 ? ' (喉部)' : '';
+      return '  r = ' + (k === 1 ? 'b₀ ' : k + 'b₀') + ' : z = ' + n6(zN) +
+             '   闭式 ' + n6(zC) +
+             '   误差 ' + Math.abs(zN - zC).toExponential(1) +
+             '   l = ' + n6(lr, 6) + tag;
+    }).join('\n');
+
+    /* 沿轴光线：从 l = +3（或 1.5b₀，取较大者）指向喉部，J = 0 */
+    const l0 = Math.max(3.0, 1.5 * b0);
+    const axial = integrateRay(b0, l0, -1, 0, h, rEsc, maxSteps);
+
+    /* 临界碰撞参数附近：J/b₀ < 1 穿越，> 1 折返。
+       平面内 J = r_c·sinα，取 α 使 J = 1.01b₀（要求 r_c > 1.01b₀）。 */
+    const rEsc2 = Math.max(200 * b0, 2.2 * Math.sqrt(l0 * l0 + b0 * b0));
+    const g1 = integrateRay(b0, l0, -Math.sqrt(1 - 0.90 * 0.90), 0.90 * b0, h, rEsc2, maxSteps);
+    const rc = Math.sqrt(l0 * l0 + b0 * b0);
+    const g2b = (rc > 1.01 * b0)
+      ? integrateRay(b0, l0, -Math.sqrt(Math.max(0, 1 - Math.pow(1.01 * b0 / rc, 2))), 1.01 * b0, h, rEsc2, maxSteps)
+      : null;
+
+    /* 侧名按"相对于该光线的起点"判定：起点在 l>0 时 l<0 才是对面，反之亦然 */
+    const sideName = (s, lStart) => {
+      if (s === 0) return '未解出';
+      const same = (s === 1) === (lStart >= 0);
+      return (s === 1 ? 'l>0 侧' : 'l<0 侧') + (same ? '（本侧）' : '（对面）');
+    };
+    const resOf = (R) => (R.l >= 0 ? 1 : 2);
+
+    const cw = canvas.width, ch = canvas.height;
+    const _sc = currentScale();
+    const rw = Math.round(cw * _sc), rh = Math.round(ch * _sc);
+
+    /* ---- 6. 能量条件（第 6 节推导的数值化） ----
+       几何单位 (G = c = 1) 下 ρ 的量纲是 1/长度²，换算到 SI 乘 c⁴/G。 */
+    const C4_G = 1.2102e44;      // J/m³ 每 m⁻²
+    const C2_G = 1.3466e27;      // kg 每 m⁻¹
+    const M_EARTH = 5.9722e24;   // kg
+    const RHO_NUC = 2.4e34;      // 核物质能量密度量级 J/m³
+    const rhoOf = (r) => -b0 * b0 / (8 * Math.PI * Math.pow(r, 4));
+    const violOf = (r) => -b0 * b0 / (4 * Math.PI * Math.pow(r, 4));
+    const eRow = (k) => {
+      const r = k * b0;
+      const rg = rhoOf(r), vs = violOf(r);
+      return '    r = ' + (k === 1 ? 'b₀ ' : k + 'b₀') +
+             ' : ρ = ' + rg.toExponential(3) + ' (几何)  →  ' + (rg * C4_G).toExponential(2) +
+             ' J/m³    Viol = ' + (vs * C4_G).toExponential(2) + ' J/m³';
+    };
+    const Mtot = -(Math.PI * b0 / 4) * C2_G;
+    const energyText =
+      '\n【6】能量条件（爱因斯坦方程 + 零能量条件 NEC）★ 本页最需要诚实交代的部分\n' +
+      '  ρ(r) = −b₀²/(8πr⁴)    p_r = ρ（径向张力）    p_t = −ρ（切向压力）\n' +
+      '  NEC 违反量 Viol = ρ + p_r = −b₀²/(4πr⁴) < 0  → 处处违反，\n' +
+      '  且 b′(b₀) = −1 < 1（flare-out）与 ρ + p_r < 0 是同一件事。\n' +
+      [1, 2, 4].map(eRow).join('\n') + '\n' +
+      '  ρ(b₀) 的绝对值约为核物质能量密度的 ' +
+        (Math.abs(rhoOf(b0) * C4_G) / RHO_NUC).toExponential(1) + ' 倍（带负号）\n' +
+      '  总奇异物质 ∫ρdV = −(πb₀/4)·c²/G = ' + Mtot.toExponential(3) + ' kg ≈ ' +
+        (Mtot / M_EARTH).toFixed(1) + ' 个地球质量\n' +
+      '  ADM 质量 = lim b(r)/2 = 0（负物质量与正引力场能相消）\n' +
+      '  ★ 纯理论构造：没有任何观测证据表明自然界存在可宏观累积的负能量密度。\n' +
+      '    卡西米尔效应的负能量密度比这里小 40 个数量级以上，且无法撑开宏观喉部。';
+
+    /* ---- 7. 步长收敛性：h 与 h/2 跑同一条光线，比较渐近方向 ---- */
+    const conv = [0.5, 0.9].map((jr) => convergenceCheck(b0, l0, jr, h)).filter(Boolean);
+    const pxAng = 2 * TAN_HALF / rh;
+    const convText = '\n【7】步长收敛性（同一条光线，h 与 h/2 各跑一次）\n' +
+      (conv.length ? conv.map((c) =>
+        '  J/b₀ = ' + (c.J / b0).toFixed(2) + ' : 步数 ' + c.stepsA + ' → ' + c.stepsB +
+        '   渐近方向角偏差 |Δ| = ' + c.dAng.toExponential(2) + ' rad = ' +
+        (c.dAng / pxAng).toFixed(4) + ' 像素\n' +
+        '            Richardson 误差估计 ≈ ' + c.est.toExponential(2) + ' rad').join('\n')
+        : '  当前步长下光线未逃逸，无法比较（请减小 h）') + '\n' +
+      '  判定：偏差远小于 1 像素 ⇒ 当前步长足够（这取代了"我猜够用"）';
+
+    const txt =
+      '【1】嵌入图 z(r) = b₀·arccosh(r/b₀)   （数值 Simpson 积分 vs 闭式）\n' +
+      rows + '\n\n' +
+      '【2】沿轴光线（J = 0，从 l = +' + n6(l0, 2) + ' 指向喉部，h = ' + h.toFixed(3) + '）\n' +
+      '  积分步数 : ' + axial.steps + '\n' +
+      '  最终落点 : l = ' + n6(axial.l, 4) + ' ,  r = ' + n6(axial.r, 4) +
+      '   →  ' + sideName(resOf(axial), l0) + '\n' +
+      '  穿越喉部 : ' + axial.crossings + ' 次    第一积分残差 : ' + axial.resid.toExponential(2) + '\n\n' +
+      '【3】临界碰撞参数校验（J < b₀ 穿越，J > b₀ 折返）\n' +
+      '  J = 0.90 b₀ : ' + (g1.escaped ? '已逃逸' : '步数耗尽') + ' , 步数 ' + g1.steps +
+      ' → ' + sideName(resOf(g1), l0) + (g1.crossings ? '（穿越 ' + g1.crossings + ' 次）' : '（未穿越）') + '\n' +
+      (g2b ? '  J = 1.01 b₀ : ' + (g2b.escaped ? '已逃逸' : '步数耗尽') + ' , 步数 ' + g2b.steps +
+             ' → ' + sideName(resOf(g2b), l0) + (g2b.crossings ? '（穿越 ' + g2b.crossings + ' 次）' : '（未穿越）') + '\n'
+           : '  J = 1.01 b₀ : 当前相机半径不足，跳过\n') +
+      '\n【4】渲染统计\n' +
+      '  画质模式 : ' + (renderH > 0
+          ? ('固定 ' + renderH + 'p（锁定，EASU/RCAS 上采样）')
+          : qualityLock
+            ? ((PRESETS[presetName] ? PRESETS[presetName].label : '手动') +
+               '（锁定，目标 ' + TARGET_FPS + 'fps）')
+            : ('自动（目标 ' + TARGET_FPS + 'fps）')) + '\n' +
+      '  帧率 : ' + fpsNow.toFixed(1) + ' fps   （目标 ' + TARGET_FPS +
+        '；< ' + Math.round(TARGET_FPS * 0.83) + ' 降级，> ' + Math.round(TARGET_FPS * 1.05) +
+        ' 升档，底线 30）' +
+        '   测量源 : ' + (tqOK()
+          ? 'timer query 实测 GPU 耗时 ' + tqMs.toFixed(2) + ' ms（fence 周期 ' +
+            fencePeriodMs.toFixed(2) + ' ms / 延迟 ' + fenceLatMs.toFixed(1) + ' ms）'
+          : fenceOK
+            ? 'GL fence 实测帧周期 ' + fencePeriodMs.toFixed(2) + ' ms（延迟 ' +
+              fenceLatMs.toFixed(1) + ' ms）'
+            : 'rAF 间隔兜底 ' + emaFrameMs.toFixed(1) + ' ms') +
+        '（统计 pass 帧已排除）\n' +
+      '  画布 : ' + cw + '×' + ch + '  →  内部渲染 ' + rw + '×' + rh +
+      '  (scale ' + currentScale().toFixed(2) + ')\n' +
+      '  步数上限 : ' + maxSteps + ' / 用户设定 ' + state.cap +
+      (stepI > 0 ? (qualityLock ? '（锁定档步长 ×' : '（自动降级 ×') +
+                   STEP_MULT[stepI].toFixed(2) + '）' : '（未降级）') + '\n' +
+      '  平均每像素积分步数 : ' + gpuAvgSteps.toFixed(1) +
+      '   （GPU ' + STAT_N + '×' + STAT_N + ' 采样，16 位编码）\n' +
+      '  落在对面区域（与相机所在侧相反）的像素占比 : ' + (gpuFarSide * 100).toFixed(2) + '%\n' +
+      '  未解出像素占比 : ' + (gpuUnresolved * 100).toFixed(3) + '%   (' +
+        gpuUnresCount + ' / ' + (STAT_N * STAT_N) + ' 采样)\n' +
+      '  采样中最大步数 : ' + gpuMaxSeen + ' / 上限 ' + maxSteps +
+        (gpuMaxSeen >= maxSteps ? '   → 有光线被截断' : '   → 无光线被截断，0% 未解出是真实的') +
+      (fpsNow < 30 ? '\n  ⚠ 低于 30fps 底线：' +
+        (qualityLock
+          ? '画质已锁定（手动档），不会自动降级；可切到「自动」或选「性能」'
+          : (scaleI >= SCALES.length - 1 && stepI >= STEP_MULT.length - 1)
+            ? '已到最低画质档，GPU 过弱，请调大步长 h 或减小窗口'
+            : '正在自动降级（分辨率 → 步数）') : '') +
+      '\n\n【5】两侧星场（必须不同）\n' +
+      '  哈希种子 : 侧 A = 0.0   侧 B = 1.0   → 星位/亮度/色温分布完全不同\n' +
+      '  星场密度 : A = 1.00×          B = ' + state.densB.toFixed(2) + '×\n' +
+      '  色温分布 : A = ' + tempRange(state.tempA) + '   B = ' + tempRange(state.tempB) +
+        '（参数 ' + state.tempA.toFixed(2) + ' / ' + state.tempB.toFixed(2) + '）\n' +
+      '  星云形态 : A = ' + state.nebA.toFixed(2) + '（大团块 + 宽银河带）   B = ' +
+        state.nebB.toFixed(2) + '（细丝 + 窄带）\n' +
+      '  星云色调 : A 冷蓝 (0.045,0.070,0.150)   B 暖橙 (0.150,0.072,0.045)\n' +
+      '  银河带向 : A (0.30,0.86,-0.41)          B (-0.62,0.35,0.70)\n' +
+      energyText + '\n' +
+      convText + '\n' +
+      '\n【8】渲染管线状态\n' +
+      '  HDR 靶 : ' + (hdrFloat ? 'RGBA16F（EXT_color_buffer_float）→ 线性 HDR 直出'
+                                : 'RGBA8 回退（无浮点扩展）→ 线性色 ×1/4 压缩存储') + '\n' +
+      '  后处理 : 阈值提取(' + BLOOM_THRESH.toFixed(2) + ', 软膝 ' + BLOOM_KNEE.toFixed(2) +
+        ') → 1/2·1/4·1/8 三级可分离高斯 → ' +
+        'ACES 色调映射（曝光 ' + state.exposure.toFixed(2) + '，泛光 ' + state.bloom.toFixed(2) + '）\n' +
+      '  星场来源 : ' + ((state.useCube && cubeOK)
+          ? '立方体贴图 ' + bakeSize + '²/面 · ' +
+            (cubeHDR ? 'RGBA16F 线性 HDR' : 'RGBA8 伽马编码') +
+            '（角分辨率 ' + (90 / bakeSize * 60).toFixed(2) + '′/纹素）'
+          : '逐像素程序化（3 层哈希 + 2 阶噪声）') + '\n' +
+      '  星场密度 : 全局 ' + state.starDens.toFixed(2) + '×  →  侧 A 约 ' +
+        Math.round(starCount(state.starDens, bandWidthJS(state.nebA))).toLocaleString('en-US') + ' 颗，侧 B 约 ' +
+        Math.round(starCount(state.starDens * state.densB, bandWidthJS(state.nebB))).toLocaleString('en-US') + ' 颗' +
+        '（A : B = 1 : ' + state.densB.toFixed(2) + '；含银河带密度增强；肉眼可见的夜空约 9 千颗 ⇒ 侧 A 相当于 ' +
+        (starCount(state.starDens, bandWidthJS(state.nebA)) / 8900).toFixed(1) + ' 倍）\n' +
+      '  贴图 vs 程序化 平均绝对差 : ' + (cubeOK && state.useCube ? cubeDiff.toFixed(5) : '—') +
+        '（验证烘焙面朝向约定与分辨率损失；应为小值而非量级差异）\n' +
+      '  临界带超采样 : ' + (state.aa ? '开（2×2 抖动）' : '关') + '\n' +
+      '  自动穿越速度剖面 : ' + (state.flying
+          ? '端部 smoothstep 减速（ramp = ' + Math.max(0.5, 0.30 * state.lMax).toFixed(2) +
+            '），当前 |v| = ' + Math.abs(state.vEff).toFixed(3) + 'c，D = ' +
+            (1 / Math.sqrt(1 - Math.min(0.999, Math.abs(state.vEff)) ** 2) *
+             (1 + Math.abs(state.vEff))).toFixed(3) + '（迎面）'
+          : '自由飞行，v = 0') + '\n' +
+      '  相机模式 : ' + (state.flying
+          ? '自动穿越 · 平滑转身 ' + (state.turnSmooth ? '开' : '关（改为一直朝前看）')
+          : '自由飞行 · 朝前看 ' + (state.lookForward ? '开（视线在 ∂_l 系固定）'
+                                                      : '关（转头盯住喉部）')) + '\n' +
+      '  视线转角 θ : ' + (state.thetaTurn * 180 / Math.PI).toFixed(1) + '°' +
+        '（0° = 朝前看 / 面向喉部，180° = 转身后仍面向喉部；一阶跟踪 τ = 0.25 s）\n' +
+      '  自动曝光增益 : ' + state.autoExp.toFixed(3) + '×' +
+        (state.autoExposure ? '' : '（已关闭）') +
+        '（对 1/D_center⁴ 做 τ = 0.45 s 一阶低通）\n' +
+      '  时间累积 TAA : ' + (accCount > 1
+          ? accCount + ' 帧（等效 ' + (Math.sqrt(accCount)).toFixed(1) + '× 采样，线性 HDR 空间平均；' +
+            '邻域钳制，运动时 alpha = 0.12）'
+          : '刚重置（相机跳跃或参数刚变）');
+
+    $('chkText').textContent = txt;
+
+    const vvNow = signedV();
+    $('hudStat').textContent =
+      'b₀ = ' + b0.toFixed(2) +
+      '   ' + (state.flying
+          ? '自动穿越' + (state.turnSmooth ? '' : '(不转身)')
+          : '自由飞行' + (state.lookForward ? '' : '(盯喉部)')) +
+      '   v = ' + Math.abs(vvNow).toFixed(2) + 'c' +
+        (Math.abs(vvNow) < 0.005 ? '（端部减速中）' : (vvNow < 0 ? ' 朝喉部' : ' 背离喉部')) +
+      '   l = ' + state.camL.toFixed(2) + '\n' +
+      fpsNow.toFixed(0) + ' fps @ ' + rw + '×' + rh +
+      '   步/像素 ' + gpuAvgSteps.toFixed(0) +
+      '   上限 ' + maxSteps +
+      '   对面 ' + (gpuFarSide * 100).toFixed(0) + '%' +
+      '   星密 ' + state.starDens.toFixed(2) + '×' +
+      (Math.abs(state.thetaTurn) > 0.01 ? '   θ ' + (state.thetaTurn * 180 / Math.PI).toFixed(0) + '°' : '') +
+      (state.autoExposure && state.flying ? '   曝光 ×' + state.autoExp.toFixed(2) : '') +
+      (accCount > 1 ? '   TAA ' + accCount + '×' : '') +
+      '   画质 ' + (renderH > 0 ? (renderH + 'p') : (qualityLock ? (PRESETS[presetName] ? PRESETS[presetName].label : '锁') : '自动'));
+  }
+
+
+/* ============================================================================
+   Part G. 交互
+   ============================================================================ */
+
+  function bindSlider(id, valId, key, fmt, onChange) {
+    const s = $(id), v = $(valId);
+    const upd = () => {
+      const x = parseFloat(s.value);
+      state[key] = x;
+      v.textContent = fmt(x);
+      if (onChange) onChange(x);
+    };
+    s.addEventListener('input', upd, false);
+    upd();
+  }
+
+  bindSlider('sB0', 'vB0', 'b0', (x) => x.toFixed(2));
+  bindSlider('sStep', 'vStep', 'step', (x) => x.toFixed(3));
+  bindSlider('sSpeed', 'vSpeed', 'speed', (x) => x.toFixed(2));
+  bindSlider('sCap', 'vCap', 'cap', (x) => x.toFixed(0));
+  bindSlider('sDens', 'vDens', 'starDens', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sDensB', 'vDensB', 'densB', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sTempA', 'vTempA', 'tempA', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sTempB', 'vTempB', 'tempB', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sNebA', 'vNebA', 'nebA', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sNebB', 'vNebB', 'nebB', (x) => x.toFixed(2), scheduleRebake);
+  bindSlider('sExp', 'vExp', 'exposure', (x) => x.toFixed(2));
+  bindSlider('sBloom', 'vBloom', 'bloom', (x) => x.toFixed(2));
+  bindSlider('sDist', 'vDist', 'camL', (x) => x.toFixed(2), (x) => {
+    state.lMax = Math.max(3.0, Math.abs(x));
+  });
+
+  function toggleFly() {
+    state.flying = !state.flying;
+    if (state.flying) state.flyDir = state.camL > 0 ? -1 : 1;
+    $('bFly').classList.toggle('on', state.flying);
+    lastSig = '';       // 模式切换立刻重算（丢掉旧的 TAA 累积）
+  }
+
+  /* ---- 画质预设 ----
+     「自动」= 解锁自适应；其余三档 = 锁定 scale/step + 设定目标帧率。
+     档位按目标机器标定（0.5 档 100~200fps，成本 ∝ scale²）：
+       性能 0.40 + 步长 0.85 → ~156-312fps
+       均衡 0.80            → ~39-78fps
+       电影 1.00            → ~25-50fps（画质优先） */
+  const PRESETS = {
+    perf: { label: '性能', scaleI: 4, stepI: 1, target: 120 },
+    bal:  { label: '均衡', scaleI: 1, stepI: 0, target: 60  },
+    cine: { label: '电影', scaleI: 0, stepI: 0, target: 30  }
+  };
+  let presetName = 'auto';
+
+  function lockQuality(s, st) {
+    scaleI = Math.max(0, Math.min(SCALES.length - 1, s | 0));
+    stepI  = Math.max(0, Math.min(STEP_MULT.length - 1, st | 0));
+    qualityLock = true;
+    lowCount = highCount = 0;
+    lastSig = '';
+  }
+  function unlockQuality() {
+    renderH = 0;               // 回到自适应档位模式
+    qualityLock = false;
+    lowCount = highCount = 0;
+    lastQualityChange = performance.now();
+    lastSig = '';
+  }
+  function applyPreset(name) {
+    presetName = name;
+    renderH = 0;                             // 预设 = 相对比例档，退出固定分辨率模式
+    if (name === 'auto') { TARGET_FPS = autoTarget; unlockQuality(); }
+    else {
+      const p = PRESETS[name];
+      TARGET_FPS = p.target;
+      lockQuality(p.scaleI, p.stepI);
+    }
+    ['qAuto', 'qPerf', 'qBal', 'qCine'].forEach((id) => $(id).classList.remove('on'));
+    $(name === 'auto' ? 'qAuto' : name === 'perf' ? 'qPerf' : name === 'bal' ? 'qBal' : 'qCine')
+      .classList.add('on');
+    ['rAuto', 'r480', 'r720', 'r1080', 'r2k'].forEach((id) => $(id).classList.remove('on'));
+    $('rAuto').classList.add('on');
+    lastSig = '';
+  }
+  /* ---- 固定渲染分辨率（480p / 720p / 1080p / 2K）----
+     把内部渲染高度固定为该值（宽度按画布宽高比换算），EASU/RCAS 再上采样到画布。
+     固定档锁定自适应；选「自动」回到目标帧率模式。
+     参考（2552×1354 画布、GTX 1650、平均 ~49 步/像素）：
+       480p ≈ 230fps、720p ≈ 103fps、1080p ≈ 46fps、2K ≈ 28fps；自动 0.65 档 ≈ 61fps。 */
+  function setRenderRes(h) {
+    if (h <= 0) { applyPreset('auto'); return; }
+    renderH = h;
+    presetName = 'res';
+    qualityLock = true;
+    lowCount = highCount = 0;
+    ['qAuto', 'qPerf', 'qBal', 'qCine'].forEach((id) => $(id).classList.remove('on'));
+    ['rAuto', 'r480', 'r720', 'r1080', 'r2k'].forEach((id) => $(id).classList.remove('on'));
+    $('r' + (h === 480 ? '480' : h === 720 ? '720' : h === 1080 ? '1080' : '2k')).classList.add('on');
+    lastSig = '';
+  }
+  /* ---- 自动档目标帧率（60 / 120 / 144）----
+     240Hz 屏上 60fps 会明显发飘，默认 120；代价是自动档会降到约 0.32~0.40。 */
+  function setAutoTarget(fps) {
+    autoTarget = fps;
+    TARGET_FPS = fps;
+    if (qualityLock) applyPreset('auto');       // 手动档时切回自动，让新目标生效
+    ['fps60', 'fps120', 'fps144'].forEach((id) => $(id).classList.remove('on'));
+    $('fps' + fps).classList.add('on');
+    lastSig = '';
+  }
+  $('qAuto').addEventListener('click', () => applyPreset('auto'), false);
+  $('qPerf').addEventListener('click', () => applyPreset('perf'), false);
+  $('qBal').addEventListener('click', () => applyPreset('bal'), false);
+  $('qCine').addEventListener('click', () => applyPreset('cine'), false);
+  $('fps60').addEventListener('click', () => setAutoTarget(60), false);
+  $('fps120').addEventListener('click', () => setAutoTarget(120), false);
+  $('fps144').addEventListener('click', () => setAutoTarget(144), false);
+  $('rAuto').addEventListener('click', () => setRenderRes(0), false);
+  $('r480').addEventListener('click', () => setRenderRes(480), false);
+  $('r720').addEventListener('click', () => setRenderRes(720), false);
+  $('r1080').addEventListener('click', () => setRenderRes(1080), false);
+  $('r2k').addEventListener('click', () => setRenderRes(1440), false);
+
+  $('bFly').addEventListener('click', toggleFly);
+  $('bPause').addEventListener('click', () => {
+    state.paused = !state.paused;
+    $('bPause').classList.toggle('on', state.paused);
+    $('bPause').textContent = state.paused ? '继续' : '暂停';
+  });
+  $('bReset').addEventListener('click', () => {
+    state.theta = Math.PI / 2; state.phi = 0;
+    state.Fw = [-1, 0, 0]; state.Uw = [0, 0, 1]; state.Rw = [0, 1, 0];
+    state.camL = 3.0; state.lMax = 3.0; state.flyDir = -1;
+    $('sDist').value = '3.00'; $('vDist').textContent = '3.00';
+  });
+  $('cAA').addEventListener('change', (e) => { state.aa = e.target.checked; }, false);
+  $('cAutoExp').addEventListener('change', (e) => { state.autoExposure = e.target.checked; }, false);
+  $('cTurn').addEventListener('change', (e) => { state.turnSmooth = e.target.checked; }, false);
+  $('cFwd').addEventListener('change', (e) => { state.lookForward = e.target.checked; }, false);
+  $('cSph').addEventListener('change', (e) => { state.showSpheres = e.target.checked; lastSig = ''; }, false);
+  $('cCube').addEventListener('change', (e) => {
+    state.useCube = e.target.checked;
+    if (state.useCube) bakeCubes();
+  }, false);
+
+  /* 星场密度变了要重烘立方体贴图；拖动过程中每帧重烘太贵，做 350ms 去抖 */
+  let rebakeTimer = 0;
+  function scheduleRebake() {
+    if (!state.useCube || !cubeOK) return;
+    clearTimeout(rebakeTimer);
+    rebakeTimer = setTimeout(() => { bakeCubes(); lastSig = ''; }, 350);
+  }
+
+  /* 拖动 = 转头 */
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.classList.add('drag');
+    canvas.setPointerCapture(e.pointerId);
+  }, false);
+  canvas.addEventListener('pointermove', (e) => {
+    if (dragging) {
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      /* 绕相机自身的上方向做水平转、绕自身右方向做垂直转，再正交化。
+         用世界坐标基而不是 (yaw, pitch)，这样抬头到 ±90° 也不会折回。 */
+      const a = -dx * 0.0032;
+      state.Fw = rotAxis(state.Fw, state.Uw, a);
+      state.Rw = rotAxis(state.Rw, state.Uw, a);
+      const b = -dy * 0.0032;
+      state.Fw = rotAxis(state.Fw, state.Rw, b);
+      state.Uw = rotAxis(state.Uw, state.Rw, b);
+      state.Fw = norm3(state.Fw);
+      state.Rw = norm3(cross3(state.Fw, state.Uw));
+      state.Uw = norm3(cross3(state.Rw, state.Fw));
+    }
+    scheduleRayPick(e.clientX, e.clientY);
+  }, false);
+  const endDrag = (e) => {
+    dragging = false; canvas.classList.remove('drag');
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  canvas.addEventListener('pointerup', endDrag, false);
+  canvas.addEventListener('pointercancel', endDrag, false);
+
+  /* 滚轮 = 前后移动相机 */
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const d = Math.sign(e.deltaY) * 0.35;
+    state.camL = Math.max(-8, Math.min(8, state.camL + d));
+    state.lMax = Math.max(3.0, Math.abs(state.camL));
+    $('sDist').value = state.camL.toFixed(2);
+    $('vDist').textContent = state.camL.toFixed(2);
+  }, { passive: false });
+
+
+/* ============================================================================
+   Part G1b. 键盘：WASD 平移 / QE 上下 / 空格切换自由飞行 ⇄ 自动穿越
+   ----------------------------------------------------------------------------
+   相机位置 = (l, θ, φ)。平移要同时分解成"沿轴"与"切向"两部分：
+     · 沿轴：Δl = d·(d̂·ê_r)                      —— 直接改 camL
+     · 切向：把位置方向 n̂₁ 绕轴 (n̂₁ × û) 转 d/r_c —— 球面上移动固有距离 d
+   转完之后再解出新的 (θ, φ) 与 (yaw, pitch)，使世界坐标下的视线方向保持不变，
+   否则平移时画面会自己歪掉。
+   ============================================================================ */
+
+  const keys = Object.create(null);
+
+  /* 把局部标架坐标 (a,b,c)（基为 ê_r, ê_θ, ê_φ）转成世界坐标 */
+  function localToWorld(cb, v) {
+    return [
+      cb.n1[0] * v[0] + cb.eth[0] * v[1] + cb.eph[0] * v[2],
+      cb.n1[1] * v[0] + cb.eth[1] * v[1] + cb.eph[1] * v[2],
+      cb.n1[2] * v[0] + cb.eth[2] * v[1] + cb.eph[2] * v[2]
+    ];
+  }
+
+  /* Rodrigues 旋转：把向量 v 绕单位轴 k 转 ang */
+  function rotAxis(v, k, ang) {
+    const c = Math.cos(ang), s = Math.sin(ang), kd = dot3(k, v);
+    const kv = cross3(k, v);
+    return [
+      v[0] * c + kv[0] * s + k[0] * kd * (1 - c),
+      v[1] * c + kv[1] * s + k[1] * kd * (1 - c),
+      v[2] * c + kv[2] * s + k[2] * kd * (1 - c)
+    ];
+  }
+
+  function moveCamera(dt) {
+    if (state.flying) return;            // 自动穿越时由轨迹接管，手动平移关闭
+    let mF = 0, mR = 0, mU = 0;
+    if (keys['KeyW']) mF += 1;
+    if (keys['KeyS']) mF -= 1;
+    if (keys['KeyD']) mR += 1;
+    if (keys['KeyA']) mR -= 1;
+    if (keys['KeyE']) mU += 1;
+    if (keys['KeyQ']) mU -= 1;
+    if (!mF && !mR && !mU) return;
+
+    const cb = cameraBasis();
+    const Fw = localToWorld(cb, cb.F);
+    const Rw = localToWorld(cb, cb.R);
+    const Uw = localToWorld(cb, cb.U);
+    const dir = norm3([
+      Fw[0] * mF + Rw[0] * mR + Uw[0] * mU,
+      Fw[1] * mF + Rw[1] * mR + Uw[1] * mU,
+      Fw[2] * mF + Rw[2] * mR + Uw[2] * mU
+    ]);
+
+    const dist = 1.5 * dt;               // 世界单位/秒（b₀ = 1 为尺度）
+    /* cb.F/cb.R/cb.U 是 ê_r 系分量，localToWorld 给出的是 ê_r 系基下的世界向量；
+       而"沿轴"要走的是 ∂_l = sign(l)·ê_r，所以这里要补一个 sign(l)。 */
+    const axial = dot3(dir, cb.n1) * (state.camL < 0 ? -1 : 1);
+    const tanVec = [dir[0] - cb.n1[0] * axial,
+                    dir[1] - cb.n1[1] * axial,
+                    dir[2] - cb.n1[2] * axial];
+    const tlen = Math.hypot(tanVec[0], tanVec[1], tanVec[2]);
+
+    /* 沿轴 */
+    const newL = Math.max(-8, Math.min(8, state.camL + axial * dist));
+    if (newL !== state.camL) {
+      state.camL = newL;
+      state.lMax = Math.max(3.0, Math.abs(newL));
+      $('sDist').value = newL.toFixed(2);
+      $('vDist').textContent = newL.toFixed(2);
+    }
+
+    /* 切向：把位置方向 n̂₁ 绕 (n̂₁ × û) 转过 d/r_c（球面上的固有距离 d）。
+       相机基保持世界方向不动 —— 平移不该让画面跟着转，那是"转头"而不是"平移"。 */
+    if (tlen > 1e-6) {
+      const u = [tanVec[0] / tlen, tanVec[1] / tlen, tanVec[2] / tlen];
+      const ang = (dist * tlen) / cb.rc;
+      const axis = norm3(cross3(cb.n1, u));
+      const n1b = rotAxis(cb.n1, axis, ang);
+      state.theta = Math.acos(Math.max(-1, Math.min(1, n1b[2])));
+      state.phi = Math.atan2(n1b[1], n1b[0]);
+    }
+  }
+
+  /* ---- UI 侧边栏开关：点击右侧竖排按钮 / 按 H 隐藏或显示所有面板 ----
+     #fail（致命错误）不参与，避免把报错藏起来。 */
+  const uiToggle = $('uiToggle');
+  function setUIHidden(hidden) {
+    document.body.classList.toggle('ui-hidden', hidden);
+    uiToggle.textContent = hidden ? '◀' : '▶';
+    uiToggle.title = hidden ? '显示面板（H）' : '隐藏面板（H）';
+    uiToggle.setAttribute('aria-label', uiToggle.title);
+  }
+  function toggleUI() { setUIHidden(!document.body.classList.contains('ui-hidden')); }
+  uiToggle.addEventListener('click', toggleUI, false);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); toggleFly(); return; }
+    if (e.code === 'KeyH') { e.preventDefault(); toggleUI(); return; }
+    keys[e.code] = true;
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'].indexOf(e.code) >= 0) e.preventDefault();
+  }, false);
+  window.addEventListener('keyup', (e) => { keys[e.code] = false; }, false);
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; }, false);
+
+/* ============================================================================
+   Part G2. 光线路径面板：把鼠标位置那条光线画到嵌入图上
+   ============================================================================ */
+
+  const rayCv = $('raycv');
+  const rayCtx = rayCv.getContext('2d');
+  let rayPick = null, rayPickAt = 0, lastMouse = null, rayRefT = 0;
+
+  /* 由屏幕坐标反解出该像素的光线参数（与着色器同一条公式链） */
+  function pickAt(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return null;
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const cb = cameraBasis();
+    const aspect = rect.width / rect.height;
+    let d = [cb.F[0] + nx * TAN_HALF * aspect * cb.R[0] + ny * TAN_HALF * cb.U[0],
+             cb.F[1] + nx * TAN_HALF * aspect * cb.R[1] + ny * TAN_HALF * cb.U[1],
+             cb.F[2] + nx * TAN_HALF * aspect * cb.R[2] + ny * TAN_HALF * cb.U[2]];
+    d = norm3(d);
+    const [ds, dop] = aberrate(d);
+    const t = Math.hypot(ds[1], ds[2]);
+    const J = cb.rc * t;
+    const w0 = ds[0] * (state.camL < 0 ? -1 : 1);
+    const R = integrateRay(state.b0, state.camL, w0, J, state.step, cb.rEsc,
+                           maxStepsFor(state.step), true);
+    return { J, w0, dop, R, rc: cb.rc };
+  }
+
+  function drawRayPanel() {
+    const W = rayCv.width, H = rayCv.height;
+    const b0 = state.b0;
+    const p = rayPick;
+
+    rayCtx.fillStyle = '#04070e';
+    rayCtx.fillRect(0, 0, W, H);
+
+    /* 横轴范围：只画到喉部附近有意义的一段（光线实际会跑到 r_esc = 200b₀） */
+    let rmax = Math.max(b0 * 2.6, Math.abs(state.camL) * 1.7 + b0);
+    const pad = 12;
+    const zmax = b0 * Math.acosh(Math.max(1.0001, rmax / b0)) * 1.10;
+    const sx = (r) => pad + (r / rmax) * (W - 2 * pad);
+    const sy = (z) => H / 2 - (z / zmax) * (H / 2 - pad);
+
+    /* 网格与刻度 */
+    rayCtx.strokeStyle = 'rgba(120,170,240,0.10)';
+    rayCtx.lineWidth = 1;
+    for (let k = 1; k * b0 <= rmax; k++) {
+      const X = sx(k * b0);
+      rayCtx.beginPath(); rayCtx.moveTo(X, pad); rayCtx.lineTo(X, H - pad); rayCtx.stroke();
+    }
+    rayCtx.strokeStyle = 'rgba(120,170,240,0.16)';
+    rayCtx.beginPath(); rayCtx.moveTo(pad, H / 2); rayCtx.lineTo(W - pad, H / 2); rayCtx.stroke();
+
+    /* 嵌入图漏斗轮廓 z = ±b₀·arccosh(r/b₀) */
+    rayCtx.strokeStyle = 'rgba(120,170,240,0.55)';
+    rayCtx.lineWidth = 1.2;
+    for (const sgn of [1, -1]) {
+      rayCtx.beginPath();
+      for (let i = 0; i <= 160; i++) {
+        const r = b0 + (rmax - b0) * (i / 160);
+        const z = sgn * b0 * Math.acosh(Math.max(1, r / b0));
+        const X = sx(r), Y = sy(z);
+        if (i === 0) rayCtx.moveTo(X, Y); else rayCtx.lineTo(X, Y);
+      }
+      rayCtx.stroke();
+    }
+
+    /* 喉部 r = b₀ */
+    rayCtx.strokeStyle = 'rgba(94,224,176,0.85)';
+    rayCtx.setLineDash([3, 3]);
+    rayCtx.beginPath();
+    rayCtx.moveTo(sx(b0), pad); rayCtx.lineTo(sx(b0), H - pad);
+    rayCtx.stroke();
+    rayCtx.setLineDash([]);
+
+    /* 选中光线 */
+    if (p && p.R.path) {
+      rayCtx.strokeStyle = '#ffd479';
+      rayCtx.lineWidth = 1.5;
+      rayCtx.beginPath();
+      let started = false;
+      for (let i = 0; i < p.R.path.length; i++) {
+        const l = p.R.path[i][0];
+        const r = Math.hypot(l, b0);
+        if (r > rmax) break;
+        const z = (l >= 0 ? 1 : -1) * b0 * Math.acosh(Math.max(1, r / b0));
+        const X = sx(r), Y = sy(z);
+        if (!started) { rayCtx.moveTo(X, Y); started = true; } else rayCtx.lineTo(X, Y);
+      }
+      rayCtx.stroke();
+
+      /* 起点（相机） */
+      const l0 = p.R.path[0][0], r0 = Math.hypot(l0, b0);
+      if (r0 <= rmax) {
+        rayCtx.fillStyle = '#5ee0b0';
+        rayCtx.beginPath();
+        rayCtx.arc(sx(r0), sy((l0 >= 0 ? 1 : -1) * b0 * Math.acosh(Math.max(1, r0 / b0))), 3, 0, 7);
+        rayCtx.fill();
+      }
+      /* 穿越点 */
+      for (let i = 1; i < p.R.path.length; i++) {
+        if ((p.R.path[i - 1][0] >= 0) !== (p.R.path[i][0] >= 0)) {
+          rayCtx.fillStyle = '#ff8fb0';
+          rayCtx.beginPath();
+          rayCtx.arc(sx(b0), H / 2, 3.2, 0, 7);
+          rayCtx.fill();
+          break;
+        }
+      }
+    }
+
+    /* 文字说明 */
+    rayCtx.fillStyle = 'rgba(160,185,215,0.9)';
+    rayCtx.font = '10px ui-monospace,Consolas,monospace';
+    rayCtx.fillText('z', pad, 14);
+    rayCtx.fillText('r →', W - 34, H / 2 - 4);
+    if (p && p.R.path) {
+      const R = p.R;
+      const side = R.l >= 0 ? 'l>0 侧' : 'l<0 侧';
+      const cross = R.crossings > 0 ? '，穿越喉部 ' + R.crossings + ' 次' : '，未穿越';
+      $('rayinfo').textContent =
+        'J/b₀ = ' + (p.J / b0).toFixed(3) + '   步数 ' + R.steps +
+        (R.escaped ? '' : '（未解出）') + '   落点 ' + side + cross +
+        '   ψ = ' + R.psi.toFixed(2) + ' rad   D = ' + p.dop.toFixed(2) +
+        (p.dop > 1.001 ? '（蓝移）' : (p.dop < 0.999 ? '（红移）' : ''));
+      rayCtx.fillStyle = '#dfe9f8';
+      rayCtx.fillText('J/b₀ = ' + (p.J / b0).toFixed(3) +
+        '   步数 ' + R.steps + (R.escaped ? '' : '（未解出）'), pad, H - 22);
+      rayCtx.fillText('落点 ' + side + '，ψ = ' + R.psi.toFixed(2) +
+        ' rad，D = ' + p.dop.toFixed(2) + (p.dop > 1.001 ? ' 蓝移' : (p.dop < 0.999 ? ' 红移' : '')),
+        pad, H - 10);
+    } else {
+      $('rayinfo').textContent = '把鼠标移到画面上';
+      rayCtx.fillStyle = 'rgba(127,142,166,0.9)';
+      rayCtx.fillText('把鼠标移到画面上', pad, H - 10);
+    }
+  }
+
+  function scheduleRayPick(clientX, clientY) {
+    lastMouse = { x: clientX, y: clientY };
+    const now = performance.now();
+    if (now - rayPickAt < 60) return;
+    rayPickAt = now;
+    rayPick = pickAt(clientX, clientY);
+    drawRayPanel();
+  }
+
+/* ============================================================================
+   Part H. 主循环（含自动降采样 + TAA）
+   ============================================================================ */
+
+  let prevT = performance.now();
+  let uiT = 0;
+
+  /* ---- 帧率测量 ----
+     rAF 间隔只在"浏览器按 vsync 节流"时可信。GPU 落后于命令提交时（集显跑重
+     着色器、软件渲染、无 vsync 的 headless），rAF 仍可能以几百 Hz 触发，
+     而 GL 队列越积越多 —— 用它做自适应会让画质反向爬升。
+     所以主用 GL fence / timer query 测 GPU 侧的真实耗时。
+     ⚠ 旧实现每帧无条件 deleteSync 上一帧 fence，导致 fence 只有一个 rAF 间隔
+     的寿命：当 GPU 帧时 > rAF 间隔（例如 240Hz 屏上 GPU 跑 100~200fps，
+     帧时 5~10ms > 4.17ms）时，fence 永远来不及 signal 就被删掉，
+     gpuFrameMs 停在初值 16.7ms → fpsNow≈60 → 落进 50~62 死区 → 永远不升档。
+     修复：fence 保活到 signal（上一帧未完成就不再插新的）。
+     ⚠ 另一个坑（实测 240Hz + 真 GPU 得出）：浏览器会同时排队多帧，"创建→signal"
+     的延迟 = 队列深度 × 帧周期（本机实测 4ms 的帧被测成 20ms，5 倍高估），
+     拿它当帧时会让画质被永久压在低档。所以 fence 路径改为**每帧都插一个 fence、
+     按 FIFO 逐个回收**，用"两次 signal 的间隔"当帧周期（与队列深度无关）；
+     "创建→signal"只作诊断值。
+     首选源是 EXT_disjoint_timer_query_webgl2（直接给 GPU 执行耗时，无队列污染）。 */
+  let gpuFrameMs = 16.7;                       // 自适应逻辑消费的"GPU 帧时"估计
+  let fenceOK = true;
+  let fenceQueue = [], lastFenceSignal = 0;    // 每帧一个 fence，按序回收
+  let fenceLatMs = 0, fencePeriodMs = 16.7, fenceSignals = 0;   // 延迟（诊断）/ 周期（可用）
+  const FENCE_MAX = 6;                         // 队列上限，防止极端情况下无限增长
+
+  /* timer query：可用时优先，无 poll 粒度问题 */
+  const extTQ = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  let tqPending = null, tqActive = false, tqSkip = false, tqMs = 0, tqSamples = 0;
+  const tqOK = () => !!extTQ && tqSamples > 0;
+
+  function markFrameEnd() {
+    if (!fenceOK) return;
+    try {
+      if (fenceQueue.length >= FENCE_MAX) {    // 积压过多：丢掉最老的，并断开周期统计
+        const old = fenceQueue.shift();
+        try { gl.deleteSync(old.sync); } catch (e) { /* ignore */ }
+        lastFenceSignal = 0;
+      }
+      fenceQueue.push({
+        sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0),
+        createdAt: performance.now(),
+      });
+      gl.flush();
+    } catch (e) { fenceOK = false; }
+  }
+
+  function pollFence() {
+    if (!fenceOK || !fenceQueue.length) return;
+    /* 队首未完成就整队等下一帧；已完成的按序回收，signal 间隔即真实帧周期 */
+    while (fenceQueue.length) {
+      const head = fenceQueue[0];
+      let st;
+      try { st = gl.clientWaitSync(head.sync, 0, 0); } catch (e) { fenceOK = false; return; }
+      if (st !== gl.ALREADY_SIGNALED && st !== gl.CONDITION_SATISFIED) break;
+      const t = performance.now();
+      if (fpsSkipFrames === 0) {
+        const lat = Math.min(250, Math.max(0.1, t - head.createdAt));
+        fenceLatMs += (lat - fenceLatMs) * 0.2;
+        if (lastFenceSignal > 0) {
+          const per = Math.min(250, Math.max(0.5, t - lastFenceSignal));
+          fencePeriodMs += (per - fencePeriodMs) * 0.2;
+          fenceSignals++;
+        }
+        lastFenceSignal = t;
+      } else {
+        lastFenceSignal = 0;   // 统计帧断开周期统计，避免把 readPixels 停顿算进帧周期
+      }
+      try { gl.deleteSync(head.sync); } catch (e) { /* ignore */ }
+      fenceQueue.shift();
+    }
+    /* 安全阀：队首 fence 卡死（context lost 等）时丢弃，避免永久阻塞 */
+    if (fenceQueue.length && performance.now() - fenceQueue[0].createdAt > 500) {
+      const head = fenceQueue.shift();
+      try { gl.deleteSync(head.sync); } catch (e) { /* ignore */ }
+      lastFenceSignal = 0;
+      fencePeriodMs = 250;
+    }
+  }
+
+  /* beginQuery 要包住本帧所有绘制（drawScene 之前），endQuery 在 drawPost 之后 */
+  function tqBegin() {
+    if (!extTQ || tqPending) return;
+    try {
+      tqPending = gl.createQuery();
+      gl.beginQuery(extTQ.TIME_ELAPSED_EXT, tqPending);
+      tqActive = true;
+    } catch (e) { tqPending = null; tqActive = false; }
+  }
+  function tqEnd() {
+    if (!extTQ || !tqActive) return;
+    tqActive = false;
+    tqSkip = fpsSkipFrames > 0;                // 统计 pass 的帧不采样（含 readPixels 同步）
+    try { gl.endQuery(extTQ.TIME_ELAPSED_EXT); }
+    catch (e) { if (tqPending) gl.deleteQuery(tqPending); tqPending = null; }
+  }
+  function tqPoll() {
+    if (!extTQ || !tqPending) return;
+    let avail = false;
+    try { avail = gl.getQueryParameter(tqPending, gl.QUERY_RESULT_AVAILABLE); }
+    catch (e) { gl.deleteQuery(tqPending); tqPending = null; return; }
+    if (!avail) return;
+    let ns = 0, disjoint = false;
+    try {
+      ns = gl.getQueryParameter(tqPending, gl.QUERY_RESULT);
+      disjoint = gl.getParameter(extTQ.GPU_DISJOINT_EXT);
+    } catch (e) { /* 读不到就当没采到 */ }
+    gl.deleteQuery(tqPending);
+    tqPending = null;
+    if (!disjoint && !tqSkip) {
+      const ms = Math.min(250, Math.max(0.05, ns / 1e6));
+      tqMs = tqOK() ? tqMs + (ms - tqMs) * 0.2 : ms;   // 首个样本直接采用
+      tqSamples++;
+    }
+  }
+
+  function frame(now) {
+    const dtRaw = (now - prevT) / 1000;
+    const dt = Math.min(0.1, Math.max(0.0005, dtRaw));
+    prevT = now;
+    ditherSeed = (ditherSeed + 1) & 63;      // IGN 抖动逐帧换种子
+
+    pollFence();
+    tqPoll();
+    /* rAF 间隔做下限：两者取慢的那个才是真正的瓶颈。
+       统计 pass 的帧（含 readPixels 同步）会人为拉长帧时间，排除掉，
+       否则帧率会周期性地掉一个坑，误触发自适应降级。 */
+    if (fpsSkipFrames > 0) {
+      fpsSkipFrames--;
+    } else {
+      const dtMs = Math.min(250, Math.max(1, dtRaw * 1000));
+      emaFrameMs += (dtMs - emaFrameMs) * 0.08;
+    }
+    /* 选当前可用的测量源：timer query（GPU 耗时）> fence 周期 > rAF 间隔 */
+    gpuFrameMs = tqOK() ? tqMs : (fenceOK ? fencePeriodMs : emaFrameMs);
+    fpsNow = 1000 / Math.max(1, Math.max(emaFrameMs, gpuFrameMs));
+
+    /* ---- 首帧标定：开局前几帧测真实成本，直接跳到合适档位 ----
+       避免「高分辨率起步 + 每档冷却」的长时间幻灯片。只做一次；
+       预设锁定（qualityLock）或统计帧不参与。 */
+    if (!calibDone && !qualityLock) {
+      calibFrames++;
+      if (calibFrames > 2 && fpsSkipFrames === 0) calibTimes.push(dtRaw * 1000);
+      if (calibTimes.length >= CALIB_N) {
+        calibDone = true;
+        const sorted = calibTimes.slice().sort((a, b) => a - b);
+        const med = sorted[sorted.length >> 1];
+        const p75 = sorted[Math.floor(sorted.length * 0.75)];
+        /* 开机前十几帧常被一次性开销污染（着色器/管线编译、靶分配、显存提交），
+           实测同一视口下样本会双峰分布（8ms 与 30~46ms 混在一起）。这种窗口
+           算出来的档位会一路跳到最低再慢慢爬回来，还不如交给自适应逻辑。
+           判据：p75 超过中位数 1.5 倍即认为样本不可信，本次不跳档；
+           另外把"超预算/余量很大"的门槛放宽到 1.6×/0.5×，只在结论明确时动手。 */
+        const reliable = p75 <= med * 1.5;
+        const budget = med / (1000 / TARGET_FPS);
+        const targetMs = 1000 / TARGET_FPS;
+        const ideal = SCALES[scaleI] * Math.sqrt(targetMs / med);
+        /* SCALES 是降序数组：取第一个 <= ideal 的档位（= 不超过 ideal 的最高画质档）。
+           原实现没有 break，best 会一路落到最后一档 0.2，再被下面"最多跳 4 档"封顶，
+           慢机上会多降 1~3 档再慢慢爬回（实测 0.8→0.32→…→0.65 就是这个原因）。 */
+        let best = SCALES.length - 1;
+        for (let i = 0; i < SCALES.length; i++) {
+          if (SCALES[i] <= ideal + 1e-6) { best = i; break; }
+        }
+        if (!reliable) {
+          /* 样本不可信：保持默认档，交给自适应逻辑（500ms 一拍 + 成本预估） */
+        } else if (budget > 1.6) {                   // 明显超预算：降，最多一次跳 4 档
+          best = Math.min(best, scaleI + 4);
+          if (best > scaleI) { scaleI = best; stepI = 0; lastSig = ''; lastQualityChange = now; }
+        } else if (budget < 0.5) {                   // 余量很大：升，最多一次跳 2 档
+          best = Math.max(best, scaleI - 2);
+          if (best < scaleI) { scaleI = best; lastSig = ''; lastQualityChange = now; }
+        }
+      }
+    }
+
+    /* ---- 自动穿越：带平滑速度剖面的往返 ----
+       原先是恒速 + 到端点瞬时反号，速度在一帧内从 +v 跳到 −v（需要无穷大加速度），
+       于是 D⁴ 前灯效应瞬间从 11.9 跳到 0.084（141 倍）、喉部窗口表观半径瞬间从
+       19.3° 跳到 60.9° —— 看起来就是"啪一下换了个场景"。
+       现在用 smoothstep 在两端各留一段 ramp 把 |v| 平滑压到 0 再反向：
+       v 连续经过 0 ⇒ D 连续经过 1，亮度/色温/视场全部连续滑过去。
+       端部保留一个极小的速度下限（1.5%），否则恰好停在端点时 dEdge=0 会卡住不动；
+       这点残差对应的亮度跳变只有约 3%（对比原来的 14100%）。 */
+    if (state.flying && !state.paused && state.speed > 0) {
+      const ramp = Math.max(0.5, 0.30 * state.lMax);
+      const dEdge = state.lMax - Math.abs(state.camL);
+      let s = Math.max(0, Math.min(1, dEdge / ramp));
+      const ease = 0.015 + 0.985 * (s * s * (3 - 2 * s));
+      state.vEff = state.flyDir * state.speed * ease;
+      state.camL += state.vEff * dt;
+      /* 只在自己"朝端点走"时才反向；否则刚启动就停在端点会来回翻转 */
+      if (Math.abs(state.camL) >= state.lMax - 1e-4 && state.flyDir * state.camL > 0) {
+        state.camL = Math.max(-state.lMax, Math.min(state.lMax, state.camL));
+        state.flyDir = -state.flyDir;
+        state.vEff = 0;
+      }
+      $('sDist').value = state.camL.toFixed(2);
+      $('vDist').textContent = state.camL.toFixed(2);
+    } else {
+      state.vEff = 0;
+    }
+    /* 自由飞行模式下的手动平移（WASD / QE） */
+    if (!state.paused) moveCamera(dt);
+
+    /* ---- A / B：视线的转角 θ 统一由这里驱动 ----
+       相机基存在 ∂_l 系里，视线绕**自身切向分量轴**转过 θ：
+         θ = 0            → 朝前看（视线在 ∂_l 系固定，穿喉部时物理连续）
+         θ = π·(l<0)      → 转头盯住喉部（在 ê_r 意义下始终朝喉部，穿喉部时翻 180°）
+         θ = π(1−tanh(l/λ))/2 → 平滑转身（自动穿越时用）
+       一阶跟踪（τ = 0.25 s）让开关切换与穿喉部都变成平滑旋转，而不是硬切。 */
+    const lam = 0.45 * state.b0;
+    let thTarget;
+    if (state.flying) {
+      thTarget = state.turnSmooth
+        ? Math.PI * 0.5 * (1 - Math.tanh(state.camL / lam))
+        : 0;
+    } else {
+      thTarget = state.lookForward ? 0 : (state.camL < 0 ? Math.PI : 0);
+    }
+    state.thetaTurn += (thTarget - state.thetaTurn) * (1 - Math.exp(-dt / 0.25));
+    /* 收敛到目标后直接吸附：否则指数尾巴永远不为零，会被 TAA 判成"一直在动" */
+    if (Math.abs(thTarget - state.thetaTurn) < 1e-6) state.thetaTurn = thTarget;
+
+    /* ---- C：自动曝光（模拟相机自动光圈 / 人眼亮适应） ----
+       目标增益 = 1/D_center⁴，让画面中心始终保持恒定亮度；D_center 由视线方向
+       与速度方向的夹角算出。只在自动穿越时生效，自由模式下平滑回到 1。 */
+    {
+      const cbE = cameraBasis();
+      const vvE = signedV();
+      let target = 1;
+      if (state.autoExposure && state.flying && !state.paused && Math.abs(vvE) > 1e-4) {
+        const vAbs = Math.min(0.999, Math.abs(vvE));
+        const g = 1 / Math.sqrt(1 - vAbs * vAbs);
+        const cosC = cbE.F[0] * (vvE < 0 ? -1 : 1);      // 视线与速度方向的夹角余弦
+        const D = Math.max(1e-3, g * (1 + vAbs * cosC));
+        target = Math.min(2000, Math.max(1 / 2000, 1 / Math.pow(D, 4)));
+      }
+      state.autoExp += (target - state.autoExp) * (1 - Math.exp(-dt / 0.45));
+    }
+
+    tqBegin();
+    drawScene(now);
+    drawPost();
+    tqEnd();
+    markFrameEnd();
+
+    /* ---- 自适应画质：目标 TARGET_FPS，快降慢升 + 滞回去抖 ----
+       降级：连续 DOWN_STREAK 次 fps < TARGET*0.83，冷却 DOWN_COOLDOWN
+       升级：连续 UP_STREAK 次 fps > TARGET*1.05，或 GPU 真实帧时 < 72% 预算
+             （后者在高刷屏上尤其重要：fps 会被刷新率封顶，但 GPU 可能仍有余量）
+       死区：两个计数缓慢衰减，而不是清零，避免一次波动抹掉全部进度。
+       升级前按 (scale_next/scale_cur)² 估算下一档成本，超预算就不升。
+       抖动本身就是画面"忽锐忽糊"的根源：分辨率档一变靶就重建，累积清零。 */
+    if (!qualityLock && now - lastAdapt > 500) {
+      lastAdapt = now;
+      const targetMs = 1000 / TARGET_FPS;
+      const lowTh = TARGET_FPS * 0.83;
+      const upTh  = TARGET_FPS * 1.05;
+      const hasHeadroom = gpuFrameMs < targetMs * 0.72;
+      /* GPU 连 72% 预算都没吃满，说明瓶颈不在 GPU（实测：窗口被其它窗口遮挡时，
+         浏览器会把 rAF 节流到 ~24fps，此时 GPU 只有 9ms 而帧周期 42ms）。
+         这种情况降分辨率毫无收益，只会白白掉画质，所以不降档。 */
+      const gpuBound = gpuFrameMs > targetMs * 0.72;
+
+      if (fpsNow < lowTh) { lowCount++; highCount = Math.max(0, highCount - 1); }
+      else if (fpsNow > upTh || hasHeadroom) { highCount++; lowCount = Math.max(0, lowCount - 1); }
+      else { lowCount = Math.max(0, lowCount - 1); highCount = Math.max(0, highCount - 1); }
+
+      if (lowCount >= DOWN_STREAK && now - lastQualityChange > DOWN_COOLDOWN && gpuBound) {
+        lowCount = 0;
+        if (scaleI < SCALES.length - 1) scaleI++;
+        else if (stepI < STEP_MULT.length - 1) stepI++;
+        lastQualityChange = now;
+      } else if (highCount >= UP_STREAK && now - lastQualityChange > UP_COOLDOWN) {
+        let nsi = scaleI, nst = stepI;
+        if (nst > 0) nst--;
+        else if (nsi > 0) nsi--;
+        if (nsi !== scaleI || nst !== stepI) {
+          const costRatio = Math.pow(SCALES[nsi] / SCALES[scaleI], 2) *
+                            (STEP_MULT[nst] / STEP_MULT[stepI]);
+          /* 只要下一档的估算帧率仍高于降档阈值（target×0.83），就允许升档。
+             原来用 0.95×预算 太保守，会停在比必要更低的档位（实测 0.4/161fps 却
+             不肯升 0.5/103fps，而 103 仍高于阈值 100）。 */
+          if (gpuFrameMs * costRatio < targetMs / 0.83) {
+            scaleI = nsi; stepI = nst;
+            lastQualityChange = now;
+          }
+        }
+        highCount = 0;
+      }
+    }
+
+    /* ---- 自检面板每 250ms 刷新 ---- */
+    if (now - uiT > 250) {
+      uiT = now;
+      buildCheckText();
+      /* 相机在动时，被选中的那条光线的轨迹也在变 */
+      if (lastMouse && now - rayRefT > 200) {
+        rayRefT = now;
+        rayPick = pickAt(lastMouse.x, lastMouse.y);
+        drawRayPanel();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  bakeCubes();
+  buildCheckText();
+  drawRayPanel();
+  requestAnimationFrame(frame);
+
+  /* 调试 / 自动化测试用的只读句柄：暴露相机标架与参数状态。
+     不参与渲染，删掉也不影响功能。 */
+  window.__wormhole = {
+    state: state,
+    cameraBasis: cameraBasis,
+    integrateRay: integrateRay,
+    worldForward: () => {
+      const cb = cameraBasis();
+      return localToWorld(cb, cb.F);
+    },
+    /* 手动锁定画质档（自动化测试/截图用，正常运行时由自适应逻辑接管） */
+    setQuality: (s, st) => lockQuality(s, st),
+    unlockQuality: () => unlockQuality(),
+    setPreset: (name) => applyPreset(name),
+    getPreset: () => presetName,
+    setRenderRes: (h) => setRenderRes(h),
+    getRenderRes: () => renderH,
+    hdr: () => ({ float: hdrFloat, scale: HDR_SCALE, fmt: HDR_FMT === gl.RGBA16F ? 'RGBA16F' : 'RGBA8' }),
+    taaDebug: () => ({ acc: accCount, reason: taaResetReason, sig: lastSig }),
+    /* 帧时测量诊断（只读）：tq = timer query 是否可用/已出数，fence 为对照值 */
+    perf: () => ({
+      gpuFrameMs, fencePeriodMs, fenceLatMs, fenceSignals, fenceOK, emaFrameMs, fpsNow, fpsSkipFrames,
+      tq: !!extTQ, tqMs, tqSamples, tqPending: !!tqPending,
+    })
+  };
+
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a419a269bed0dd',t:'MTc4OTI3MDUwNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><!-- source: deepdemos.top | author: Philia | title: DS0908虫洞穿越物理模拟 -->
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打砖块 - 114514ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px; margin: 30px auto; padding: 0 20px;
+        background: #f0f2f5; color: #1e1e1e;
+    }
+    h1 {
+        font-size: 28px; font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px; margin-bottom: 6px;
+    }
+    .sub { color: #57606a; font-size: 15px; margin-top: -6px; margin-bottom: 24px; }
+    .back-link {
+        display: inline-block; margin-bottom: 16px;
+        color: #0969da; text-decoration: none; font-weight: 500;
+    }
+    .back-link:hover { text-decoration: underline; }
+    .game-wrap { display: flex; gap: 20px; flex-wrap: wrap; }
+    .board-box { background: #ffffff; border: 1px solid #d0d7de; padding: 12px; }
+    #board { display: block; background: #f6f8fa; border: 1px solid #e1e4e8; }
+    .panel { flex: 1; min-width: 180px; }
+    .panel-box {
+        background: #ffffff; border: 1px solid #d0d7de;
+        padding: 14px 16px; margin-bottom: 12px;
+    }
+    .panel-label { font-size: 13px; color: #57606a; margin-bottom: 4px; }
+    .panel-value { font-size: 24px; font-weight: 600; font-family: monospace; }
+    .key-list { font-size: 14px; color: #57606a; line-height: 1.9; }
+    .key-list b {
+        color: #24292e; font-family: monospace;
+        background: #e9ecef; padding: 1px 6px; font-weight: 500;
+    }
+    button {
+        font-family: inherit; font-size: 14px; font-weight: 500;
+        padding: 8px 18px; border: 1px solid #d0d7de;
+        background: #f6f8fa; color: #24292e;
+        cursor: pointer; border-radius: 0;
+        margin-right: 8px; margin-bottom: 8px;
+    }
+    button:hover { background: #e9ecef; }
+    button.primary { background: #2da44e; border-color: #2da44e; color: #fff; }
+    button.primary:hover { background: #22863a; }
+    .footer {
+        margin-top: 28px; text-align: center; font-size: 14px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        .board-box, .panel-box { background: #161b22; border-color: #30363d; }
+        #board { background: #0d1117; border-color: #30363d; }
+        .key-list b { background: #30363d; color: #c9d1d9; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .footer { border-top-color: #30363d; color: #8b949e; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← 返回游戏列表</a>
+    <h1>打砖块</h1>
+    <div class="sub">左右方向键移动挡板 · 别让球掉下去</div>
+
+    <div class="game-wrap">
+        <div class="board-box">
+            <canvas id="board" width="480" height="400"></canvas>
+        </div>
+
+        <div class="panel">
+            <div class="panel-box">
+                <div class="panel-label">分数</div>
+                <div class="panel-value" id="score">0</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">生命</div>
+                <div class="panel-value" id="lives">3</div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-label">关卡</div>
+                <div class="panel-value" id="level">1</div>
+            </div>
+            <div class="panel-box">
+                <div class="key-list">
+                    <b>←</b> <b>→</b> 移动挡板<br>
+                    <b>空格</b> 发球<br>
+                    <b>P</b> 暂停
+                </div>
+            </div>
+            <button class="primary" id="btn-start">开始游戏</button>
+            <button id="btn-reset">重新开始</button>
+        </div>
+    </div>
+
+    <div class="footer">44444448.xyz · 114514ZYHS</div>
+
+<script>
+(function () {
+    var W = 480, H = 400;
+    var cv = document.getElementById('board');
+    var ctx = cv.getContext('2d');
+
+    var paddle, ball, bricks, score, lives, level, running, paused, over;
+    var leftHeld = false, rightHeld = false, launched = false;
+    var raf = null;
+
+    function initLevel() {
+        bricks = [];
+        var rows = 5, cols = 8;
+        var bw = 52, bh = 18, gapX = 6, gapY = 8;
+        var ox = (W - (cols * bw + (cols - 1) * gapX)) / 2;
+        var oy = 40;
+        var COLORS_ROW = ['#d73a49', '#f0883e', '#d4a72c', '#2da44e', '#0969da'];
+        for (var r = 0; r < rows; r++) {
+            for (var c = 0; c < cols; c++) {
+                bricks.push({
+                    x: ox + c * (bw + gapX),
+                    y: oy + r * (bh + gapY),
+                    w: bw, h: bh,
+                    alive: true,
+                    color: COLORS_ROW[r % COLORS_ROW.length],
+                    hp: 1
+                });
+            }
+        }
+    }
+
+    function resetBall() {
+        paddle = { x: W / 2 - 40, y: H - 26, w: 80, h: 10, speed: 6 };
+        ball = { x: W / 2, y: H - 40, r: 6, dx: 0, dy: 0, speed: 4.6 };
+        launched = false;
+    }
+
+    function start() {
+        score = 0; lives = 3; level = 1;
+        over = false; paused = false; running = true;
+        initLevel();
+        resetBall();
+        updateHud();
+        if (raf) cancelAnimationFrame(raf);
+        loop();
+    }
+
+    function updateHud() {
+        document.getElementById('score').textContent = score;
+        document.getElementById('lives').textContent = lives;
+        document.getElementById('level').textContent = level;
+    }
+
+    function loop() {
+        if (!running) return;
+        if (!paused && !over) update();
+        draw();
+        raf = requestAnimationFrame(loop);
+    }
+
+    function update() {
+        if (leftHeld) paddle.x -= paddle.speed;
+        if (rightHeld) paddle.x += paddle.speed;
+        if (paddle.x < 0) paddle.x = 0;
+        if (paddle.x + paddle.w > W) paddle.x = W - paddle.w;
+
+        if (!launched) {
+            ball.x = paddle.x + paddle.w / 2;
+            ball.y = paddle.y - ball.r - 2;
+            return;
+        }
+
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        if (ball.x - ball.r < 0) { ball.x = ball.r; ball.dx = -ball.dx; }
+        if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.dx = -ball.dx; }
+        if (ball.y - ball.r < 0) { ball.y = ball.r; ball.dy = -ball.dy; }
+
+        // 挡板碰撞
+        if (ball.dy > 0 &&
+            ball.y + ball.r >= paddle.y &&
+            ball.y - ball.r <= paddle.y + paddle.h &&
+            ball.x >= paddle.x && ball.x <= paddle.x + paddle.w) {
+            ball.y = paddle.y - ball.r;
+            var hitPos = (ball.x - paddle.x) / paddle.w;
+            var angle = (hitPos - 0.5) * Math.PI * 0.7;
+            var sp = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+            ball.dx = Math.sin(angle) * sp;
+            ball.dy = -Math.cos(angle) * sp;
+        }
+
+        // 砖块碰撞
+        for (var i = 0; i < bricks.length; i++) {
+            var b = bricks[i];
+            if (!b.alive) continue;
+            if (ball.x + ball.r > b.x && ball.x - ball.r < b.x + b.w &&
+                ball.y + ball.r > b.y && ball.y - ball.r < b.y + b.h) {
+                b.alive = false;
+                score += 10;
+                updateHud();
+                var overlapX = Math.min(ball.x + ball.r - b.x, b.x + b.w - (ball.x - ball.r));
+                var overlapY = Math.min(ball.y + ball.r - b.y, b.y + b.h - (ball.y - ball.r));
+                if (overlapX < overlapY) ball.dx = -ball.dx;
+                else ball.dy = -ball.dy;
+                break;
+            }
+        }
+
+        // 通关
+        var remain = 0;
+        for (var j = 0; j < bricks.length; j++) if (bricks[j].alive) remain++;
+        if (remain === 0) {
+            level++;
+            if (level > 5) {
+                over = true;
+                running = false;
+                return;
+            }
+            initLevel();
+            resetBall();
+            updateHud();
+            return;
+        }
+
+        // 掉落
+        if (ball.y - ball.r > H) {
+            lives--;
+            updateHud();
+            if (lives <= 0) {
+                over = true;
+                running = false;
+                return;
+            }
+            resetBall();
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+
+        for (var i = 0; i < bricks.length; i++) {
+            var b = bricks[i];
+            if (!b.alive) continue;
+            ctx.fillStyle = b.color;
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fillRect(b.x, b.y, b.w, 3);
+        }
+
+        ctx.fillStyle = '#24292e';
+        ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+        ctx.fillStyle = '#0969da';
+        ctx.fillRect(paddle.x, paddle.y, paddle.w, 3);
+
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#2da44e';
+        ctx.fill();
+
+        if (!launched && running && !over) {
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.font = '14px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('按空格发球', W / 2, H / 2);
+        }
+
+        if (over) {
+            ctx.fillStyle = 'rgba(0,0,0,0.72)';
+            ctx.fillRect(0, H / 2 - 40, W, 80);
+            ctx.fillStyle = '#fff';
+            ctx.font = '600 22px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', W / 2, H / 2 + 2);
+            ctx.font = '14px -apple-system, sans-serif';
+            ctx.fillText('得分 ' + score, W / 2, H / 2 + 28);
+        } else if (paused && running) {
+            ctx.fillStyle = 'rgba(0,0,0,0.72)';
+            ctx.fillRect(0, H / 2 - 30, W, 60);
+            ctx.fillStyle = '#fff';
+            ctx.font = '600 20px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('已暂停', W / 2, H / 2 + 7);
+        }
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { leftHeld = true; e.preventDefault(); }
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { rightHeld = true; e.preventDefault(); }
+        if (e.key === ' ') {
+            if (over || !running) { start(); e.preventDefault(); return; }
+            if (!launched) {
+                launched = true;
+                var sp = ball.speed;
+                var ang = (Math.random() * 0.5 + 0.25) * Math.PI;
+                ball.dx = Math.cos(ang) * sp;
+                ball.dy = -Math.sin(ang) * sp;
+            }
+            e.preventDefault();
+        }
+        if (e.key === 'p' || e.key === 'P') {
+            if (running && !over) paused = !paused;
+            e.preventDefault();
+        }
+    });
+
+    document.addEventListener('keyup', function (e) {
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') leftHeld = false;
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') rightHeld = false;
+    });
+
+    // 触屏/鼠标支持
+    cv.addEventListener('mousemove', function (e) {
+        if (!running || over) return;
+        var rect = cv.getBoundingClientRect();
+        var x = (e.clientX - rect.left) * (W / rect.width);
+        paddle.x = Math.max(0, Math.min(W - paddle.w, x - paddle.w / 2));
+    });
+    cv.addEventListener('click', function () {
+        if (over || !running) { start(); return; }
+        if (!launched) {
+            launched = true;
+            var sp = ball.speed;
+            var ang = (Math.random() * 0.5 + 0.25) * Math.PI;
+            ball.dx = Math.cos(ang) * sp;
+            ball.dy = -Math.sin(ang) * sp;
+        }
+    });
+
+    document.getElementById('btn-start').addEventListener('click', start);
+    document.getElementById('btn-reset').addEventListener('click', start);
+
+    score = 0; lives = 3; level = 1; over = false; paused = false; running = false;
+    initLevel();
+    resetBall();
+    updateHud();
+    draw();
+})();
+</script>
+</body>
+</html>

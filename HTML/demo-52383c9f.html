@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-52383c9f/v72babccdbd76/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>越王勾践剑 · 高精度体素复原</title>
+<style>
+  :root{
+    --ink:#e8eef7; --dim:#8fa3bd; --line:#22303f; --panel:rgba(12,17,24,.82);
+    --accent:#d8b45a; --accent2:#4f8fd8;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden;background:#070a0e;color:var(--ink);
+    font:13px/1.55 "Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+  canvas.drag{cursor:grabbing}
+
+  .panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 18px 50px rgba(0,0,0,.55)}
+
+  #head{left:18px;top:18px;padding:14px 18px 13px;max-width:340px}
+  #head h1{margin:0;font-size:17px;letter-spacing:2px;font-weight:600}
+  #head h1 small{display:block;font-size:10px;letter-spacing:3px;color:var(--dim);font-weight:400;margin-top:3px}
+  #head .meta{margin-top:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:10.5px;color:var(--dim)}
+  #head .meta b{display:block;color:var(--accent);font-size:14px;font-weight:600;letter-spacing:.5px}
+  #head .spec{margin-top:8px;font-size:10.5px;color:#6f8299;line-height:1.5}
+
+  #parts{left:18px;bottom:18px;padding:12px 14px;width:232px}
+  .ttl{font-size:11px;letter-spacing:2px;color:var(--dim);margin-bottom:9px}
+  .prow{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:8px;cursor:pointer;
+    transition:background .15s,transform .15s}
+  .prow:hover{background:rgba(255,255,255,.06);transform:translateX(2px)}
+  .prow.on{background:rgba(216,180,90,.14)}
+  .prow.on .nm{color:var(--accent)}
+  .dot{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.5) inset}
+  .nm{font-size:12.5px;flex:1}
+  .cnt{font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+  #views{right:18px;bottom:18px;padding:12px 14px;width:216px}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  button{font:inherit;font-size:12px;color:var(--ink);background:rgba(255,255,255,.055);
+    border:1px solid var(--line);border-radius:9px;padding:7px 6px;cursor:pointer;
+    transition:.15s;letter-spacing:.5px}
+  button:hover{background:rgba(255,255,255,.12);border-color:#33475c}
+  button.on{background:rgba(216,180,90,.18);border-color:rgba(216,180,90,.5);color:var(--accent)}
+  .wide{grid-column:1/-1}
+
+  #legend{right:18px;top:18px;padding:12px 14px;width:216px;max-height:58vh;overflow:auto}
+  #legend::-webkit-scrollbar{width:6px}
+  #legend::-webkit-scrollbar-thumb{background:#2a3644;border-radius:3px}
+  .lrow{display:flex;align-items:center;gap:8px;padding:2.5px 0;font-size:11.5px;color:#c3d1e2}
+  .lrow .dot{width:9px;height:9px;border-radius:2px}
+
+  #hint{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);font-size:11.5px;
+    color:#5f738c;letter-spacing:1px;pointer-events:none;transition:opacity .6s;text-align:center}
+  #perf{position:fixed;left:50%;top:18px;transform:translateX(-50%);font-size:11px;color:#4a5d75;
+    font-variant-numeric:tabular-nums;pointer-events:none;letter-spacing:.5px}
+  @media (max-width:1000px){
+    #legend{display:none} #parts{width:190px} #head{max-width:250px}
+  }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div class="panel" id="head">
+  <h1>越王勾践剑<small>THE SWORD OF GOUJIAN · VOXEL 0.5&nbsp;mm</small></h1>
+  <div class="meta">
+    <div><b id="m-len">—</b>全长</div>
+    <div><b id="m-vox">—</b>体素</div>
+    <div><b id="m-mesh">—</b>合并面</div>
+  </div>
+  <div class="spec" id="m-spec"></div>
+</div>
+
+<div class="panel" id="legend">
+  <div class="ttl">材质</div>
+  <div id="legend-body"></div>
+</div>
+
+<div class="panel" id="parts">
+  <div class="ttl">部件（点击聚焦）</div>
+  <div id="parts-body"></div>
+</div>
+
+<div class="panel" id="views">
+  <div class="ttl">视角</div>
+  <div class="btns" id="view-btns"></div>
+</div>
+
+<div id="hint">拖动旋转 · 滚轮缩放</div>
+<div id="perf"></div>
+
+<script src="glyph-data.js"></script>
+<script src="sword-model.js"></script>
+<script src="voxel-render.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var t0 = performance.now();
+  var model = GoujianSword.build();
+  var t1 = performance.now();
+  var canvas = document.getElementById('cv');
+  var R = VoxelRender.create(canvas, model);
+  var t2 = performance.now();
+
+  /* ---------------- 相机预设（单位：体素，1 voxel = 0.5 mm） ---------------- */
+  var VIEWS = {
+    all:         { yaw: -0.62, pitch: 0.14, dist: 2150, target: [0, 556, 0] },
+    front:       { yaw:  0.00, pitch: 0.02, dist: 2350, target: [0, 556, 0] },
+    pommel:      { yaw: -0.55, pitch: -0.42, dist: 230, target: [0, 14, 0] },
+    guard:       { yaw: -0.62, pitch: 0.10, dist: 430, target: [0, 190, 0] },
+    inscription: { yaw: -0.30, pitch: 0.06, dist: 400, target: [0, 305, 0] },
+    tip:         { yaw: -0.50, pitch: 0.08, dist: 620, target: [0, 1010, 0] }
+  };
+
+  /* ---------------- 部件 ---------------- */
+  var PARTS = [
+    { id: 'pommel',      name: '剑首',   color: '#dcc37c', cam: 'pommel' },
+    { id: 'grip',        name: '剑柄',   color: '#8d6c44', cam: 'guard' },
+    { id: 'guard',       name: '剑格',   color: '#2b5cba', cam: 'guard' },
+    { id: 'blade',       name: '剑身',   color: '#b3903f', cam: 'all' },
+    { id: 'inscription', name: '铭文',   color: '#ffd24a', cam: 'inscription' },
+    { id: 'edge',        name: '刃口',   color: '#e6dcb4', cam: 'tip' }
+  ];
+
+  var counts = {};
+  model.used.forEach(function (i) {
+    var p = model.grid[i] >> 5;
+    counts[p] = (counts[p] || 0) + 1;
+  });
+  var PID = model.partIds;
+
+  var partsBody = document.getElementById('parts-body');
+  PARTS.forEach(function (p) {
+    var row = document.createElement('div');
+    row.className = 'prow';
+    row.dataset.part = p.id;
+    row.innerHTML = '<span class="dot" style="background:' + p.color + '"></span>' +
+                    '<span class="nm">' + p.name + '</span>' +
+                    '<span class="cnt">' + (counts[PID[p.id]] || 0).toLocaleString() + '</span>';
+    row.addEventListener('click', function () { selectPart(p); });
+    partsBody.appendChild(row);
+  });
+
+  var activePart = null;
+  function selectPart(p, instant) {
+    var same = activePart === p.id;
+    activePart = same ? null : p.id;
+    R.setDimPart(activePart ? PID[activePart] : null);
+    Array.prototype.forEach.call(partsBody.children, function (el) {
+      el.classList.toggle('on', el.dataset.part === activePart);
+    });
+    if (!same) {
+      setAutoRotate(false);
+      if (p.cam && VIEWS[p.cam]) {
+        if (instant) R.setCamera(VIEWS[p.cam]);
+        else R.animateTo(VIEWS[p.cam], 620);
+      }
+    }
+  }
+
+  /* ---------------- 图例 ---------------- */
+  var legendBody = document.getElementById('legend-body');
+  model.palette.forEach(function (p) {
+    if (!p) return;
+    var d = document.createElement('div');
+    d.className = 'lrow';
+    d.innerHTML = '<span class="dot" style="background:' + p.hex + '"></span>' + p.name;
+    d.title = p.desc || '';
+    legendBody.appendChild(d);
+  });
+
+  /* ---------------- 视角按钮 ---------------- */
+  var viewBtns = document.getElementById('view-btns');
+  var VIEWBTN = [
+    { k: 'all',    label: '整体' },
+    { k: 'front',  label: '正面' },
+    { k: 'pommel', label: '剑首' },
+    { k: 'guard',  label: '剑格' },
+    { k: 'inscription', label: '铭文' },
+    { k: 'tip',    label: '剑锋' },
+    { k: 'rot',    label: '自动旋转', wide: true, toggle: true },
+    { k: 'edges',  label: '线框', wide: true, toggle: true }
+  ];
+  var rotOn = true, edgeOn = false, rotBtn = null;
+  function setAutoRotate(on) {
+    rotOn = on; R.setAutoRotate(on);
+    if (rotBtn) rotBtn.classList.toggle('on', on);
+  }
+  VIEWBTN.forEach(function (b) {
+    var el = document.createElement('button');
+    el.textContent = b.label;
+    if (b.wide) el.classList.add('wide');
+    if (b.toggle && b.k === 'rot') { el.classList.add('on'); rotBtn = el; }
+    el.addEventListener('click', function () {
+      if (b.toggle) {
+        if (b.k === 'rot') setAutoRotate(!rotOn);
+        else { edgeOn = !edgeOn; R.setShowEdges(edgeOn); el.classList.toggle('on', edgeOn); }
+      } else {
+        R.animateTo(VIEWS[b.k], 620);
+        if (activePart) {
+          activePart = null; R.setDimPart(null);
+          Array.prototype.forEach.call(partsBody.children, function (e) { e.classList.remove('on'); });
+        }
+      }
+    });
+    viewBtns.appendChild(el);
+  });
+
+  /* ---------------- 数据 ---------------- */
+  var st = model.stats;
+  document.getElementById('m-len').textContent = st.totalLengthCm.toFixed(1) + ' cm';
+  document.getElementById('m-vox').textContent = st.voxels.toLocaleString();
+  document.getElementById('m-mesh').textContent = R.mesh.count.toLocaleString();
+  document.getElementById('m-spec').textContent =
+    '体素 0.5 mm · 剑身 ' + st.bladeLengthCm.toFixed(1) + ' cm × 宽 ' + st.bladeWidthCm.toFixed(1) +
+    ' cm · 剑格 ' + st.guardWidthCm.toFixed(1) + ' cm · 剑首径 ' + st.pommelDiaCm.toFixed(1) +
+    ' cm\n建模 ' + (t1 - t0).toFixed(0) + ' ms · 网格化 ' + (t2 - t1).toFixed(0) + ' ms';
+
+  /* ---------------- 交互 ---------------- */
+  var dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', function (e) {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.classList.add('drag');
+    canvas.setPointerCapture(e.pointerId);
+    hideHint();
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    R.camera.yaw -= dx * 0.0075;
+    R.camera.pitch = Math.max(-1.45, Math.min(1.45, R.camera.pitch + dy * 0.0075));
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false; canvas.classList.remove('drag');
+    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    R.camera.dist = Math.max(40, Math.min(6000, R.camera.dist * Math.exp(e.deltaY * 0.0011)));
+    hideHint();
+  }, { passive: false });
+
+  var hint = document.getElementById('hint'), hintGone = false;
+  function hideHint() { if (!hintGone) { hintGone = true; hint.style.opacity = '0'; } }
+  setTimeout(hideHint, 8000);
+
+  /* ---------------- 主循环 ---------------- */
+  var perfEl = document.getElementById('perf');
+  var last = performance.now(), acc = 0, frames = 0;
+  function frame(now) {
+    var dt = Math.min(64, now - last); last = now;
+    R.tick(dt);
+    R.render();
+    acc += dt; frames++;
+    if (acc > 500) {
+      perfEl.textContent = (frames * 1000 / acc).toFixed(0) + ' fps · 可见面 ' +
+        R.stats.visible.toLocaleString() + ' · 批次 ' + R.stats.batches + ' · ' + R.stats.ms.toFixed(1) + ' ms/帧';
+      acc = 0; frames = 0;
+    }
+    requestAnimationFrame(frame);
+  }
+  function onResize() { R.resize(); }
+  window.addEventListener('resize', onResize);
+  onResize();
+
+  var hash = decodeURIComponent(location.hash.replace('#', ''));
+  if (hash) {
+    var hp = PARTS.filter(function (x) { return x.id === hash; })[0];
+    if (hp) selectPart(hp, true);
+    else if (VIEWS[hash]) R.animateTo(VIEWS[hash], 0);
+  } else {
+    R.setCamera(VIEWS.all);
+  }
+  requestAnimationFrame(frame);
+  window.__R = R; window.__model = model;
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a41b498fbdc886',t:'MTc4OTI3MDU3NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<!-- source: deepdemos.top | author: wanzu | title: 越王勾践剑-体素精细版 -->
+</body>
+</html>

@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/webgl2-5e084dc8/v6ca04c601f1c/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>DISSOLUTION — 地球解体 / 数据粒子螺旋内陷</title>
+<style>
+  :root{ --cy:#31f2ff; --mg:#ff2bd6; --or:#ff8a1e; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ width:100%; height:100%; background:#000; overflow:hidden; }
+  body{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  canvas{ display:block; width:100%; height:100%; }
+  #hud{
+    position:fixed; left:0; right:0; bottom:0; padding:14px 18px;
+    display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
+    color:var(--cy); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    pointer-events:none; user-select:none;
+    text-shadow:0 0 12px rgba(49,242,255,.55);
+    transition:opacity .35s ease;
+  }
+  #hud .l{ display:flex; flex-direction:column; gap:6px; }
+  #hud .r{ text-align:right; color:var(--mg); text-shadow:0 0 12px rgba(255,43,214,.55); }
+  #title{ font-size:15px; letter-spacing:.42em; color:#eafcff; text-shadow:0 0 18px rgba(49,242,255,.9),0 0 42px rgba(255,43,214,.5); }
+  #stage{ color:var(--or); text-shadow:0 0 14px rgba(255,138,30,.7); }
+  #bar{ width:190px; height:2px; background:rgba(49,242,255,.16); position:relative; overflow:hidden; }
+  #bar i{ position:absolute; inset:0 auto 0 0; width:0%; background:linear-gradient(90deg,var(--cy),var(--mg)); box-shadow:0 0 10px var(--cy); }
+  #hint{ opacity:.55; font-size:10px; }
+  #boot{
+    position:fixed; inset:0; display:grid; place-items:center; background:#000;
+    color:var(--cy); font-size:12px; letter-spacing:.4em; z-index:9;
+    transition:opacity .8s ease; text-shadow:0 0 20px rgba(49,242,255,.8);
+  }
+  #boot.done{ opacity:0; pointer-events:none; }
+  #err{ position:fixed; inset:0; display:none; place-items:center; padding:40px; background:#000;
+        color:var(--mg); font-size:13px; line-height:1.9; text-align:center; z-index:20; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud">
+  <div class="l">
+    <div id="title">DISSOLUTION</div>
+    <div id="stage">STANDBY</div>
+    <div id="bar"><i></i></div>
+  </div>
+  <div class="r">
+    <div id="hint">拖拽旋转 · 滚轮缩放 · 空格暂停 · H 隐藏</div>
+    <div id="stats">—</div>
+  </div>
+</div>
+
+<div id="boot">INITIALIZING</div>
+<div id="err"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DISSOLUTION
+   Earth → billions of glowing data particles → spiral inward like water
+   down a drain → continents peel off as orange wireframe surfaces → cities
+   shatter into pixel dust → the 3D sphere stretches and flattens into a
+   rotating pure-white 2D light disc → background stars bend into arcs under
+   gravitational lensing → and the loop closes forever.
+
+   Pure WebGL2. No dependencies. No network. Seamless 18-second cycle.
+   - 260 000 GPU particles, each sprite carrying sub-pixel "data" structure
+   - the crust is a land-masked lat/lon lattice broken into rigid 3-D plates
+     (dim filled faces + bright wireframe edges) that peel and spiral in
+   - 5.5 % of particles carry curved 4-vertex motion-blur streaks — the cue
+     that makes the infall read as a drain rather than a puff
+   - background starfield with point-mass gravitational lensing: the sampling
+     direction is remapped, stars smear into tangential arcs, and the sky is
+     twisted by frame dragging; an Einstein ring blooms as the mass collapses
+   - HDR half-float pipeline + threshold bloom + ACES + chromatic aberration
+
+   URL params:
+     ?t=0.35          freeze at loop phase (0..1) — deterministic stills
+     ?loop=18         cycle length in seconds
+     ?q=high|med|low  particle density (620k / 260k / 110k)
+     ?hud=0           hide the overlay
+   Debug:  ?off=bg,grid,shell,bloom   ?trail=<phase-units>   ?dens=<k>
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function fatal(msg){
+  const e = document.getElementById('err');
+  if(e){ e.style.display = 'grid'; e.innerHTML = msg; }
+  const b = document.getElementById('boot');
+  if(b) b.style.display = 'none';
+  window.__DISSOLUTION_ERROR = msg;
+}
+window.addEventListener('error', ev=>fatal('RUNTIME ERROR<br><br>' + (ev.message || ev)));
+
+const Q = new URLSearchParams(location.search);
+const FIXED_T = Q.has('t') ? (parseFloat(Q.get('t')) || 0) : null;
+const LOOP    = Math.max(4, parseFloat(Q.get('loop') || '18'));
+const QUALITY = (Q.get('q') || 'med').toLowerCase();
+const OFF = new Set((Q.get('off') || '').split(',').filter(Boolean));   // debug: off=bg,grid,shell,bloom
+const TRAIL = Q.has('trail') ? parseFloat(Q.get('trail')) : 0.021;     // motion-blur length (phase units)
+const DENSC = Q.has('dens') ? parseFloat(Q.get('dens')) : 10.0;        // collapse density compensation
+
+const COUNTS = { low: 110000, med: 260000, high: 620000 };
+let PCOUNT = COUNTS[QUALITY] || COUNTS.med;
+
+/* ───────────────────────────────── canvas ───────────────────────────────── */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', {
+  alpha:false, depth:false, stencil:false, antialias:false,
+  premultipliedAlpha:false, powerPreference:'high-performance', preserveDrawingBuffer:false
+});
+
+if(!gl){
+  const e = document.getElementById('err');
+  e.style.display = 'grid';
+  e.innerHTML = 'WEBGL2 UNAVAILABLE<br><br>此浏览器/设备未启用 WebGL2。<br>请用较新的 Chrome / Edge / Safari / Firefox 打开。';
+  document.getElementById('boot').style.display = 'none';
+  return;
+}
+
+const HDR_OK = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+gl.getExtension('OES_texture_float_linear');
+const PT_RANGE = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE) || [1,255];
+const MAX_PT = Math.min(64, PT_RANGE[1] || 64);
+
+/* ─────────────────────────────── gl helpers ─────────────────────────────── */
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    console.error(log, src.split('\n').map((l,i)=>(i+1)+': '+l).join('\n'));
+    throw new Error('shader: ' + log);
+  }
+  return s;
+}
+function program(vsSrc, fsSrc, name){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    const log = gl.getProgramInfoLog(p);
+    console.error('link ' + name + ': ' + log);
+    throw new Error('link ' + name + ': ' + log);
+  }
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for(let i=0;i<n;i++){
+    const info = gl.getActiveUniform(p, i);
+    const key = info.name.replace(/\[0\]$/, '');
+    u[key] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u, name };
+}
+function buffer(data, target){
+  const b = gl.createBuffer();
+  gl.bindBuffer(target || gl.ARRAY_BUFFER, b);
+  gl.bufferData(target || gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  return b;
+}
+function vao(attribs, indexBuf){
+  const v = gl.createVertexArray();
+  gl.bindVertexArray(v);
+  for(const a of attribs){
+    gl.bindBuffer(gl.ARRAY_BUFFER, a.buf);
+    gl.enableVertexAttribArray(a.loc);
+    gl.vertexAttribPointer(a.loc, a.size, gl.FLOAT, false, a.stride || 0, a.off || 0);
+  }
+  if(indexBuf) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuf);
+  gl.bindVertexArray(null);
+  return v;
+}
+function renderTarget(w, h, half){
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  const internal = (HDR_OK && half) ? gl.RGBA16F : gl.RGBA8;
+  const type     = (HDR_OK && half) ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fbo, w, h };
+}
+
+/* fullscreen triangle-pair */
+const quadVAO = (function(){
+  const b = buffer(new Float32Array([-1,-1, 3,-1, -1,3]));
+  const v = gl.createVertexArray();
+  gl.bindVertexArray(v);
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  return v;
+})();
+
+/* ─────────────────────────────── math / noise ───────────────────────────── */
+function smoothstep(a, b, x){ const t = Math.min(1, Math.max(0, (x-a)/(b-a))); return t*t*(3-2*t); }
+/* deterministic RNG — the same artwork (continents, cities, choreography) must
+   load identically every time, and it makes A/B frame comparison meaningful */
+let _rngState = 0x9E3779B9;
+function srnd(){
+  _rngState = (_rngState + 0x6D2B79F5) | 0;
+  let t = Math.imul(_rngState ^ (_rngState >>> 15), 1 | _rngState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+
+function hash3i(x, y, z){
+  let n = (Math.imul(x|0, 374761393) ^ Math.imul(y|0, 668265263) ^ Math.imul(z|0, 1274126177)) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+function vnoise(x, y, z){
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = x-ix, fy = y-iy, fz = z-iz;
+  const ux = fx*fx*(3-2*fx), uy = fy*fy*(3-2*fy), uz = fz*fz*(3-2*fz);
+  const c000 = hash3i(ix,   iy,   iz  ), c100 = hash3i(ix+1, iy,   iz  );
+  const c010 = hash3i(ix,   iy+1, iz  ), c110 = hash3i(ix+1, iy+1, iz  );
+  const c001 = hash3i(ix,   iy,   iz+1), c101 = hash3i(ix+1, iy,   iz+1);
+  const c011 = hash3i(ix,   iy+1, iz+1), c111 = hash3i(ix+1, iy+1, iz+1);
+  const x00 = c000+(c100-c000)*ux, x10 = c010+(c110-c010)*ux;
+  const x01 = c001+(c101-c001)*ux, x11 = c011+(c111-c011)*ux;
+  const y0 = x00+(x10-x00)*uy, y1 = x01+(x11-x01)*uy;
+  return y0+(y1-y0)*uz;
+}
+function fbm(x, y, z, oct){
+  let a = 0.5, f = 1, s = 0, norm = 0;
+  for(let i=0;i<oct;i++){ s += a*vnoise(x*f, y*f, z*f); norm += a; a *= 0.5; f *= 2.03; }
+  return s/norm;
+}
+/* continent field: 0..1, land above ~0.53 */
+function landField(dx, dy, dz){
+  const n = fbm(dx*1.85 + 11.3, dy*1.85 - 4.7, dz*1.85 + 2.1, 5);
+  const warp = fbm(dx*0.9 - 5.0, dy*0.9 + 9.0, dz*0.9 + 1.0, 3) - 0.5;
+  return clamp(n + warp*0.30, 0, 1);
+}
+const LAND_T = 0.525;
+
+/* ───────────────────────────── geometry build ───────────────────────────── */
+const golden = Math.PI*(3 - Math.sqrt(5));
+
+function buildParticles(count){
+  const dir  = new Float32Array(count*3);
+  const rnd  = new Float32Array(count*4);
+  const meta = new Float32Array(count*4);   // x=type y=seed z=glow w=radiusJitter
+  const cityField = (x,y,z)=> fbm(x*8.4 - 3.1, y*8.4 + 7.7, z*8.4 - 1.4, 4);
+
+  /* particles flagged for motion-blur streaks are packed at the FRONT of the
+     buffer so the streak pass only draws them */
+  const TRAIL_FRAC = 0.055;
+  const flagArr = new Uint8Array(count);
+  let k = 0;
+  for(let i=0;i<count;i++){
+    flagArr[i] = srnd() < TRAIL_FRAC ? 1 : 0;
+    const y  = 1 - (i + 0.5)/count*2;
+    const r  = Math.sqrt(Math.max(0, 1 - y*y));
+    const th = golden*i;
+    let dx = Math.cos(th)*r, dy = y, dz = Math.sin(th)*r;
+
+    // slight radius jitter so the shell has depth
+    const jit = 1 + (srnd()-0.5)*0.012;
+    dir[k*3]   = dx*jit; dir[k*3+1] = dy*jit; dir[k*3+2] = dz*jit;
+
+    rnd[k*4]   = srnd();
+    rnd[k*4+1] = srnd();
+    rnd[k*4+2] = srnd();
+    rnd[k*4+3] = srnd();
+
+    const lv = landField(dx, dy, dz);
+    let type = 0;                       // 0 ocean, 1 land, 2 city, 3 coast
+    let glow = 0;
+    if(lv > LAND_T){
+      type = 1;
+      const coast = Math.min(lv - LAND_T, LAND_T - (lv - 0.5));
+      if(Math.abs(lv - LAND_T) < 0.022) type = 3;
+      const cf = cityField(dx, dy, dz);
+      if(cf > 0.672){
+        type = 2;
+        glow = clamp((cf - 0.672)/0.18, 0, 1);
+      }
+      glow = Math.max(glow, clamp((lv - LAND_T)*4.0, 0, 1)*0.35);
+    }
+    meta[k*4]   = type;
+    meta[k*4+1] = srnd();
+    meta[k*4+2] = glow;
+    meta[k*4+3] = srnd();
+    k++;
+  }
+  /* reorder: streak-flagged first */
+  const order = [];
+  for(let i=0;i<count;i++) if(flagArr[i]) order.push(i);
+  const trailCount = order.length;
+  for(let i=0;i<count;i++) if(!flagArr[i]) order.push(i);
+  const dir2 = new Float32Array(count*3), rnd2 = new Float32Array(count*4), meta2 = new Float32Array(count*4);
+  for(let j=0;j<count;j++){
+    const i = order[j];
+    dir2[j*3] = dir[i*3]; dir2[j*3+1] = dir[i*3+1]; dir2[j*3+2] = dir[i*3+2];
+    for(let c=0;c<4;c++){ rnd2[j*4+c] = rnd[i*4+c]; meta2[j*4+c] = meta[i*4+c]; }
+  }
+  return {
+    dir:  buffer(dir2),
+    rnd:  buffer(rnd2),
+    meta: buffer(meta2),
+    count, trailCount
+  };
+}
+
+/* orange wireframe continents — lat/lon grid, land-masked. The crust is broken
+   into discrete rigid PLATES (3-D cells): every vertex of a plate shares its
+   lift / delay / spin, so plates detach and spiral in as whole sheets instead
+   of smearing into yarn. Each plate also gets a dim filled FACE so the gaps
+   between plates read as black space. */
+function buildGrid(NLAT, NLON, SUB){
+  const lp = [], lr = [], fp = [], fr = [];
+  const P = (a,b,c)=>{ const l = Math.hypot(a,b,c)||1; return [a/l,b/l,c/l]; };
+  const CELL = 2.55;
+
+  const plateOf = q => hash3i(Math.floor(q[0]*CELL), Math.floor(q[1]*CELL), Math.floor(q[2]*CELL));
+  const at = (la, lo) => { const cl = Math.cos(la); return [cl*Math.cos(lo), Math.sin(la), cl*Math.sin(lo)]; };
+  const coastness = d => { const v = landField(d[0], d[1], d[2]); return clamp(1 - Math.abs(v - LAND_T)/0.035, 0, 1); };
+
+  const lat = [], lon = [];
+  for(let i=0;i<=NLAT;i++) lat.push(-Math.PI/2 + Math.PI*i/NLAT);
+  for(let j=0;j<=NLON;j++) lon.push(2*Math.PI*j/NLON);
+
+  function edge(a, b, plate, coast){
+    // SUB sub-segments, emitted as independent line segments
+    let prev = null;
+    for(let s=0;s<=SUB;s++){
+      const t = s/SUB;
+      const q = P(a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t);
+      const cur = [q, plate, coast];
+      if(prev){
+        lp.push(prev[0][0], prev[0][1], prev[0][2], cur[0][0], cur[0][1], cur[0][2]);
+        lr.push(prev[1], prev[2], cur[1], cur[2]);
+      }
+      prev = cur;
+    }
+  }
+
+  for(let i=0;i<NLAT;i++){
+    for(let j=0;j<NLON;j++){
+      const c00 = at(lat[i],   lon[j]);
+      const c01 = at(lat[i],   lon[j+1]);
+      const c10 = at(lat[i+1], lon[j]);
+      const c11 = at(lat[i+1], lon[j+1]);
+      const mid = P(c00[0]+c01[0]+c10[0]+c11[0], c00[1]+c01[1]+c10[1]+c11[1], c00[2]+c01[2]+c10[2]+c11[2]);
+      if(landField(mid[0], mid[1], mid[2]) <= LAND_T) continue;
+      const plate = plateOf(mid);
+      if(plate <= 0.28) continue;                       // gaps between plates
+      const coast = coastness(mid);
+
+      edge(c00, c01, plate, coast);
+      edge(c01, c11, plate, coast);
+      edge(c11, c10, plate, coast);
+      edge(c10, c00, plate, coast);
+
+      // filled face: two triangles
+      const quad = [c00, c01, c11, c00, c11, c10];
+      for(const q of quad){ fp.push(q[0], q[1], q[2]); fr.push(plate, srnd(), coast); }
+    }
+  }
+
+  const pos = new Float32Array(lp.length + fp.length);
+  pos.set(lp, 0); pos.set(fp, lp.length);
+  const rnd = new Float32Array(lr.length + fr.length);
+  rnd.set(lr, 0); rnd.set(fr, lr.length);
+
+  return {
+    pos: buffer(pos),
+    rnd: buffer(rnd),
+    lineVerts: lp.length/3,
+    fillVerts: fp.length/3
+  };
+}
+
+/* ─────────────────────────────── shaders ────────────────────────────────── */
+
+/* shared vortex motion. Everything about the loop lives here.
+   A = inbound progress (monotone 0→1), B = outbound progress (monotone 1→0)
+   c = A*B  → the collapse pulse, exactly 0 at p=0 and p=1 → seamless.
+   The swirl angle uses 2π·(turnsIn·A + turnsOut·(1−B)) so the vortex always
+   rotates the SAME direction on the way in and on the way out, and the total
+   is an exact integer number of turns → no seam, no rewind. */
+const VORTEX_GLSL = `
+#define TAU 6.283185307179586
+
+uniform mat4  u_view;
+uniform mat4  u_proj;
+uniform float u_p;
+uniform float u_time;
+uniform float u_dpr;
+uniform float u_sizeScale;
+uniform float u_spinTurns;
+uniform float u_ptGain;      // 1/dpr² — keeps the shell's density identical on any display
+
+float hash11(float p){ p = fract(p*0.1031); p *= p+33.33; p *= p+p; return fract(p); }
+
+/* the loop timeline, evaluated at any phase (so motion-blur tails can be
+   sampled a few milliseconds in the past) */
+float cInAt (float p){ return smoothstep(0.16, 0.70, p); }
+float cOutAt(float p){ return 1.0 - smoothstep(0.80, 0.99, p); }
+
+vec4 vortex(vec3 dir, float dIn, float dOut, float turnsIn, float turnsOut,
+            float rFinal, float flatAmt, float phase, out float oAng){
+  float A = clamp((cInAt(phase)  - dIn ) / max(1.0 - dIn , 1e-4), 0.0, 1.0);
+  float B = clamp((cOutAt(phase) - dOut) / max(1.0 - dOut, 1e-4), 0.0, 1.0);
+  A = A*A*(3.0-2.0*A);
+  B = B*B*(3.0-2.0*B);
+  float c = A*B;
+
+  float R = mix(1.0, rFinal, pow(c, 2.30));
+  vec3  P = dir * R;
+
+  float fl = smoothstep(0.42, 1.0, c) * flatAmt;
+  P.y  *= mix(1.0, 0.055, fl);
+  P.xz *= mix(1.0, 1.24, fl);
+
+  float ang = TAU * u_spinTurns * phase + TAU * (turnsIn*A + turnsOut*(1.0 - B));
+  /* transient spiral twist: particles that lag behind swing wide, so the
+     infall reads as a spiral funnel instead of a stack of rings */
+  ang += TAU * 1.15 * (A*(1.0 - A)*4.0);
+  float ca = cos(ang), sa = sin(ang);
+  P = vec3(P.x*ca - P.z*sa, P.y, P.x*sa + P.z*ca);
+
+  /* spiral density arms: the infalling material is pulled onto three curved
+     arms keyed to each particle's original azimuth, so the collapse reads as a
+     vortex instead of a symmetric bloom. Fades to zero at both ends so the
+     final disc stays clean. */
+  float ang0 = atan(dir.z, dir.x);
+  float armAmp = 0.44*sin(3.14159265*clamp(c, 0.0, 1.0));
+  P.xz *= 1.0 + armAmp*sin(3.0*ang0 + 5.5*R);
+
+  oAng = ang;
+  return vec4(P, c);
+}`;
+
+/* ── main particle shell ── */
+const PART_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 a_dir;
+layout(location=1) in vec4 a_rnd;
+layout(location=2) in vec4 a_meta;
+${VORTEX_GLSL}
+out vec3  v_col;
+out float v_bright;
+out float v_type;
+out float v_c;
+out float v_glow;
+out float v_trail;
+uniform float u_trailDt;     // >0 → this pass draws motion-blur streaks
+uniform float u_densC;
+
+void main(){
+  float type   = a_meta.x;
+  float dIn    = a_rnd.x * 0.44;
+  float dOut   = a_rnd.y * 0.44;
+  float tIn    = floor(a_rnd.z * 3.0) + 1.0;
+  float tOut   = floor(a_rnd.w * 2.0) + 1.0;
+  float rFinal = 0.09 + 0.34 * a_meta.w;
+
+  /* streak pass: vertex 0 of each line instance = head (now), vertex 1 = tail */
+  float tail = 0.0;
+  float phase = u_p;
+  if(u_trailDt > 0.0){
+    tail  = float(gl_VertexID)/3.0;          // 4-vertex polyline → curved streak
+    phase = u_p - tail*u_trailDt;
+  }
+
+  float ang;
+  vec4 V = vortex(a_dir, dIn, dOut, tIn, tOut, rFinal, 1.0, phase, ang);
+  vec3 P = V.xyz;
+  float c = V.w;
+
+  vec4 mv = u_view * vec4(P, 1.0);
+  gl_Position = u_proj * mv;
+  float dist = max(-mv.z, 0.08);
+
+  float big = (type > 1.5 && type < 2.5) ? 1.90 : (type > 0.5 ? 1.14 : 1.0);
+  float sz  = u_sizeScale * u_dpr * big * (1.0 - 0.45*c);
+  gl_PointSize = clamp(sz * 1.05 / dist, 0.75, ${MAX_PT}.0);
+
+  vec3 col;
+  if(type < 0.5)      col = vec3(0.020, 0.150, 0.290);   // ocean
+  else if(type < 1.5) col = vec3(0.760, 0.235, 0.020);   // land
+  else if(type < 2.5) col = vec3(1.000, 0.130, 0.830);   // city
+  else                col = vec3(1.000, 0.560, 0.080);   // coast
+
+  vec3 charge = mix(vec3(0.05,0.88,1.00), vec3(1.00,0.12,0.86), smoothstep(0.15,0.85,a_meta.w));
+  col = mix(col, charge, 0.82*smoothstep(0.0, 0.90, c));   // charge → neon cyan / magenta
+  /* the disc: white hot core, neon cyan/magenta rim */
+  float w = smoothstep(0.62, 0.99, c);
+  vec3 rim = mix(vec3(0.25,0.95,1.0), vec3(1.0,0.30,0.88), step(0.5, a_meta.w));
+  vec3 discTint = mix(vec3(1.0), rim, 0.60*(1.0 - smoothstep(0.14, 0.52, rFinal)));
+  col = mix(col, discTint, w);
+
+  float flick = 0.72 + 0.58*hash11(a_meta.y + floor(u_time*11.0)*0.1371);
+  float base  = (type < 0.5) ? 0.0135 : (type < 1.5 ? 0.054 : (type < 2.5 ? 0.255 : 0.128));
+  /* the disc concentrates: hot white core, dimmer outer rim */
+  float coreHot = pow(1.0 - rFinal, 2.2);
+  float discMul = mix(1.0, 0.42 + 2.30*coreHot, c);
+  /* as the shell collapses its projected density explodes — compensate so the
+     frame keeps its colour instead of washing to white */
+  float dens = 1.0/(1.0 + u_densC*pow(c, 2.30));
+  v_bright = base * flick * (1.0 + 0.70*c) * discMul * dens * u_ptGain * (1.0 - 0.85*tail);
+  v_col  = col;
+  v_type = type;
+  v_c    = c;
+  v_glow = a_meta.z;
+  v_trail = u_trailDt > 0.0 ? 1.0 : 0.0;
+}`;
+
+const PART_FS = `#version 300 es
+precision highp float;
+in vec3  v_col;
+in float v_bright;
+in float v_type;
+in float v_c;
+in float v_glow;
+in float v_trail;
+out vec4 o;
+
+float hash11(float p){ p = fract(p*0.1031); p *= p+33.33; p *= p+p; return fract(p); }
+
+void main(){
+  if(v_trail > 0.5){
+    /* motion-blur streak — the drain only reads as a vortex because of these */
+    o = vec4(v_col*v_bright*3.20, 1.0);
+    return;
+  }
+  vec2 uv = gl_PointCoord*2.0 - 1.0;
+  float a;
+  if(v_type > 1.5 && v_type < 2.5){
+    /* city → 3x3 pixel block that shatters into drifting dust */
+    vec2 g  = gl_PointCoord*3.0;
+    vec2 off = (floor(g) - 1.0) * v_c * 0.55;
+    vec2 gg = fract(g - off) - 0.5;
+    a = step(max(abs(gg.x), abs(gg.y)), 0.36 - 0.16*v_c);
+    a *= 0.75 + 0.25*step(0.45, hash11(floor(g).x*7.1 + floor(g).y*3.7));
+  } else if(v_type > 0.5){
+    /* land / coast → tiny data glyph: square with a hot core */
+    vec2 g = gl_PointCoord*2.0 - 1.0;
+    float sq = step(max(abs(g.x), abs(g.y)), 0.44);
+    float core = 1.0 - smoothstep(0.0, 0.55, length(g));
+    a = sq*0.55 + core*0.75;
+  } else {
+    /* ocean → soft glowing dot */
+    a = 1.0 - smoothstep(0.06, 0.52, length(uv));
+  }
+  a = max(a, 0.0);
+  if(a < 0.02) discard;
+  vec3 col = v_col * (1.0 + 1.4*v_glow);
+  o = vec4(col * v_bright * a, a);
+}`;
+
+/* ── orange grid continents ── */
+const GRID_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 a_dir;
+layout(location=1) in vec2 a_rand;   // x = plate value (constant per plate), y = per-vertex phase
+layout(location=2) in float a_coast;
+${VORTEX_GLSL}
+uniform float u_fill;                // 1.0 → this pass draws filled plate faces
+out vec3  v_col;
+out float v_alpha;
+out float v_c;
+out float v_fill;
+
+void main(){
+  float c = clamp(cInAt(u_p)*cOutAt(u_p), 0.0, 1.0);
+  /* the crust lifts off the surface and peels outward before being swallowed */
+  float peel = smoothstep(0.06, 0.55, c);
+  vec3 n = normalize(a_dir);
+  /* per-plate rigid lift → plates detach as whole sheets */
+  float lift = peel * (0.020 + 0.190*a_rand.x) * (0.55 + 0.85*a_coast);
+  vec3 d = n * (1.0 + lift);
+
+  /* plate-level delays: every vertex of a plate moves together */
+  float dIn  = a_rand.x * 0.26;
+  float dOut = fract(a_rand.x*3.71) * 0.26;
+  float ang;
+  vec4 V = vortex(d, dIn, dOut, 2.0, 1.0, 0.34 + 0.42*a_rand.x, 1.0, u_p, ang);
+  gl_Position = u_proj * u_view * vec4(V.xyz, 1.0);
+  float cc = V.w;
+
+  vec3 orange = vec3(1.00, 0.44, 0.045);
+  vec3 cyan   = vec3(0.16, 0.95, 1.00);
+  vec3 col = mix(orange, cyan, smoothstep(0.05, 0.85, cc));
+  col = mix(col, vec3(1.0), smoothstep(0.6, 1.0, cc));
+  /* travelling data pulse along the wireframe */
+  float pulse = 0.72 + 0.28*sin(dot(n, vec3(0.0,1.0,0.0))*22.0 - u_time*2.6 + a_rand.x*9.0);
+
+  if(u_fill > 0.5){
+    /* plate face: dim, matte, so gaps read as black space between plates */
+    v_col   = col * (0.055 + 0.075*cc);
+    v_alpha = (1.0 - smoothstep(0.25, 0.95, cc)) * (0.55 + 0.45*a_coast);
+    v_fill  = 1.0;
+  } else {
+    v_col   = col * (0.42 + 0.72*a_coast) * pulse * (1.0 + 0.60*cc);
+    v_alpha = (1.0 - smoothstep(0.15, 0.82, cc)) * (0.80 + 0.20*a_coast);
+    v_fill  = 0.0;
+  }
+  v_c = cc;
+}`;
+
+const GRID_FS = `#version 300 es
+precision highp float;
+in vec3 v_col; in float v_alpha; in float v_c; in float v_fill;
+out vec4 o;
+void main(){
+  if(v_alpha <= 0.01) discard;
+  o = vec4(v_col*v_alpha, v_alpha);
+}`;
+
+/* ── starfield + gravitational lensing + body glow ── */
+const BG_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;
+out vec2 v_uv;
+void main(){ v_uv = a_pos; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+
+const BG_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2  u_res;
+uniform vec3  u_camPos;
+uniform vec3  u_fwd;
+uniform vec3  u_right;
+uniform vec3  u_up;
+uniform float u_tanHalf;
+uniform float u_aspect;
+uniform float u_time;
+uniform float u_lens;     // 0..1 lensing strength
+uniform float u_body;     // body radius (limb glow)
+uniform float u_collapse;
+uniform float u_disc;     // 0..1 disc glow amount
+uniform float u_discR;    // disc radius
+out vec4 o;
+
+float h21(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y)*p3.z);
+}
+float h31(vec3 p){
+  p = fract(p*0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y)*p.z);
+}
+vec3 rotAxis(vec3 v, vec3 k, float a){
+  float ca = cos(a), sa = sin(a);
+  return v*ca + cross(k, v)*sa + k*dot(k, v)*(1.0 - ca);
+}
+
+vec3 starLayer(vec3 d, float scale, float density, float bright, vec3 tint){
+  vec3 a = abs(d);
+  vec2 uv; float face;
+  if(a.x >= a.y && a.x >= a.z){ uv = d.yz/a.x; face = d.x > 0.0 ? 0.0 : 1.0; }
+  else if(a.y >= a.z)         { uv = d.xy/a.y; face = d.y > 0.0 ? 2.0 : 3.0; }
+  else                        { uv = d.xy/a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+  vec2 g = uv*scale + face*23.17;
+  vec2 c = floor(g), f = fract(g);
+  float h = h21(c + face*57.0);
+  if(h > density) return vec3(0.0);
+  vec2 sp = vec2(h21(c + vec2(1.37, 7.71)), h21(c + vec2(5.11, 2.93)));
+  float r = length(f - sp);
+  float b = bright*pow(max(0.0, 1.0 - r*3.1), 11.0);
+  float tw = 0.62 + 0.38*sin(u_time*2.1 + h*137.0);
+  vec3 tint2 = mix(tint, vec3(1.0), h*0.55);
+  return tint2*b*tw;
+}
+vec3 starField(vec3 d){
+  vec3 s = vec3(0.0);
+  s += starLayer(d,  74.0, 0.22, 1.50, vec3(0.55, 0.90, 1.00));
+  s += starLayer(d,  27.0, 0.13, 3.60, vec3(1.00, 0.72, 0.95));
+  s += starLayer(d, 152.0, 0.16, 0.50, vec3(0.70, 0.85, 1.00));
+  return s;
+}
+float nebula(vec3 d){
+  vec3 p = d*2.1;
+  float n = 0.0, a = 0.5, f = 1.0;
+  for(int i=0;i<4;i++){
+    vec3 q = p*f;
+    float v = sin(q.x*1.7 + u_time*0.05)*sin(q.y*1.3 - 1.1)*sin(q.z*1.9 + 2.3);
+    n += a*(0.5 + 0.5*v);
+    a *= 0.5; f *= 2.07;
+  }
+  return n;
+}
+
+void main(){
+  vec2 ndc = v_uv;
+  vec3 dir = normalize(u_right*ndc.x*u_tanHalf*u_aspect + u_up*ndc.y*u_tanHalf + u_fwd);
+
+  float ct  = clamp(dot(dir, u_fwd), -1.0, 1.0);
+  float th  = acos(ct);
+  float thE = u_lens*0.105;
+
+  /* --- gravitational lensing: remap the sampling direction --- */
+  vec3 srcDir = dir;
+  float arc = 0.0;
+  if(thE > 1e-4){
+    float defl = min(thE*thE/max(th, 0.10*thE), 2.2*thE);
+    vec3 axis = cross(dir, u_fwd);
+    float al = length(axis);
+    if(al > 1e-5){ srcDir = rotAxis(dir, axis/al, defl); }
+    /* frame-dragging twist: the sky itself spirals toward the drain */
+    float twist = clamp(u_lens*0.40*thE/max(th, 0.32*thE), 0.0, 0.45);
+    srcDir = rotAxis(srcDir, u_fwd, twist);
+    /* tangential magnification → stars smear into arcs / lines */
+    arc = clamp(thE*thE/max(th*th, 1e-4)*0.085, 0.0, 0.15)*u_lens;
+  }
+
+  vec3 col = vec3(0.0);
+  if(arc > 0.004){
+    const int N = 9;
+    for(int i=0;i<N;i++){
+      float o2 = (float(i)/float(N-1) - 0.5)*2.0*arc;
+      col += starField(rotAxis(srcDir, u_fwd, o2));
+    }
+    col /= float(N);
+  } else {
+    col = starField(srcDir);
+  }
+
+  /* colour fringing from the extreme deflection */
+  if(thE > 1e-4){
+    float fr = clamp(thE*thE/max(th*th, 1e-4)*0.06, 0.0, 0.35);
+    col.r *= 1.0 + fr;
+    col.b *= 1.0 - fr*0.55;
+  }
+
+  /* --- nebula haze + cosmic-horror depth --- */
+  float neb = nebula(dir);
+  neb *= neb*neb;
+  col += vec3(0.052, 0.011, 0.082)*neb*0.20;
+  col += vec3(0.006, 0.028, 0.042)*neb*0.45;
+
+  /* --- Einstein ring --- */
+  if(thE > 1e-4){
+    float ring = exp(-pow((th - thE)/max(0.006, thE*0.075), 2.0));
+    float ring2 = exp(-pow((th - thE*1.55)/max(0.012, thE*0.20), 2.0));
+    vec3 rc = mix(vec3(0.35,0.95,1.0), vec3(1.0,0.45,0.95), 0.5 + 0.5*sin(th*3.0 + u_time*0.7));
+    col += rc*ring*0.20*u_lens;
+    col += vec3(1.0,0.85,1.0)*ring2*0.05*u_lens;
+  }
+
+  /* --- the flattened body: a continuous glowing disc in the world XZ plane --- */
+  if(u_disc > 0.01 && abs(dir.y) > 1e-3){
+    float tHit = -u_camPos.y/dir.y;
+    if(tHit > 0.0){
+      vec3 hp = u_camPos + dir*tHit;
+      float rr = length(hp.xz)/max(u_discR, 1e-3);
+      float core = 1.0 - smoothstep(0.10, 1.06, rr);
+      float rim  = exp(-pow((rr - 1.0)/0.17, 2.0));
+      vec3 dc = mix(vec3(1.0), vec3(0.45,0.95,1.0), smoothstep(0.55, 1.0, rr));
+      col += (dc*core*3.00 + vec3(0.60,0.96,1.0)*rim*0.85)*u_disc;
+    }
+  }
+
+  /* --- limb / atmosphere glow of the body --- */
+  float b = length(cross(u_camPos, dir));
+  float R = u_body;
+  float limb = exp(-pow((b - R)/0.055, 2.0));
+  float inR  = 1.0 - smoothstep(R*0.92, R*1.01, b);
+  float haze = exp(-pow(max(R - b, 0.0)/0.30, 2.0)) * inR;
+  vec3 atmo = mix(vec3(0.10,0.85,1.0), vec3(1.0,0.30,0.88), 0.22 + 0.20*sin(dir.x*2.0));
+  col += atmo*(limb*0.26 + haze*0.045)*(1.0 - 0.55*u_collapse);
+  float inner = 1.0 - smoothstep(R*0.25, R, b);
+  col += vec3(0.05,0.22,0.30)*inner*0.035;
+
+  /* the void behind the drain darkens as the mass collapses (never the disc itself) */
+  col *= 1.0 - 0.42*u_collapse*(1.0 - u_disc)*(1.0 - smoothstep(0.15, 1.35, b/max(R,1e-3)));
+
+  /* vignette-ish deep space falloff */
+  col *= 1.0 - 0.30*pow(length(ndc)*0.72, 2.0);
+  o = vec4(col, 1.0);
+}`;
+
+/* ── bloom: threshold + separable gaussian ── */
+const BLUR_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_texel;
+uniform vec2 u_dir;
+uniform float u_thresh;
+uniform float u_pass;      // 1 = threshold pass
+out vec4 o;
+void main(){
+  if(u_pass > 0.5){
+    vec3 c = texture(u_tex, v_uv).rgb;
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float k = max(0.0, l - u_thresh)/max(l, 1e-4);
+    o = vec4(c*k, 1.0);
+    return;
+  }
+  vec3 s = texture(u_tex, v_uv).rgb*0.2270270270;
+  s += (texture(u_tex, v_uv + u_dir*u_texel*1.3846153846).rgb
+      + texture(u_tex, v_uv - u_dir*u_texel*1.3846153846).rgb)*0.3162162162;
+  s += (texture(u_tex, v_uv + u_dir*u_texel*3.2307692308).rgb
+      + texture(u_tex, v_uv - u_dir*u_texel*3.2307692308).rgb)*0.0702702703;
+  o = vec4(s, 1.0);
+}`;
+
+/* ── composite ── */
+const COMP_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform sampler2D u_b1;
+uniform sampler2D u_b2;
+uniform vec2  u_res;
+uniform float u_time;
+uniform float u_collapse;
+uniform float u_exposure;
+uniform float u_bloom;
+out vec4 o;
+
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x + 0.03))/(x*(2.43*x + 0.59) + 0.14), 0.0, 1.0);
+}
+float h21(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y)*p3.z);
+}
+
+void main(){
+  vec2 uv = v_uv*0.5 + 0.5;
+  vec2 d  = uv - 0.5;
+
+  /* chromatic aberration — widens as the mass collapses */
+  float ca = (0.00022 + 0.00078*u_collapse)*(1.0 + 1.6*dot(d,d)*4.0);
+  vec3 col;
+  col.r = texture(u_scene, uv + d*ca).r;
+  col.g = texture(u_scene, uv).g;
+  col.b = texture(u_scene, uv - d*ca).b;
+
+  vec3 bl = texture(u_b1, uv).rgb + texture(u_b2, uv).rgb*1.35;
+  col += bl*1.15*u_bloom;
+
+  col *= u_exposure;
+  col = aces(col);
+  col = pow(col, vec3(0.4545));
+
+  /* scanline + grain */
+  col *= 1.0 - 0.035*sin(uv.y*u_res.y*1.35 + u_time*3.0);
+  float g = h21(uv*u_res + fract(u_time)*137.0);
+  col += (g - 0.5)*0.030;
+
+  /* vignette */
+  col *= 1.0 - smoothstep(0.30, 1.28, length(d)*1.35);
+
+  o = vec4(col, 1.0);
+}`;
+
+/* ─────────────────────────────── resources ──────────────────────────────── */
+const P = {
+  bg:   program(BG_VS,   BG_FS,   'bg'),
+  part: program(PART_VS, PART_FS, 'part'),
+  grid: program(GRID_VS, GRID_FS, 'grid'),
+  blur: program(BG_VS,   BLUR_FS, 'blur'),
+  comp: program(BG_VS,   COMP_FS, 'comp')
+};
+
+let shell = buildParticles(PCOUNT);
+let grid  = buildGrid(52, 104, 3);
+
+let shellVAO = vao([
+  { buf: shell.dir,  loc: 0, size: 3 },
+  { buf: shell.rnd,  loc: 1, size: 4 },
+  { buf: shell.meta, loc: 2, size: 4 }
+]);
+/* same data, instanced: one 2-vertex line strip per particle (motion blur) */
+const trailVAO = (function(){
+  const v = vao([
+    { buf: shell.dir,  loc: 0, size: 3 },
+    { buf: shell.rnd,  loc: 1, size: 4 },
+    { buf: shell.meta, loc: 2, size: 4 }
+  ]);
+  gl.bindVertexArray(v);
+  for(let i=0;i<3;i++) gl.vertexAttribDivisor(i, 1);
+  gl.bindVertexArray(null);
+  return v;
+})();
+let gridVAO = vao([
+  { buf: grid.pos, loc: 0, size: 3 },
+  { buf: grid.rnd, loc: 1, size: 3 }
+]);
+
+/* ───────────────────────────── render targets ───────────────────────────── */
+let W = 1, H = 1, DPR = 1;
+let sceneRT, b1a, b1b, b2a, b2b;
+
+function allocTargets(){
+  if(sceneRT){ [sceneRT, b1a, b1b, b2a, b2b].forEach(t=>{ gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fbo); }); }
+  const w = W, h = H;
+  sceneRT = renderTarget(w, h, true);
+  const h1w = Math.max(1, w>>2), h1h = Math.max(1, h>>2);
+  const h2w = Math.max(1, w>>4), h2h = Math.max(1, h>>4);
+  b1a = renderTarget(h1w, h1h, true); b1b = renderTarget(h1w, h1h, true);
+  b2a = renderTarget(h2w, h2h, true); b2b = renderTarget(h2w, h2h, true);
+}
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = Math.max(2, Math.floor(canvas.clientWidth  * DPR));
+  const ch = Math.max(2, Math.floor(canvas.clientHeight * DPR));
+  if(cw === W && ch === H) return;
+  W = cw; H = ch;
+  canvas.width = W; canvas.height = H;
+  allocTargets();
+}
+window.addEventListener('resize', resize);
+
+/* ─────────────────────────────── camera ─────────────────────────────────── */
+const cam = { yaw: 0, pitch: 0.30, dist: 3.45, yawUser: 0, distUser: 1, roll: 0 };
+
+let dragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener('pointerdown', e=>{ dragging = true; lastX = e.clientX; lastY = e.clientY; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointerup',   e=>{ dragging = false; });
+canvas.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  cam.yawUser += (e.clientX - lastX)*0.006;
+  cam.pitch   = clamp(cam.pitch + (e.clientY - lastY)*0.004, -1.15, 1.15);
+  lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  cam.distUser = clamp(cam.distUser * (1 + Math.sign(e.deltaY)*0.06), 0.45, 2.6);
+}, { passive:false });
+
+let paused = false, hudHidden = false;
+window.addEventListener('keydown', e=>{
+  if(e.code === 'Space'){ paused = !paused; e.preventDefault(); }
+  if(e.key === 'h' || e.key === 'H'){
+    hudHidden = !hudHidden;
+    document.getElementById('hud').style.opacity = hudHidden ? '0' : '1';
+  }
+});
+
+/* ─────────────────────────────── render ─────────────────────────────────── */
+const hudStage = document.getElementById('stage');
+const hudBar   = document.querySelector('#bar i');
+const hudStats = document.getElementById('stats');
+
+const FOV = 42*Math.PI/180;
+const tanHalf = Math.tan(FOV/2);
+
+let t0 = performance.now(), virtualT = 0, lastNow = t0, frames = 0, fpsAcc = 0, fpsT = t0;
+
+function stageName(p){
+  if(p < 0.16) return '01 · INTACT 稳定壳层';
+  if(p < 0.40) return '02 · CRUST PEEL 大陆剥离';
+  if(p < 0.70) return '03 · DRAIN 螺旋内陷';
+  if(p < 0.79) return '04 · DISC 二维光碟';
+  return '05 · REBIRTH 重生';
+}
+
+function draw(now){
+  resize();
+
+  let phase;
+  if(FIXED_T !== null){
+    phase = ((FIXED_T % 1) + 1) % 1;
+  } else {
+    if(!paused){
+      const dt = Math.min(0.1, (now - lastNow)/1000);
+      virtualT += dt;
+    }
+    lastNow = now;
+    phase = (virtualT / LOOP) % 1;
+  }
+  const t = FIXED_T !== null ? phase*LOOP : virtualT;
+
+  /* ── loop timeline (all periodic → seamless) ── */
+  const cIn   = smoothstep(0.16, 0.70, phase);
+  const cOut  = 1 - smoothstep(0.78, 0.99, phase);
+  const collapse = cIn*cOut;
+  const lens  = Math.pow(smoothstep(0.14, 1.0, collapse), 1.35)*0.98 + 0.05;
+  const bodyR = 1.0*(1 - 0.62*smoothstep(0.3, 1.0, collapse)) + 0.16;
+
+  /* ── camera: one full 360° orbit per loop ── */
+  const orbit = phase*Math.PI*2;
+  cam.yaw  = orbit + cam.yawUser;
+  /* the camera rises to look down on the disc as the sphere flattens */
+  const pitch = Math.min(1.30, cam.pitch + Math.sin(orbit*1.0 + 0.9)*0.16
+                              + 0.95*smoothstep(0.15, 0.75, collapse));
+  const dist  = (cam.dist + Math.sin(orbit + 1.7)*0.30 - 0.55*collapse) * cam.distUser;
+  cam.roll = Math.sin(orbit + 2.4)*0.055;
+
+  const cy = Math.cos(pitch), sy = Math.sin(pitch);
+  const eye = [
+    Math.cos(cam.yaw)*cy*dist,
+    sy*dist,
+    Math.sin(cam.yaw)*cy*dist
+  ];
+  /* basis: looking at the origin */
+  const fwd = [-eye[0]/dist, -eye[1]/dist, -eye[2]/dist];
+  let upW = [0,1,0];
+  /* right = normalize(cross(fwd, up)) */
+  let right = [
+    fwd[1]*upW[2] - fwd[2]*upW[1],
+    fwd[2]*upW[0] - fwd[0]*upW[2],
+    fwd[0]*upW[1] - fwd[1]*upW[0]
+  ];
+  let rl = Math.hypot(right[0], right[1], right[2]) || 1;
+  right = [right[0]/rl, right[1]/rl, right[2]/rl];
+  let up = [
+    right[1]*fwd[2] - right[2]*fwd[1],
+    right[2]*fwd[0] - right[0]*fwd[2],
+    right[0]*fwd[1] - right[1]*fwd[0]
+  ];
+  /* roll */
+  const cr = Math.cos(cam.roll), sr = Math.sin(cam.roll);
+  const r2 = [
+    right[0]*cr + up[0]*sr, right[1]*cr + up[1]*sr, right[2]*cr + up[2]*sr
+  ];
+  const u2 = [
+    up[0]*cr - right[0]*sr, up[1]*cr - right[1]*sr, up[2]*cr - right[2]*sr
+  ];
+  right = r2; up = u2;
+
+  /* view + proj matrices (column-major) */
+  const view = new Float32Array(16);
+  view[0]=right[0]; view[4]=right[1]; view[8] =right[2]; view[12]=-(right[0]*eye[0]+right[1]*eye[1]+right[2]*eye[2]);
+  view[1]=up[0];    view[5]=up[1];    view[9] =up[2];    view[13]=-(up[0]*eye[0]+up[1]*eye[1]+up[2]*eye[2]);
+  view[2]=-fwd[0];  view[6]=-fwd[1];  view[10]=-fwd[2]; view[14]=  (fwd[0]*eye[0]+fwd[1]*eye[1]+fwd[2]*eye[2]);
+  view[3]=0; view[7]=0; view[11]=0; view[15]=1;
+
+  const aspect = W/H;
+  const f = 1/Math.tan(FOV/2);
+  const proj = new Float32Array(16);
+  proj[0]=f/aspect; proj[5]=f; proj[10]=(0.1+60)/(0.1-60); proj[11]=-1; proj[14]=(2*0.1*60)/(0.1-60);
+
+  /* ── PASS 1: scene → HDR ── */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneRT.fbo);
+  gl.viewport(0, 0, W, H);
+  gl.disable(gl.BLEND);
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  /* background */
+  if(!OFF.has('bg')){
+  gl.useProgram(P.bg.p);
+  gl.bindVertexArray(quadVAO);
+  gl.uniform2f(P.bg.u.u_res, W, H);
+  gl.uniform3f(P.bg.u.u_camPos, eye[0], eye[1], eye[2]);
+  gl.uniform3f(P.bg.u.u_fwd, fwd[0], fwd[1], fwd[2]);
+  gl.uniform3f(P.bg.u.u_right, right[0], right[1], right[2]);
+  gl.uniform3f(P.bg.u.u_up, up[0], up[1], up[2]);
+  gl.uniform1f(P.bg.u.u_tanHalf, tanHalf);
+  gl.uniform1f(P.bg.u.u_aspect, aspect);
+  gl.uniform1f(P.bg.u.u_time, t);
+  gl.uniform1f(P.bg.u.u_lens, lens);
+  gl.uniform1f(P.bg.u.u_body, bodyR);
+  gl.uniform1f(P.bg.u.u_collapse, collapse);
+  gl.uniform1f(P.bg.u.u_disc, smoothstep(0.74, 0.97, collapse));
+  gl.uniform1f(P.bg.u.u_discR, 0.58);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /* additive from here on */
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+
+  /* grid continents */
+  if(!OFF.has('grid')){
+  gl.useProgram(P.grid.p);
+  gl.bindVertexArray(gridVAO);
+  gl.uniformMatrix4fv(P.grid.u.u_view, false, view);
+  gl.uniformMatrix4fv(P.grid.u.u_proj, false, proj);
+  gl.uniform1f(P.grid.u.u_p, phase);
+  gl.uniform1f(P.grid.u.u_time, t);
+  gl.uniform1f(P.grid.u.u_dpr, DPR);
+  gl.uniform1f(P.grid.u.u_sizeScale, 1.0);
+  gl.uniform1f(P.grid.u.u_spinTurns, 2.0);
+  gl.uniform1f(P.grid.u.u_fill, 1.0);
+  gl.drawArrays(gl.TRIANGLES, grid.lineVerts, grid.fillVerts);
+  gl.uniform1f(P.grid.u.u_fill, 0.0);
+  gl.drawArrays(gl.LINES, 0, grid.lineVerts);
+  }
+
+  /* particle shell */
+  if(!OFF.has('shell')){
+  gl.useProgram(P.part.p);
+  gl.bindVertexArray(shellVAO);
+  gl.uniformMatrix4fv(P.part.u.u_view, false, view);
+  gl.uniformMatrix4fv(P.part.u.u_proj, false, proj);
+  gl.uniform1f(P.part.u.u_p, phase);
+  gl.uniform1f(P.part.u.u_time, t);
+  gl.uniform1f(P.part.u.u_dpr, DPR);
+  /* sprite size in device px scales with the viewport so the shell's apparent
+     density — and therefore the whole image — is identical at any resolution */
+  gl.uniform1f(P.part.u.u_sizeScale, 4.0*(H/1080));
+  gl.uniform1f(P.part.u.u_spinTurns, 2.0);
+  gl.uniform1f(P.part.u.u_ptGain, 1/(DPR*DPR));
+
+  /* motion-blur streaks first (they are the vortex cue), then the particles */
+  gl.uniform1f(P.part.u.u_densC, DENSC);
+  /* streaks shorten as the planet reforms, so nothing slashes across the frame */
+  gl.uniform1f(P.part.u.u_trailDt, TRAIL*(1.0 - 0.65*smoothstep(0.80, 0.99, phase)));
+  gl.bindVertexArray(trailVAO);
+  gl.drawArraysInstanced(gl.LINE_STRIP, 0, 4, shell.trailCount);
+
+  gl.uniform1f(P.part.u.u_trailDt, 0.0);
+  gl.bindVertexArray(shellVAO);
+  gl.drawArrays(gl.POINTS, 0, shell.count);
+  }
+
+  gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);
+
+  /* ── PASS 2: bloom ── */
+  gl.useProgram(P.blur.p);
+  gl.bindVertexArray(quadVAO);
+
+  /* threshold scene → b1a */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, b1a.fbo);
+  gl.viewport(0, 0, b1a.w, b1a.h);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneRT.tex);
+  gl.uniform1i(P.blur.u.u_tex, 0);
+  gl.uniform1f(P.blur.u.u_pass, 1);
+  gl.uniform1f(P.blur.u.u_thresh, 0.62);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  const blit = (src, dst, dx, dy)=>{
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dst.w, dst.h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.tex);
+    gl.uniform1i(P.blur.u.u_tex, 0);
+    gl.uniform1f(P.blur.u.u_pass, 0);
+    gl.uniform2f(P.blur.u.u_texel, 1/src.w, 1/src.h);
+    gl.uniform2f(P.blur.u.u_dir, dx, dy);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  blit(b1a, b1b, 1, 0);
+  blit(b1b, b1a, 0, 1);
+
+  /* downsample → b2a */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, b2a.fbo);
+  gl.viewport(0, 0, b2a.w, b2a.h);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, b1a.tex);
+  gl.uniform1i(P.blur.u.u_tex, 0);
+  gl.uniform1f(P.blur.u.u_pass, 0);
+  gl.uniform2f(P.blur.u.u_texel, 1/b1a.w, 1/b1a.h);
+  gl.uniform2f(P.blur.u.u_dir, 0.0, 0.0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  blit(b2a, b2b, 1, 0);
+  blit(b2b, b2a, 0, 1);
+  blit(b2a, b2b, 1, 1);
+  blit(b2b, b2a, 0, 1);
+
+  /* ── PASS 3: composite → screen ── */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(P.comp.p);
+  gl.bindVertexArray(quadVAO);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneRT.tex); gl.uniform1i(P.comp.u.u_scene, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b1a.tex);     gl.uniform1i(P.comp.u.u_b1, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, b2a.tex);     gl.uniform1i(P.comp.u.u_b2, 2);
+  gl.uniform2f(P.comp.u.u_res, W, H);
+  gl.uniform1f(P.comp.u.u_time, t);
+  gl.uniform1f(P.comp.u.u_collapse, collapse);
+  gl.uniform1f(P.comp.u.u_exposure, 0.96/(1.0 + 0.45*collapse));
+  gl.uniform1f(P.comp.u.u_bloom, OFF.has('bloom') ? 0.0 : 1.0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindVertexArray(null);
+
+  /* ── HUD ── */
+  frames++;
+  fpsAcc += now - fpsT; fpsT = now;
+  if(frames % 12 === 0){
+    const fps = 1000/(fpsAcc/12) || 0; fpsAcc = 0;
+    hudStats.textContent = `${(shell.count/1000).toFixed(0)}K PARTICLES · ${fps.toFixed(0)} FPS`;
+  }
+  if(!hudHidden){
+    hudStage.textContent = stageName(phase);
+    hudBar.style.width = (phase*100).toFixed(1) + '%';
+  }
+}
+
+let raf = 0;
+function loop(now){
+  raf = requestAnimationFrame(loop);
+  try{ draw(now); }
+  catch(err){
+    cancelAnimationFrame(raf);
+    console.error(err);
+    const e = document.getElementById('err');
+    e.style.display = 'grid';
+    e.textContent = 'RENDER ERROR — ' + (err && err.message ? err.message : err);
+  }
+}
+
+/* first frame, then reveal */
+resize();
+draw(performance.now());
+const bootEl = document.getElementById('boot');
+bootEl.classList.add('done');
+if(FIXED_T !== null) bootEl.style.display = 'none';          // clean stills
+bootEl.addEventListener('transitionend', ()=>{ bootEl.style.display = 'none'; });
+setTimeout(()=>{ bootEl.style.display = 'none'; }, 1500);   // safety net
+if(Q.get('hud') === '0') document.getElementById('hud').style.display = 'none';
+document.title += ' [' + (HDR_OK ? 'HDR16F' : 'LDR8') + ' ' + shell.count + 'p ' + shell.trailCount + 'tr ' + (grid.lineVerts+grid.fillVerts) + 'gv]';
+window.__DISSOLUTION_READY = true;
+window.__DISSOLUTION_INFO = { particles: shell.count, gridVerts: grid.lineVerts + grid.fillVerts, hdr: HDR_OK, loop: LOOP };
+raf = requestAnimationFrame(loop);
+
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a41b50baa7fff5',t:'MTc4OTI3MDU3Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><!-- source: deepdemos.top | author: heyizhiyuan | title: 地球解体：WebGL2 数据粒子螺旋内陷实验 -->
+</body>
+</html>

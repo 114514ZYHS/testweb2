@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-aa5bf7f0/va92296af9a69/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方块世界 · 网页版迷你体素沙盒</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000;
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;user-select:none;-webkit-user-select:none}
+  #game{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .hidden{display:none!important}
+
+  /* ===== 标题遮罩 ===== */
+  #overlay{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(10,22,38,.5),rgba(4,9,18,.85))}
+  .panel{background:rgba(14,24,40,.8);border:1px solid rgba(255,255,255,.14);border-radius:14px;
+    padding:32px 46px;text-align:center;color:#eef4fb;box-shadow:0 12px 60px rgba(0,0,0,.55);backdrop-filter:blur(6px)}
+  .panel h1{font-size:42px;letter-spacing:10px;margin-bottom:6px;text-shadow:0 2px 14px rgba(90,170,255,.55)}
+  .panel .sub{color:#9db8d8;font-size:13px;letter-spacing:3px;margin-bottom:20px}
+  .keys{display:grid;grid-template-columns:1fr 1fr;gap:7px 30px;text-align:left;font-size:13px;
+    color:#c9d9ec;margin:0 auto 22px;max-width:460px}
+  .keys b{color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);
+    border-radius:4px;padding:1px 6px;margin-right:8px;font-weight:600;display:inline-block;
+    min-width:58px;text-align:center;font-size:12px}
+  #enterBtn{font-size:18px;padding:12px 48px;border:none;border-radius:8px;cursor:pointer;
+    background:linear-gradient(180deg,#58b44a,#3a8c34);color:#fff;letter-spacing:8px;font-weight:700;
+    box-shadow:0 4px 20px rgba(70,170,70,.45);transition:filter .12s,transform .12s}
+  #enterBtn:hover{filter:brightness(1.12);transform:translateY(-1px)}
+  .tip{margin-top:14px;font-size:12px;color:#8fa8c6;letter-spacing:1px}
+
+  /* ===== 暂停遮罩 ===== */
+  #pause{position:fixed;inset:0;z-index:19;display:flex;flex-direction:column;gap:12px;
+    align-items:center;justify-content:center;background:rgba(8,14,24,.62);
+    color:#fff;font-size:26px;letter-spacing:6px;cursor:pointer}
+  #pause small{font-size:13px;color:#a8c0dc;letter-spacing:2px}
+
+  /* ===== HUD ===== */
+  #crosshair{position:fixed;left:50%;top:50%;width:22px;height:22px;transform:translate(-50%,-50%);
+    z-index:10;pointer-events:none}
+  #crosshair::before,#crosshair::after{content:"";position:absolute;background:rgba(255,255,255,.9);mix-blend-mode:difference}
+  #crosshair::before{left:50%;top:0;width:2px;height:100%;transform:translateX(-50%)}
+  #crosshair::after{top:50%;left:0;height:2px;width:100%;transform:translateY(-50%)}
+  #info{position:fixed;left:10px;top:10px;z-index:10;color:#fff;font:12px/1.8 Consolas,monospace;
+    background:rgba(0,0,0,.38);padding:8px 14px;border-radius:6px;pointer-events:none}
+  #hotbarWrap{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:10;text-align:center;pointer-events:none}
+  #blockName{color:#fff;font-size:13px;letter-spacing:2px;text-shadow:0 1px 4px #000;margin-bottom:7px}
+  #hotbar{display:flex;gap:6px}
+  .slot{width:52px;height:52px;background:rgba(10,16,26,.55);border:2px solid rgba(255,255,255,.25);
+    border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;
+    transition:transform .08s,border-color .08s,box-shadow .08s}
+  .slot.sel{border-color:#ffd75e;box-shadow:0 0 12px rgba(255,215,90,.55);transform:scale(1.12)}
+  .slot .num{position:absolute;left:4px;top:2px;font-size:10px;color:rgba(255,255,255,.85)}
+  .sw{width:30px;height:30px;border-radius:3px;
+    box-shadow:inset 0 -5px 6px rgba(0,0,0,.3),inset 0 3px 4px rgba(255,255,255,.22)}
+  .sw-grass{background:linear-gradient(180deg,#57a336 0 34%,#6c4b2f 34%)}
+  .sw-dirt{background:#6c4b2f}
+  .sw-stone{background:#8a8a90}
+  .sw-sand{background:#d8cd94}
+  .sw-wood{background:linear-gradient(90deg,#5a3f21,#7e5d33 45%,#5a3f21)}
+  .sw-leaves{background:#3d7c26}
+  .sw-glass{background:linear-gradient(135deg,rgba(205,238,252,.6),rgba(150,200,232,.32));
+    border:1px solid rgba(230,250,255,.85)}
+  #waterTint{position:fixed;inset:0;z-index:5;background:rgba(24,68,140,.38);pointer-events:none}
+
+  /* ===== WebGL 不可用提示 ===== */
+  #glfail{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+    background:#101820;color:#e8f0fa;font-size:16px;line-height:2;text-align:center;white-space:pre-line;padding:20px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- HUD -->
+<div id="crosshair"></div>
+<div id="info"></div>
+<div id="waterTint" class="hidden"></div>
+<div id="hotbarWrap">
+  <div id="blockName"></div>
+  <div id="hotbar"></div>
+</div>
+
+<!-- 标题遮罩 -->
+<div id="overlay">
+  <div class="panel">
+    <h1>方块世界</h1>
+    <div class="sub">网 页 版 迷 你 体 素 沙 盒 · 原 生 WEBGL</div>
+    <div class="keys">
+      <span><b>W A S D</b>移动</span>
+      <span><b>鼠标</b>环顾四周</span>
+      <span><b>空格</b>跳跃 / 上升</span>
+      <span><b>Shift</b>飞行下降</span>
+      <span><b>F</b>切换飞行模式</span>
+      <span><b>左键</b>破坏方块</span>
+      <span><b>右键</b>放置方块</span>
+      <span><b>1~7 / 滚轮</b>选择方块</span>
+    </div>
+    <button id="enterBtn">进入世界</button>
+    <div class="tip">进入后按 Esc 释放鼠标（暂停） · 世界大小 128 × 128 × 64 · 零依赖单文件</div>
+  </div>
+</div>
+
+<!-- 暂停遮罩 -->
+<div id="pause" class="hidden">
+  <div>游戏已暂停</div>
+  <small>点击任意位置继续 · F 切换飞行 · Esc 释放鼠标</small>
+</div>
+
+<!-- WebGL 失败提示 -->
+<div id="glfail" class="hidden"></div>
+
+<!-- 错误捕获（必须为 body 内第一段脚本） -->
+<script>window.__DEMO_ERRORS__=[];function __showErr(){var d=document.getElementById('__errbox');if(!d){d=document.createElement('div');d.id='__errbox';d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;font:12px monospace;padding:4px 8px;max-height:140px;overflow:auto;pointer-events:none;white-space:pre-wrap';(document.body||document.documentElement).appendChild(d);}d.textContent=('JS错误: '+window.__DEMO_ERRORS__.join(' | ')).slice(0,600);}window.addEventListener('error',function(e){var m=String(e.message||e);window.__DEMO_ERRORS__.push(m);try{__showErr()}catch(_){}});window.addEventListener('unhandledrejection',function(e){var m=String(e.reason||e);window.__DEMO_ERRORS__.push(m);try{__showErr()}catch(_){}});</script>
+
+<script>
+'use strict';
+(function(){
+
+/* ============================================================
+ * 方块世界 · 单文件体素沙盒
+ * 结构：1 常量  2 WebGL 初始化/着色器  3 矩阵库  4 噪声
+ *       5 世界数据与地形生成  6 chunk 网格构建  7 玩家物理
+ *       8 射线拾取  9 输入与 UI  10 渲染与主循环
+ * ============================================================ */
+
+/* ---------- 1. 常量 ---------- */
+var CHUNK = 16;                 // chunk 边长
+var CW = 8, CD = 8;             // 水平 8x8 个 chunk
+var WW = CHUNK * CW;            // 世界宽度 128
+var WH = 64;                    // 世界高度 64
+var SEA = 26;                   // 海平面
+var AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, WATER=7, GLASS=8;
+
+var FOG = [0.72, 0.82, 0.92];   // 雾色 = 地平线色
+var FOG_NEAR = 55, FOG_FAR = 150;
+var G = 27, JUMP = 8.4;         // 重力 / 起跳速度
+var WALK = 4.4, FLY = 13, FLY_V = 9, SWIM = 3.2;
+var P_HW = 0.3, P_H = 1.8;      // 玩家半宽 / 身高
+var EYE = 1.62;                 // 眼睛高度
+var EPS = 0.001;
+
+var canvas = document.getElementById('game');
+var overlayEl = document.getElementById('overlay');
+var pauseEl = document.getElementById('pause');
+var infoEl = document.getElementById('info');
+var blockNameEl = document.getElementById('blockname') || document.getElementById('blockName');
+var waterTintEl = document.getElementById('waterTint');
+var glfailEl = document.getElementById('glfail');
+
+function showFail(msg){
+  overlayEl.classList.add('hidden');
+  pauseEl.classList.add('hidden');
+  glfailEl.classList.remove('hidden');
+  glfailEl.textContent = msg;
+}
+
+/* ---------- 2. WebGL 初始化与着色器 ---------- */
+var gl = null;
+try{
+  gl = canvas.getContext('webgl', {antialias:true, alpha:false}) ||
+       canvas.getContext('experimental-webgl', {antialias:true, alpha:false});
+}catch(e){ gl = null; }
+if(!gl){
+  showFail('抱歉：当前浏览器不支持 WebGL，无法进入方块世界。\n请使用最新版 Chrome / Edge / Firefox，并确认已开启硬件加速。');
+  return;
+}
+
+function makeProgram(vsSrc, fsSrc, attribs){
+  function sh(type, src){
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error('着色器编译失败: ' + gl.getShaderInfoLog(s));
+    return s;
+  }
+  var p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsSrc));
+  // 固定属性槽位，简化多程序间切换
+  for(var i=0;i<attribs.length;i++) gl.bindAttribLocation(p, attribs[i][1], attribs[i][0]);
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error('着色器链接失败: ' + gl.getProgramInfoLog(p));
+  return p;
+}
+
+/* 地形着色器：顶点色 + 距离雾（用 gl_Position.w 作为视距） */
+var terrainProg = makeProgram(
+  'attribute vec3 aPos;' +
+  'attribute vec4 aColor;' +
+  'uniform mat4 uMVP;' +
+  'uniform vec2 uFog;' +
+  'varying vec4 vColor;' +
+  'varying float vFog;' +
+  'void main(){' +
+  '  gl_Position = uMVP * vec4(aPos, 1.0);' +
+  '  vColor = aColor;' +
+  '  vFog = clamp((gl_Position.w - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0);' +
+  '}',
+  'precision mediump float;' +
+  'varying vec4 vColor;' +
+  'varying float vFog;' +
+  'uniform vec3 uFogColor;' +
+  'void main(){' +
+  '  vec3 c = mix(vColor.rgb, uFogColor, vFog);' +
+  '  gl_FragColor = vec4(c, vColor.a);' +
+  '}',
+  [['aPos',0],['aColor',1]]);
+var terLoc = {
+  uMVP: gl.getUniformLocation(terrainProg,'uMVP'),
+  uFog: gl.getUniformLocation(terrainProg,'uFog'),
+  uFogColor: gl.getUniformLocation(terrainProg,'uFogColor'),
+  aPos: 0, aColor: 1
+};
+
+/* 天空着色器：全屏大三角形，屏幕空间垂直渐变 */
+var skyProg = makeProgram(
+  'attribute vec2 aPos;' +
+  'varying vec2 vP;' +
+  'void main(){ vP = aPos; gl_Position = vec4(aPos, 0.9999, 1.0); }',
+  'precision mediump float;' +
+  'varying vec2 vP;' +
+  'void main(){' +
+  '  float t = clamp(vP.y * 0.5 + 0.5, 0.0, 1.0);' +
+  '  vec3 zen = vec3(0.28, 0.52, 0.86);' +
+  '  vec3 hor = vec3(0.72, 0.82, 0.92);' +
+  '  gl_FragColor = vec4(mix(hor, zen, pow(t, 1.25)), 1.0);' +
+  '}',
+  [['aPos',0]]);
+var skyLoc = { aPos: 0 };
+
+/* 线框着色器：选中方块高亮 */
+var lineProg = makeProgram(
+  'attribute vec3 aPos;' +
+  'uniform mat4 uMVP;' +
+  'uniform vec3 uOffset;' +
+  'void main(){ gl_Position = uMVP * vec4(aPos + uOffset, 1.0); }',
+  'precision mediump float;' +
+  'uniform vec4 uColor;' +
+  'void main(){ gl_FragColor = uColor; }',
+  [['aPos',0]]);
+var lineLoc = {
+  uMVP: gl.getUniformLocation(lineProg,'uMVP'),
+  uOffset: gl.getUniformLocation(lineProg,'uOffset'),
+  uColor: gl.getUniformLocation(lineProg,'uColor'),
+  aPos: 0
+};
+
+/* 静态缓冲：天空大三角形 + 立方体 12 条棱 */
+var skyBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+var lineBuf = gl.createBuffer();
+(function(){
+  var e = 0.004, lo = -e, hi = 1 + e;
+  var C = [[lo,lo,lo],[hi,lo,lo],[hi,lo,hi],[lo,lo,hi],[lo,hi,lo],[hi,hi,lo],[hi,hi,hi],[lo,hi,hi]];
+  var E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  var v = [];
+  for(var i=0;i<E.length;i++){ v.push.apply(v, C[E[i][0]]); v.push.apply(v, C[E[i][1]]); }
+  gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STATIC_DRAW);
+})();
+
+/* ---------- 3. 矩阵库（列主序，仅实现所需部分） ---------- */
+var matProj = new Float32Array(16);
+var matView = new Float32Array(16);
+var MVP = new Float32Array(16);
+
+function mat4Perspective(out, fovy, aspect, near, far){
+  var f = 1/Math.tan(fovy/2), nf = 1/(near-far);
+  out[0]=f/aspect; out[1]=0; out[2]=0; out[3]=0;
+  out[4]=0; out[5]=f; out[6]=0; out[7]=0;
+  out[8]=0; out[9]=0; out[10]=(far+near)*nf; out[11]=-1;
+  out[12]=0; out[13]=0; out[14]=2*far*near*nf; out[15]=0;
+}
+function mat4LookAt(out, ex, ey, ez, cx, cy, cz){
+  // z 轴 = eye - center（指向观察者反方向）
+  var zx = ex-cx, zy = ey-cy, zz = ez-cz;
+  var l = 1/Math.sqrt(zx*zx+zy*zy+zz*zz); zx*=l; zy*=l; zz*=l;
+  // x 轴 = up × z，up 固定 (0,1,0)
+  var xx = zz, xy = 0, xz = -zx;
+  l = 1/(Math.sqrt(xx*xx+xz*xz) || 1); xx*=l; xz*=l;
+  // y 轴 = z × x
+  var yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+  out[0]=xx; out[1]=yx; out[2]=zx; out[3]=0;
+  out[4]=xy; out[5]=yy; out[6]=zy; out[7]=0;
+  out[8]=xz; out[9]=yz; out[10]=zz; out[11]=0;
+  out[12]=-(xx*ex+xy*ey+xz*ez);
+  out[13]=-(yx*ex+yy*ey+yz*ez);
+  out[14]=-(zx*ex+zy*ey+zz*ez);
+  out[15]=1;
+}
+function mat4Mul(out, a, b){ // out = a * b
+  var o = new Float32Array(16);
+  for(var c=0;c<4;c++){
+    for(var r=0;r<4;r++){
+      o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+    }
+  }
+  out.set(o);
+}
+
+/* ---------- 4. 噪声（确定性值噪声 + 分形叠加） ---------- */
+var SEED_I = 20260905;
+function hash2(x, y){
+  var n = Math.imul(x|0, 374761393) + Math.imul(y|0, 668265263) + SEED_I;
+  n = Math.imul(n ^ (n>>>13), 1274126177);
+  n ^= n>>>16;
+  return (n>>>0) / 4294967296;
+}
+function hash3(x, y, z){
+  return hash2(x + Math.imul(y|0, 73428767), z + Math.imul(y|0, -912931));
+}
+function smooth(t){ return t*t*(3-2*t); }
+function noise2(x, y){
+  var xi = Math.floor(x), yi = Math.floor(y);
+  var xf = x-xi, yf = y-yi;
+  var a = hash2(xi,yi), b = hash2(xi+1,yi), c = hash2(xi,yi+1), d = hash2(xi+1,yi+1);
+  var u = smooth(xf), v = smooth(yf);
+  return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v; // [0,1)
+}
+function fbm(x, y, oct){
+  var s = 0, amp = 0.5, tot = 0;
+  for(var i=0;i<oct;i++){
+    s += noise2(x,y)*amp; tot += amp;
+    x = x*2 + 31.7; y = y*2 - 17.3; amp *= 0.5;
+  }
+  return s/tot; // [0,1)
+}
+
+/* ---------- 5. 世界数据与地形生成 ---------- */
+var world = new Uint8Array(WW*WW*WH);      // 体素数据: x + z*128 + y*16384
+var heights = new Int16Array(WW*WW);       // 高度图缓存
+
+function getBlock(x, y, z){
+  if(x<0 || x>=WW || z<0 || z>=WW) return AIR; // 世界之外是虚空
+  if(y<0) return STONE;                        // 世界底面（避免渲染底面、兜底碰撞）
+  if(y>=WH) return AIR;
+  return world[(y<<14) | (z<<7) | x];
+}
+function isSolid(b){ return b !== AIR && b !== WATER; }   // 碰撞固体
+// 剔除判断时视为“不透明”的方块（水/玻璃透明）
+function isOpaqueLike(b){ return b > 0 && b <= LEAVES; }
+
+function terrainHeight(x, z){
+  var n = fbm(x*0.014 + 3.1, z*0.014 - 7.7, 4);   // 基础起伏
+  var h = 29 + (n-0.5)*2*13;
+  var m = fbm(x*0.007 + 400, z*0.007 + 400, 3);   // 山地mask
+  if(m > 0.58) h += (m-0.58)*70;
+  h = Math.floor(h);
+  return h < 2 ? 2 : (h > 58 ? 58 : h);
+}
+
+function generateWorld(){
+  var x, y, z, h, sandy;
+  for(z=0; z<WW; z++){
+    for(x=0; x<WW; x++){
+      h = terrainHeight(x, z);
+      heights[z*WW + x] = h;
+      sandy = h <= SEA + 1;                     // 海平面附近为沙滩
+      for(y=0; y<=h; y++){
+        var b;
+        if(y===0) b = STONE;                    // 基岩层
+        else if(y===h) b = sandy ? SAND : GRASS;
+        else if(y >= h-3) b = sandy ? SAND : DIRT;
+        else b = STONE;
+        world[(y<<14)|(z<<7)|x] = b;
+      }
+      for(y=h+1; y<=SEA; y++) world[(y<<14)|(z<<7)|x] = WATER; // 海水
+    }
+  }
+  // 随机树木：木干 + 树叶球
+  for(z=2; z<WW-2; z++){
+    for(x=2; x<WW-2; x++){
+      h = heights[z*WW + x];
+      if(h <= SEA+1 || h > 52) continue;        // 只长在草原上
+      if(hash2(x*131+7, z*173+11) >= 0.007) continue;
+      plantTree(x, h, z);
+    }
+  }
+}
+
+function plantTree(x, gy, z){
+  var th = 4 + Math.floor(hash2(x*91+1, z*57+2)*3);  // 树干高 4~6
+  var i, dx, dy, dz, r;
+  for(i=1; i<=th; i++) world[((gy+i)<<14)|(z<<7)|x] = WOOD;
+  var top = gy + th;
+  for(dy=-2; dy<=2; dy++){
+    var ly = top + dy;
+    if(ly < 0 || ly >= WH) continue;
+    r = dy < 1 ? 2 : 1;
+    for(dx=-r; dx<=r; dx++){
+      for(dz=-r; dz<=r; dz++){
+        if(dx===0 && dz===0 && dy<=0) continue;                       // 树干占位
+        if(dx*dx + dz*dz > r*r + (r===2 ? 1 : 0)) continue;           // 圆形截面
+        if(dy>=1 && Math.abs(dx)===1 && Math.abs(dz)===1 &&
+           hash2(x+dx*31+ly, z+dz*37+ly) < 0.5) continue;             // 顶层随机削角
+        var idx = (ly<<14)|((z+dz)<<7)|(x+dx);
+        if(x+dx>=0 && x+dx<WW && z+dz>=0 && z+dz<WW && world[idx]===AIR)
+          world[idx] = LEAVES;
+      }
+    }
+  }
+}
+
+/* ---------- 6. chunk 网格构建 ---------- */
+/* 每个面：法线 d、四角 c（从外侧看逆时针）、基础亮度 b */
+var FACES = [
+  { d:[ 1,0,0], b:0.66, c:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },  // +X 东
+  { d:[-1,0,0], b:0.66, c:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },  // -X 西
+  { d:[ 0,1,0], b:1.00, c:[[0,1,0],[0,1,1],[1,1,1],[1,1,0]] },  // +Y 上
+  { d:[0,-1,0], b:0.50, c:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },  // -Y 下
+  { d:[ 0,0,1], b:0.82, c:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]] },  // +Z 南
+  { d:[0,0,-1], b:0.82, c:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }   // -Z 北
+];
+var QUAD = [0,1,2,0,2,3]; // 两个三角形
+
+/* 每种方块的 [顶, 侧, 底] 颜色 */
+var COLORS = {};
+COLORS[GRASS]  = [[0.34,0.63,0.25],[0.45,0.55,0.27],[0.49,0.35,0.23]];
+COLORS[DIRT]   = [[0.49,0.35,0.23],[0.49,0.35,0.23],[0.49,0.35,0.23]];
+COLORS[STONE]  = [[0.56,0.56,0.59],[0.53,0.53,0.56],[0.50,0.50,0.53]];
+COLORS[SAND]   = [[0.85,0.79,0.57],[0.82,0.76,0.54],[0.78,0.72,0.50]];
+COLORS[WOOD]   = [[0.62,0.49,0.29],[0.47,0.35,0.20],[0.62,0.49,0.29]];
+COLORS[LEAVES] = [[0.23,0.48,0.16],[0.20,0.43,0.14],[0.18,0.40,0.13]];
+COLORS[WATER]  = [[0.17,0.43,0.78],[0.17,0.43,0.78],[0.17,0.43,0.78]];
+COLORS[GLASS]  = [[0.82,0.92,0.96],[0.82,0.92,0.96],[0.82,0.92,0.96]];
+
+/* 顶点格式: x,y,z, r,g,b,a（7 个 float，28 字节） */
+function pushFace(arr, x, y, z, f, b){
+  var F = FACES[f], cs = COLORS[b];
+  var col = f===2 ? cs[0] : (f===3 ? cs[2] : cs[1]);
+  var a = b===WATER ? 0.58 : (b===GLASS ? 0.40 : 1.0);
+  var v = (b===WATER || b===GLASS) ? 1.0 : 0.92 + hash3(x,y,z)*0.14; // 轻微色块噪点
+  var br = F.b * v;
+  var r = col[0]*br, g = col[1]*br, bl = col[2]*br;
+  var c = F.c, i, p;
+  for(i=0;i<6;i++){
+    p = c[QUAD[i]];
+    arr.push(x+p[0], y+p[1], z+p[2], r, g, bl, a);
+  }
+}
+
+var chunks = [];
+for(var ci=0; ci<CW*CD; ci++)
+  chunks.push({ vbO: gl.createBuffer(), vbT: gl.createBuffer(), nO: 0, nT: 0 });
+
+function buildChunk(ci){
+  var ch = chunks[ci];
+  var cx = ci % CW, cz = (ci / CW) | 0;
+  var opq = [], trn = [];
+  var x0 = cx*CHUNK, z0 = cz*CHUNK;
+  var x, y, z, f, b, n, d, vis, arr;
+  for(y=0; y<WH; y++){
+    for(z=z0; z<z0+CHUNK; z++){
+      for(x=x0; x<x0+CHUNK; x++){
+        b = world[(y<<14)|(z<<7)|x];
+        if(b === AIR) continue;
+        arr = (b===WATER || b===GLASS) ? trn : opq;
+        for(f=0; f<6; f++){
+          d = FACES[f].d;
+          n = getBlock(x+d[0], y+d[1], z+d[2]);
+          // 只有相邻为空气/透明时才生成面
+          if(b===WATER)      vis = (n===AIR || n===GLASS);
+          else if(b===GLASS) vis = (n===AIR || n===WATER);
+          else               vis = !isOpaqueLike(n);
+          if(vis) pushFace(arr, x, y, z, f, b);
+        }
+      }
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbO);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(opq), gl.STATIC_DRAW);
+  ch.nO = opq.length / 7;
+  gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbT);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(trn), gl.STATIC_DRAW);
+  ch.nT = trn.length / 7;
+}
+
+function buildAllChunks(){
+  for(var i=0;i<chunks.length;i++) buildChunk(i);
+}
+
+/* 修改方块并重建受影响 chunk（边界处连带邻接 chunk） */
+function setBlock(x, y, z, v){
+  if(x<0 || x>=WW || y<0 || y>=WH || z<0 || z>=WW) return;
+  world[(y<<14)|(z<<7)|x] = v;
+  var cx = (x/CHUNK)|0, cz = (z/CHUNK)|0;
+  var xs = [cx], zs = [cz], lx = x & 15, lz = z & 15;
+  if(lx===0  && cx>0)    xs.push(cx-1);
+  if(lx===15 && cx<CW-1) xs.push(cx+1);
+  if(lz===0  && cz>0)    zs.push(cz-1);
+  if(lz===15 && cz<CD-1) zs.push(cz+1);
+  for(var i=0;i<xs.length;i++)
+    for(var j=0;j<zs.length;j++)
+      buildChunk(xs[i] + zs[j]*CW);
+}
+
+/* ---------- 7. 玩家物理（AABB 分轴碰撞） ---------- */
+var player = { x:64.5, y:40, z:64.5, vx:0, vy:0, vz:0, yaw:0.6, pitch:-0.12,
+               onGround:false, fly:false };
+var spawn = { x:64.5, y:40, z:64.5 };
+var keys = {};
+var started = false;
+
+function findSpawn(){
+  var bx=64, bz=64, bd=1e9;
+  for(var z=0; z<WW; z++){
+    for(var x=0; x<WW; x++){
+      var h = heights[z*WW + x];
+      if(h > SEA+1 && h < 50){
+        var d = (x-64)*(x-64) + (z-64)*(z-64);
+        if(d < bd){ bd = d; bx = x; bz = z; }
+      }
+    }
+  }
+  spawn.x = bx + 0.5;
+  spawn.z = bz + 0.5;
+  spawn.y = heights[bz*WW + bx] + 1.02;
+}
+function respawn(){
+  player.x = spawn.x; player.y = spawn.y; player.z = spawn.z;
+  player.vx = player.vy = player.vz = 0;
+}
+
+/* 单轴移动 + 碰撞推出（分轴处理，dt 分步防穿透） */
+function sweep(axis, amt){
+  if(amt === 0) return;
+  player[axis] += amt;
+  var minX = player.x-P_HW, maxX = player.x+P_HW;
+  var minY = player.y,      maxY = player.y+P_H;
+  var minZ = player.z-P_HW, maxZ = player.z+P_HW;
+  var x0 = Math.floor(minX), x1 = Math.floor(maxX - 1e-7);
+  var y0 = Math.floor(minY), y1 = Math.floor(maxY - 1e-7);
+  var z0 = Math.floor(minZ), z1 = Math.floor(maxZ - 1e-7);
+  var x, y, z;
+  for(y=y0; y<=y1; y++){
+    for(z=z0; z<=z1; z++){
+      for(x=x0; x<=x1; x++){
+        if(!isSolid(getBlock(x,y,z))) continue;
+        if(axis === 'y'){
+          if(amt < 0){ player.y = y+1+EPS; player.onGround = true; }
+          else       { player.y = y-P_H-EPS; }
+          player.vy = 0;
+        }else if(axis === 'x'){
+          player.x = amt > 0 ? x-P_HW-EPS : x+1+P_HW+EPS;
+          player.vx = 0;
+        }else{
+          player.z = amt > 0 ? z-P_HW-EPS : z+1+P_HW+EPS;
+          player.vz = 0;
+        }
+        return; // 单帧位移 < 1 格，一次推出即可
+      }
+    }
+  }
+}
+
+function updatePlayer(dt){
+  // 是否在水中（脚部或胸口）
+  var fx = Math.floor(player.x), fz = Math.floor(player.z);
+  var inWater =
+    getBlock(fx, Math.floor(player.y+0.25), fz) === WATER ||
+    getBlock(fx, Math.floor(player.y+1.3),  fz) === WATER;
+
+  // 输入 → 目标水平速度（相对视角朝向）
+  var ix = 0, iz = 0;
+  if(keys.KeyW) iz += 1;
+  if(keys.KeyS) iz -= 1;
+  if(keys.KeyD) ix += 1;
+  if(keys.KeyA) ix -= 1;
+  var sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  var wx = sy*iz + cy*ix, wz = -cy*iz + sy*ix;
+  var wl = Math.sqrt(wx*wx + wz*wz);
+  var spd = player.fly ? FLY : (inWater ? SWIM : WALK);
+  if(wl > 0){ wx = wx/wl*spd; wz = wz/wl*spd; }
+  var k = Math.min(1, dt * ((player.onGround || player.fly) ? 13 : 5));
+  player.vx += (wx - player.vx)*k;
+  player.vz += (wz - player.vz)*k;
+
+  // 垂直运动
+  if(player.fly){
+    var ty = 0;
+    if(keys.Space) ty = FLY_V;
+    if(keys.ShiftLeft || keys.ShiftRight) ty = -FLY_V;
+    player.vy += (ty - player.vy) * Math.min(1, dt*13);
+  }else if(inWater){
+    player.vy -= 10*dt;                       // 水中浮力
+    if(player.vy < -2.6) player.vy = -2.6;
+    if(keys.Space){
+      player.vy += (3.4 - player.vy) * Math.min(1, dt*7);
+      if(player.onGround) player.vy = 5.5;    // 从水底起跳上岸
+    }
+  }else{
+    player.vy -= G*dt;
+    if(player.vy < -20) player.vy = -20;
+    if(keys.Space && player.onGround) player.vy = JUMP;
+  }
+
+  // 分步移动，防止单帧位移超过 1 格穿透
+  var maxV = Math.max(Math.abs(player.vx), Math.abs(player.vy), Math.abs(player.vz));
+  var steps = Math.max(1, Math.ceil(maxV*dt/0.35));
+  var sdt = dt/steps;
+  player.onGround = false;
+  for(var i=0;i<steps;i++){
+    sweep('y', player.vy*sdt);
+    sweep('x', player.vx*sdt);
+    sweep('z', player.vz*sdt);
+  }
+  if(player.y < -24) respawn();               // 掉入虚空则重生
+}
+
+/* ---------- 8. 射线拾取（Amanatides & Woo 体素步进） ---------- */
+function raycast(ox, oy, oz, dx, dy, dz, maxD){
+  var x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
+  var sx = dx>0?1:-1, sy = dy>0?1:-1, sz = dz>0?1:-1;
+  var tdx = dx!==0 ? Math.abs(1/dx) : Infinity;
+  var tdy = dy!==0 ? Math.abs(1/dy) : Infinity;
+  var tdz = dz!==0 ? Math.abs(1/dz) : Infinity;
+  var tmx = dx!==0 ? (sx>0 ? x+1-ox : ox-x)*tdx : Infinity;
+  var tmy = dy!==0 ? (sy>0 ? y+1-oy : oy-y)*tdy : Infinity;
+  var tmz = dz!==0 ? (sz>0 ? z+1-oz : oz-z)*tdz : Infinity;
+  var fx=0, fy=0, fz=0, i, b;
+  for(i=0;i<256;i++){
+    b = getBlock(x,y,z);
+    if(b !== AIR && b !== WATER) return {x:x, y:y, z:z, fx:fx, fy:fy, fz:fz, type:b};
+    if(tmx < tmy && tmx < tmz){ if(tmx > maxD) return null; x += sx; tmx += tdx; fx=-sx; fy=0; fz=0; }
+    else if(tmy < tmz)        { if(tmy > maxD) return null; y += sy; tmy += tdy; fx=0; fy=-sy; fz=0; }
+    else                      { if(tmz > maxD) return null; z += sz; tmz += tdz; fx=0; fy=0; fz=-sz; }
+  }
+  return null;
+}
+function raycastFromCamera(){
+  var cp = Math.cos(player.pitch), sp = Math.sin(player.pitch);
+  var sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  return raycast(player.x, player.y+EYE, player.z,
+                 sy*cp, sp, -cy*cp, 6.5);
+}
+function intersectsPlayer(bx, by, bz){
+  return bx < player.x+P_HW && bx+1 > player.x-P_HW &&
+         by < player.y+P_H  && by+1 > player.y &&
+         bz < player.z+P_HW && bz+1 > player.z-P_HW;
+}
+
+/* ---------- 9. 输入与 UI ---------- */
+var HOTBAR = [
+  {t:GRASS,  name:'草方块', cls:'sw-grass'},
+  {t:DIRT,   name:'泥土',   cls:'sw-dirt'},
+  {t:STONE,  name:'石头',   cls:'sw-stone'},
+  {t:SAND,   name:'沙子',   cls:'sw-sand'},
+  {t:WOOD,   name:'木头',   cls:'sw-wood'},
+  {t:LEAVES, name:'树叶',   cls:'sw-leaves'},
+  {t:GLASS,  name:'玻璃',   cls:'sw-glass'}
+];
+var selIdx = 0;
+var hotbarEl = document.getElementById('hotbar');
+var slotEls = HOTBAR.map(function(b, i){
+  var d = document.createElement('div');
+  d.className = 'slot';
+  d.innerHTML = '<span class="num">'+(i+1)+'</span><div class="sw '+b.cls+'"></div>';
+  hotbarEl.appendChild(d);
+  return d;
+});
+function updateHotbarUI(){
+  for(var i=0;i<slotEls.length;i++) slotEls[i].classList.toggle('sel', i===selIdx);
+  blockNameEl.textContent = HOTBAR[selIdx].name;
+}
+updateHotbarUI();
+
+function lockPointer(){
+  try{
+    var p = canvas.requestPointerLock && canvas.requestPointerLock();
+    if(p && p.catch) p.catch(function(){});
+  }catch(e){}
+}
+document.getElementById('enterBtn').addEventListener('click', function(){
+  started = true;
+  overlayEl.classList.add('hidden');
+  lockPointer();
+});
+pauseEl.addEventListener('click', lockPointer);
+
+document.addEventListener('pointerlockchange', function(){
+  var locked = document.pointerLockElement === canvas;
+  if(locked){
+    pauseEl.classList.add('hidden');
+  }else if(started){
+    pauseEl.classList.remove('hidden');
+    keys = {};
+  }
+});
+document.addEventListener('pointerlockerror', function(){
+  if(started) pauseEl.classList.remove('hidden');
+});
+
+document.addEventListener('mousemove', function(e){
+  if(document.pointerLockElement !== canvas) return;
+  player.yaw += e.movementX * 0.0022;
+  player.pitch -= e.movementY * 0.0022;
+  var lim = 1.553; // 约 89 度
+  if(player.pitch >  lim) player.pitch =  lim;
+  if(player.pitch < -lim) player.pitch = -lim;
+});
+canvas.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+canvas.addEventListener('mousedown', function(e){
+  if(document.pointerLockElement !== canvas) return;
+  e.preventDefault();
+  var hit = raycastFromCamera();
+  if(!hit) return;
+  if(e.button === 0){                       // 左键破坏（基岩层除外）
+    if(hit.y === 0) return;
+    setBlock(hit.x, hit.y, hit.z, AIR);
+  }else if(e.button === 2){                 // 右键放置（不能放进自己身体）
+    var px = hit.x + hit.fx, py = hit.y + hit.fy, pz = hit.z + hit.fz;
+    var cur = getBlock(px, py, pz);
+    if(cur !== AIR && cur !== WATER) return;
+    if(intersectsPlayer(px, py, pz)) return;
+    setBlock(px, py, pz, HOTBAR[selIdx].t);
+  }
+});
+
+window.addEventListener('keydown', function(e){
+  keys[e.code] = true;
+  if(e.code === 'Space') e.preventDefault();
+  if(document.pointerLockElement !== canvas) return;
+  if(e.code === 'KeyF'){ player.fly = !player.fly; player.vy = 0; }
+  if(e.code.indexOf('Digit') === 0){
+    var n = +e.code.slice(5);
+    if(n >= 1 && n <= 7){ selIdx = n-1; updateHotbarUI(); }
+  }
+});
+window.addEventListener('keyup', function(e){ keys[e.code] = false; });
+window.addEventListener('blur', function(){ keys = {}; });
+window.addEventListener('wheel', function(e){
+  if(document.pointerLockElement !== canvas) return;
+  e.preventDefault();
+  selIdx = (selIdx + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length;
+  updateHotbarUI();
+}, {passive:false});
+
+/* ---------- 10. 渲染与主循环 ---------- */
+function resize(){
+  var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  var w = Math.floor(canvas.clientWidth * dpr) || 1;
+  var h = Math.floor(canvas.clientHeight * dpr) || 1;
+  if(canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
+}
+window.addEventListener('resize', resize);
+
+var target = null;               // 当前选中方块
+var fpsVal = 0, fpsFrames = 0, fpsTime = 0, infoTimer = 0;
+var lastTint = false;
+
+function drawScene(locked){
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(FOG[0], FOG[1], FOG[2], 1);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  /* 天空（先画，不写深度） */
+  gl.disable(gl.CULL_FACE);
+  gl.depthMask(false);
+  gl.useProgram(skyProg);
+  gl.disableVertexAttribArray(1);
+  gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+  gl.enableVertexAttribArray(skyLoc.aPos);
+  gl.vertexAttribPointer(skyLoc.aPos, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.depthMask(true);
+
+  /* 不透明地形 */
+  gl.useProgram(terrainProg);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.uniformMatrix4fv(terLoc.uMVP, false, MVP);
+  gl.uniform2f(terLoc.uFog, FOG_NEAR, FOG_FAR);
+  gl.uniform3f(terLoc.uFogColor, FOG[0], FOG[1], FOG[2]);
+  gl.enableVertexAttribArray(terLoc.aPos);
+  gl.enableVertexAttribArray(terLoc.aColor);
+  var i, ch;
+  for(i=0;i<chunks.length;i++){
+    ch = chunks[i];
+    if(!ch.nO) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbO);
+    gl.vertexAttribPointer(terLoc.aPos, 3, gl.FLOAT, false, 28, 0);
+    gl.vertexAttribPointer(terLoc.aColor, 4, gl.FLOAT, false, 28, 12);
+    gl.drawArrays(gl.TRIANGLES, 0, ch.nO);
+  }
+
+  /* 半透明（水 / 玻璃）：混合、不写深度、双面 */
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false);
+  gl.disable(gl.CULL_FACE);
+  for(i=0;i<chunks.length;i++){
+    ch = chunks[i];
+    if(!ch.nT) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, ch.vbT);
+    gl.vertexAttribPointer(terLoc.aPos, 3, gl.FLOAT, false, 28, 0);
+    gl.vertexAttribPointer(terLoc.aColor, 4, gl.FLOAT, false, 28, 12);
+    gl.drawArrays(gl.TRIANGLES, 0, ch.nT);
+  }
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+
+  /* 选中方块线框 */
+  if(locked && target){
+    gl.useProgram(lineProg);
+    gl.disableVertexAttribArray(1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+    gl.enableVertexAttribArray(lineLoc.aPos);
+    gl.vertexAttribPointer(lineLoc.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.uniformMatrix4fv(lineLoc.uMVP, false, MVP);
+    gl.uniform3f(lineLoc.uOffset, target.x, target.y, target.z);
+    gl.uniform4f(lineLoc.uColor, 0.03, 0.03, 0.03, 0.9);
+    gl.drawArrays(gl.LINES, 0, 24);
+  }
+}
+
+var lastT = performance.now ? performance.now() : Date.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  var rawDt = (now - lastT) / 1000;
+  lastT = now;
+  if(!(rawDt > 0) || rawDt > 1) rawDt = 0.016;  // 标签页切回时防跳变
+  var dt = Math.min(rawDt, 0.05);
+
+  resize();
+  var locked = document.pointerLockElement === canvas;
+
+  if(started && locked){
+    updatePlayer(dt);
+  }else if(!started){
+    player.yaw += dt * 0.04;   // 标题界面缓慢环视
+  }
+
+  // 相机与矩阵
+  var ex = player.x, ey = player.y + EYE, ez = player.z;
+  var cp = Math.cos(player.pitch), sp = Math.sin(player.pitch);
+  var sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  mat4Perspective(matProj, 70*Math.PI/180, canvas.width/canvas.height, 0.1, 400);
+  mat4LookAt(matView, ex, ey, ez, ex + sy*cp, ey + sp, ez - cy*cp);
+  mat4Mul(MVP, matProj, matView);
+
+  // 准星射线拾取
+  target = locked ? raycastFromCamera() : null;
+
+  // 水下滤镜
+  var under = getBlock(Math.floor(ex), Math.floor(ey), Math.floor(ez)) === WATER;
+  if(under !== lastTint){ waterTintEl.classList.toggle('hidden', !under); lastTint = under; }
+
+  drawScene(locked);
+
+  // HUD 信息
+  fpsFrames++; fpsTime += rawDt; infoTimer += rawDt;
+  if(fpsTime >= 0.5){ fpsVal = Math.round(fpsFrames/fpsTime); fpsFrames = 0; fpsTime = 0; }
+  if(infoTimer >= 0.2){
+    infoTimer = 0;
+    infoEl.innerHTML =
+      'FPS: ' + fpsVal +
+      '<br>坐标: ' + Math.floor(player.x) + ' , ' + Math.floor(player.y) + ' , ' + Math.floor(player.z) +
+      '<br>模式: ' + (player.fly ? '飞行' : '行走');
+  }
+}
+
+/* ---------- 启动 ---------- */
+generateWorld();
+buildAllChunks();
+findSpawn();
+respawn();
+gl.lineWidth(2);
+/* 循环延迟启动：开场遮罩关闭后才开始渲染，避免遮罩期高负载重绘 */
+(function(){var __fn=frame;function __boot(){var ovx=document.getElementById("overlay")||document.getElementById("intro");var gone=!ovx||ovx.classList.contains("hidden")||ovx.classList.contains("hide")||ovx.classList.contains("gone")||ovx.style.display==="none";if(gone){requestAnimationFrame(__fn);}else{setTimeout(__boot,150);}}__boot();})();
+
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a42450ecf7167e',t:'MTc4OTI3MDk0NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><!-- source: deepdemos.top | author: public | title: 方块世界 · 网页版迷你体素沙盒 -->
+</body>
+</html>

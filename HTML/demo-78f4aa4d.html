@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-78f4aa4d/va94427d29c90/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渝天 2147 · 云端山城 / CHONGQING NEO-TERRACE</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+  html,body{margin:0;height:100%;background:#05060f;overflow:hidden;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;}
+  #c{display:block;width:100vw;height:100vh;cursor:crosshair;}
+  .glassy{background:rgba(8,10,24,.42);backdrop-filter:blur(10px);border:1px solid rgba(120,220,255,.18);}
+  .btn{transition:all .18s ease;letter-spacing:.08em}
+  .btn:hover{background:rgba(60,230,255,.18);border-color:rgba(120,240,255,.7);color:#d8fbff}
+  .btn.off{opacity:.38;filter:saturate(.2)}
+  .neon{text-shadow:0 0 6px rgba(60,230,255,.85),0 0 22px rgba(60,230,255,.35)}
+  .neonm{text-shadow:0 0 6px rgba(255,60,150,.85),0 0 22px rgba(255,60,150,.35)}
+  .vt{writing-mode:vertical-rl;letter-spacing:.35em}
+  #boot{transition:opacity .8s ease}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- 左上 标题 -->
+<div class="fixed top-5 left-5 select-none pointer-events-none">
+  <div class="text-[11px] tracking-[.45em] text-cyan-300/70">CHONGQING · NEO-TERRACE ARCOLOGY</div>
+  <div class="text-4xl md:text-5xl font-bold text-white neon mt-1">渝天 <span class="text-cyan-300">2147</span></div>
+  <div class="text-[12px] text-fuchsia-300/80 neonm mt-1 tracking-[.2em]">云端山城 · 八层立交 · 雾都电烟</div>
+</div>
+
+<!-- 右上 控制 -->
+<div class="fixed top-5 right-5 flex flex-col gap-2 items-end select-none">
+  <div class="glassy rounded-xl px-3 py-2 flex gap-2 text-[12px] text-cyan-200/90">
+    <button id="bRain" class="btn px-3 py-1 rounded-lg border border-cyan-400/40">酸雨</button>
+    <button id="bFog"  class="btn px-3 py-1 rounded-lg border border-cyan-400/40">江雾</button>
+    <button id="bHolo" class="btn px-3 py-1 rounded-lg border border-cyan-400/40">全息</button>
+    <button id="bPan"  class="btn px-3 py-1 rounded-lg border border-cyan-400/40">巡航</button>
+  </div>
+  <div class="glassy rounded-xl px-3 py-2 text-[11px] text-cyan-100/70 w-[228px] leading-relaxed">
+    移动鼠标 = 视差换位<br>江面标高 <span class="text-cyan-300">+168.4 m</span> · 崖顶 <span class="text-cyan-300">+402 m</span><br>
+    索道跨度 <span class="text-fuchsia-300">1,166 m</span> · 轻轨 2 号线穿楼段
+  </div>
+</div>
+
+<!-- 底部 图例 -->
+<div class="fixed bottom-4 left-5 right-5 flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-cyan-200/55 select-none pointer-events-none">
+  <span>① 吊脚楼台地 / STILT TERRACES</span>
+  <span>② 穿楼轨道 / THROUGH-BLOCK RAIL</span>
+  <span>③ 跨江斜拉桥 / CABLE-STAYED SPAN</span>
+  <span>④ 长江索道 / AERIAL TRAMWAY</span>
+  <span>⑤ 崖壁升降筒 / CLIFF LIFT</span>
+  <span class="ml-auto text-fuchsia-300/60">FPS <span id="fps">--</span></span>
+</div>
+
+<div id="boot" class="fixed inset-0 bg-[#05060f] flex items-center justify-center z-50">
+  <div class="text-cyan-300 text-sm tracking-[.4em] animate-pulse">正在生成山城地形 …</div>
+</div>
+
+<script>
+(()=>{
+const VW=1920, VH=1080;
+const cvs=document.getElementById('c'), ctx=cvs.getContext('2d');
+let CW=0,CH=0,SC=1,OX=0,OY=0,DPR=1;
+
+/* ---------- utils ---------- */
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ss=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let R=mulberry32(20470101);
+const rr=(a,b)=>a+R()*(b-a);
+const ri=(a,b)=>Math.floor(rr(a,b+1));
+const pick=a=>a[Math.floor(R()*a.length)];
+
+/* ---------- 地形基准函数（全局唯一真相） ---------- */
+// 岸线：左远(高/小) -> 右近(低/大)
+function shoreY(x){ return 700 + 190*ss((x-190)/1500) + 4*Math.sin(x*0.013) + 3*Math.sin(x*0.031); }
+// 崖顶平台线
+function cliffTop(x){ return shoreY(x) - (200 + 45*Math.sin(x*0.0032+1.1) + 25*Math.sin(x*0.0091)); }
+// 局部尺度（越近越大）
+function scaleAt(x){ return 0.55 + 0.65*ss((x-150)/1650); }
+
+/* ---------- 离屏层 ---------- */
+function mk(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
+const L_sky=mk(VW,VH), L_far=mk(VW,VH), L_mid=mk(VW,VH), L_near=mk(VW,VH), L_refl=mk(VW,VH);
+
+function rgbaAlpha(color,a){
+  const m=String(color).match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*[\d.]+)?\s*\)/i);
+  return m ? `rgba(${m[1]},${m[2]},${m[3]},${a})` : color;
+}
+function glowSprite(color,size=128){
+  const c=mk(size,size), g=c.getContext('2d');
+  const rad=g.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2);
+  rad.addColorStop(0,color); rad.addColorStop(.28,rgbaAlpha(color,0.55));
+  rad.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=rad; g.fillRect(0,0,size,size); return c;
+}
+const GL={
+  cyan:glowSprite('rgba(60,230,255,0.95)'), mag:glowSprite('rgba(255,60,150,0.95)'),
+  amber:glowSprite('rgba(255,178,80,0.95)'), white:glowSprite('rgba(255,255,255,0.95)'),
+  red:glowSprite('rgba(255,70,50,0.95)'), jade:glowSprite('rgba(70,255,190,0.95)')
+};
+function glow(c,sp,x,y,r,a=1){c.globalAlpha=a;c.drawImage(sp,x-r,y-r,r*2,r*2);c.globalAlpha=1;}
+
+const FOG=(()=>{const c=mk(512,160),g=c.getContext('2d');
+  const rad=g.createRadialGradient(256,80,0,256,80,256);
+  rad.addColorStop(0,'rgba(170,200,235,0.55)');rad.addColorStop(.5,'rgba(150,180,220,0.22)');rad.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=rad;g.save();g.translate(256,80);g.scale(1,0.42);g.translate(-256,-80);g.fillRect(0,0,512,160);g.restore();return c;})();
+
+/* =======================================================
+   1. 天空层
+======================================================= */
+function buildSky(){
+  const c=L_sky.getContext('2d');
+  const g=c.createLinearGradient(0,0,0,760);
+  g.addColorStop(0,'#05061a'); g.addColorStop(.30,'#111036');
+  g.addColorStop(.55,'#2a1450'); g.addColorStop(.78,'#591d55');
+  g.addColorStop(.92,'#8e2c50'); g.addColorStop(1,'#c25a4e');
+  c.fillStyle=g; c.fillRect(0,0,VW,780);
+
+  // 星
+  for(let i=0;i<420;i++){const x=rr(0,VW),y=rr(0,560),s=rr(.4,1.5);
+    c.globalAlpha=rr(.15,.85)*(1-y/700); c.fillStyle='#dff3ff'; c.fillRect(x,y,s,s);}
+  c.globalAlpha=1;
+
+  // 月 + 轨道环（巨构）
+  const mx=430,my=205,mr=76;
+  glow(c,GL.white,mx,my,240,.16);
+  c.save(); c.beginPath(); c.arc(mx,my,mr,0,7); c.closePath(); c.clip();
+  c.fillStyle='#e9e4f5'; c.fillRect(mx-mr,my-mr,mr*2,mr*2);
+  c.fillStyle='rgba(150,140,180,.35)';
+  for(let i=0;i<11;i++){c.beginPath();c.arc(mx+rr(-60,60),my+rr(-60,60),rr(5,18),0,7);c.fill();}
+  const sh=c.createLinearGradient(mx-mr,0,mx+mr,0);
+  sh.addColorStop(0,'rgba(10,8,26,0)');sh.addColorStop(1,'rgba(10,8,26,.55)');
+  c.fillStyle=sh;c.fillRect(mx-mr,my-mr,mr*2,mr*2); c.restore();
+  // 轨道环
+  c.save(); c.translate(mx,my); c.rotate(-0.32); c.scale(1,0.19);
+  c.lineWidth=6; c.strokeStyle='rgba(190,220,255,.32)'; c.beginPath(); c.arc(0,0,170,0,7); c.stroke();
+  c.lineWidth=2; c.strokeStyle='rgba(120,240,255,.55)'; c.beginPath(); c.arc(0,0,150,0,7); c.stroke();
+  c.restore();
+  for(let i=0;i<26;i++){const a=i/26*6.283; glow(c,GL.cyan,mx+Math.cos(a)*170,my+Math.sin(a)*170*0.19-Math.sin(0.32)*0,2.6,.5);}
+
+  // 高空云带
+  for(let i=0;i<26;i++){const x=rr(-100,VW),y=rr(180,640),w=rr(240,760);
+    c.globalAlpha=rr(.05,.16)*ss((y-140)/500);
+    c.drawImage(FOG,x-w/2,y-40,w,80);}
+  c.globalAlpha=1;
+
+  // 远山（三重）
+  const ridges=[{y:612,amp:92,col:'#231a44',f:.0022},{y:648,amp:66,col:'#1b1638',f:.0034},{y:676,amp:40,col:'#15122c',f:.0052}];
+  ridges.forEach((rg,k)=>{
+    c.beginPath(); c.moveTo(0,760);
+    for(let x=0;x<=VW;x+=8){
+      const y=rg.y - Math.abs(Math.sin(x*rg.f+k*2.1))*rg.amp - Math.sin(x*rg.f*2.7+k)*rg.amp*.28;
+      c.lineTo(x,y);
+    }
+    c.lineTo(VW,760); c.closePath(); c.fillStyle=rg.col; c.fill();
+    // 山脊塔灯
+    if(k<2) for(let i=0;i<8;i++){const x=rr(0,VW);
+      const y=rg.y-Math.abs(Math.sin(x*rg.f+k*2.1))*rg.amp-Math.sin(x*rg.f*2.7+k)*rg.amp*.28;
+      glow(c,GL.red,x,y-3,5,.35);}
+  });
+  // 地平雾
+  const hz=c.createLinearGradient(0,620,0,720);
+  hz.addColorStop(0,'rgba(210,150,170,0)');hz.addColorStop(1,'rgba(226,160,165,.30)');
+  c.fillStyle=hz;c.fillRect(0,620,VW,110);
+}
+
+/* =======================================================
+   2. 远岸天际线（对岸江北 / 河湾深处）
+======================================================= */
+const farLights=[];
+function buildFar(){
+  const c=L_far.getContext('2d');
+  const base=700;
+  for(let i=0;i<64;i++){
+    const w=rr(26,74), x=rr(-40,1180), h=rr(70,300);
+    const y=base-h;
+    c.fillStyle=`rgba(${ri(26,40)},${ri(30,52)},${ri(62,90)},0.95)`;
+    c.fillRect(x,y,w,h);
+    c.fillStyle='rgba(120,190,255,0.07)'; c.fillRect(x,y,w,3);
+    for(let wy=y+8;wy<base-6;wy+=9){
+      for(let wx=x+4;wx<x+w-4;wx+=7){
+        if(R()<0.32){c.fillStyle=R()<.75?'rgba(140,200,255,0.35)':'rgba(255,190,120,0.32)';c.fillRect(wx,wy,3,4);}
+      }
+    }
+    if(R()<.3){glow(c,GL.red,x+w/2,y-2,6,.45);}
+    if(R()<.22){c.fillStyle='rgba(120,220,255,.35)';c.fillRect(x+w/2-1,y-rr(20,54),2,rr(20,54));}
+  }
+  // 远处跨江桥（左侧河湾）
+  c.strokeStyle='rgba(150,200,255,.30)'; c.lineWidth=3;
+  c.beginPath(); c.moveTo(-20,690); c.quadraticCurveTo(230,662,520,694); c.stroke();
+  for(let i=0;i<7;i++){const t=i/6,x=lerp(-20,520,t),y=lerp(690,694,t)-Math.sin(t*Math.PI)*24;
+    c.fillStyle='rgba(120,190,255,.25)'; c.fillRect(x,y,2,700-y);
+    glow(c,GL.amber,x,y-2,4,.35);}
+  // 蓝雾压远
+  const g=c.createLinearGradient(0,380,0,704);
+  g.addColorStop(0,'rgba(90,120,190,0.12)');g.addColorStop(1,'rgba(150,170,215,0.42)');
+  c.fillStyle=g; c.fillRect(0,380,1220,326);
+  farLights.length=0;
+  for(let i=0;i<50;i++) farLights.push({x:rr(0,1150),y:rr(430,690),p:rr(0,6.28),c:R()<.6?GL.cyan:GL.amber});
+}
+
+/* =======================================================
+   3. 半岛巨塔层
+======================================================= */
+const towers=[], midWindows=[], aviation=[], holoRings=[];
+function buildMid(){
+  const c=L_mid.getContext('2d');
+  let x=150;
+  while(x<VW+60){
+    const sc=scaleAt(x);
+    const w=rr(52,118)*lerp(.8,1.25,sc);
+    const bot=cliffTop(x+w/2)+26;
+    const h=rr(230,560)*lerp(.75,1.3,sc);
+    towers.push({x,w,bot,top:bot-h,sc});
+    x+=w+rr(10,46);
+  }
+  towers.sort((a,b)=>a.sc-b.sc); // 远的先画
+  towers.forEach(t=>{
+    const {x,w,bot,top}=t;
+    // 主体
+    const g=c.createLinearGradient(x,0,x+w,0);
+    g.addColorStop(0,'#0d1026'); g.addColorStop(.42,'#1a2040'); g.addColorStop(1,'#080a1c');
+    c.fillStyle=g; c.fillRect(x,top,w,bot-top);
+    // 退台
+    if(R()<.45){const sw=w*rr(.45,.72), sx=x+(w-sw)/2, sh2=rr(40,120);
+      c.fillStyle='#141834'; c.fillRect(sx,top-sh2,sw,sh2); t.top=top-sh2;}
+    // 竖向霓虹肋
+    const ribs=ri(1,3);
+    for(let i=0;i<ribs;i++){
+      const rx=x+rr(4,w-6), col=pick(['rgba(60,230,255,.75)','rgba(255,60,150,.7)','rgba(70,255,190,.6)']);
+      c.fillStyle=col; c.fillRect(rx,t.top+8,2,bot-t.top-14);
+    }
+    // 横向光带
+    for(let y=t.top+rr(20,60); y<bot-12; y+=rr(38,86)){
+      c.fillStyle=R()<.5?'rgba(60,220,255,.30)':'rgba(255,120,180,.22)';
+      c.fillRect(x,y,w,2);
+    }
+    // 窗
+    for(let y=t.top+10;y<bot-8;y+=8){
+      for(let wx=x+4;wx<x+w-5;wx+=6){
+        if(R()<0.34){
+          const on=R();
+          c.fillStyle = on<.62?'rgba(255,205,140,0.55)': on<.86?'rgba(120,215,255,0.5)':'rgba(255,110,170,0.45)';
+          c.fillRect(wx,y,3,4);
+          if(R()<0.012&&midWindows.length<190) midWindows.push({x:wx,y,p:rr(0,6.28),s:rr(.5,2.2)});
+        }
+      }
+    }
+    // 顶部构件
+    if(R()<.5){c.fillStyle='#0a0d20';c.fillRect(x+w*.3,t.top-rr(30,90),w*.08,rr(30,90));}
+    if(R()<.35){c.strokeStyle='rgba(120,230,255,.4)';c.lineWidth=2;c.beginPath();
+      c.ellipse(x+w/2,t.top+4,w*.75,9,0,0,7);c.stroke();}
+    aviation.push({x:x+w/2,y:t.top-2,p:rr(0,6.28)});
+    if(R()<.2) holoRings.push({x:x+w/2,y:t.top+rr(40,130),r:w*rr(.9,1.5),p:rr(0,6.28)});
+  });
+  // 空中连廊（同高塔之间）
+  for(let i=0;i<towers.length-1;i++){
+    const a=towers[i], b=towers[i+1];
+    if(Math.abs(a.top-b.top)<130 && b.x-(a.x+a.w)<130 && R()<.5){
+      const y=Math.max(a.top,b.top)+rr(50,150);
+      const x1=a.x+a.w, x2=b.x;
+      c.fillStyle='#151a38'; c.fillRect(x1,y,x2-x1,13);
+      c.fillStyle='rgba(120,230,255,.55)'; c.fillRect(x1,y+3,x2-x1,2);
+      for(let k=x1+5;k<x2;k+=11){c.fillStyle='rgba(255,205,140,.5)';c.fillRect(k,y+6,4,4);}
+      // 吊索
+      c.strokeStyle='rgba(140,190,230,.25)';c.lineWidth=1;
+      c.beginPath();c.moveTo(x1+4,y);c.lineTo(x1+4,Math.max(a.top,b.top)+8);
+      c.moveTo(x2-4,y);c.lineTo(x2-4,Math.max(a.top,b.top)+8);c.stroke();
+    }
+  }
+  // 大气透视
+  const g2=c.createLinearGradient(0,150,0,860);
+  g2.addColorStop(0,'rgba(120,120,200,0.05)');g2.addColorStop(1,'rgba(150,160,210,0.26)');
+  c.fillStyle=g2;c.globalCompositeOperation='source-atop';c.fillRect(0,0,VW,VH);c.globalCompositeOperation='source-over';
+}
+
+/* =======================================================
+   4. 崖壁 + 吊脚楼台地 + 轨道 + 索道站 + 升降筒
+======================================================= */
+const lanterns=[], nearWindows=[], signs=[];
+const RAIL={ax:150,ay:562,bx:1600,by:792};     // 轻轨梁（直线）
+const THRU={x:762,w:182};                       // 穿楼段
+const TRAM={ax:140,ay:412,bx:1502,by:576,sag:96}; // 索道
+const LIFT={x:1704,w:34};                       // 崖壁升降筒
+function railY(x){ return RAIL.ay+(x-RAIL.ax)*(RAIL.by-RAIL.ay)/(RAIL.bx-RAIL.ax); }
+function tramPt(t){ const x=lerp(TRAM.ax,TRAM.bx,t), y=lerp(TRAM.ay,TRAM.by,t)+Math.sin(Math.PI*t)*TRAM.sag; return {x,y}; }
+
+function tileRoof(c,x,y,w,h,col,edge){
+  c.beginPath();
+  c.moveTo(x-w*.14,y);
+  c.quadraticCurveTo(x+w*.12,y-h*.62,x+w*.5,y-h);
+  c.quadraticCurveTo(x+w*.88,y-h*.62,x+w*1.14,y);
+  c.quadraticCurveTo(x+w*.5,y-h*.16,x-w*.14,y);
+  c.closePath(); c.fillStyle=col; c.fill();
+  if(edge){c.strokeStyle=edge;c.lineWidth=1.2;c.stroke();}
+}
+
+function buildNear(){
+  const c=L_near.getContext('2d');
+  // ---- 崖体 ----
+  c.beginPath(); c.moveTo(170,shoreY(170));
+  for(let x=170;x<=VW;x+=10) c.lineTo(x,cliffTop(x));
+  c.lineTo(VW,VH); c.lineTo(170,VH); c.closePath();
+  const rg=c.createLinearGradient(0,480,0,980);
+  rg.addColorStop(0,'#241f33'); rg.addColorStop(.45,'#191527'); rg.addColorStop(1,'#0c0a17');
+  c.fillStyle=rg; c.fill();
+  c.save(); c.clip();
+  // 岩层纹理
+  for(let i=0;i<170;i++){
+    const x=rr(170,VW), y=rr(cliffTop(x),shoreY(x)+20), w=rr(30,170);
+    c.strokeStyle=`rgba(${ri(60,105)},${ri(55,95)},${ri(80,130)},${rr(.05,.2)})`;
+    c.lineWidth=rr(1,4); c.beginPath(); c.moveTo(x,y); c.quadraticCurveTo(x+w/2,y+rr(-9,9),x+w,y+rr(-5,5)); c.stroke();
+  }
+  // 崖壁灯槽 / 管线
+  for(let i=0;i<16;i++){
+    const x=rr(200,VW), y0=rr(cliffTop(x)+40,shoreY(x)-40);
+    c.strokeStyle=R()<.5?'rgba(60,220,255,.22)':'rgba(255,120,170,.18)'; c.lineWidth=2;
+    c.beginPath(); c.moveTo(x,y0); c.lineTo(x+rr(-40,40),y0+rr(30,90)); c.stroke();
+  }
+  c.restore();
+
+  // ---- 台地 + 吊脚楼（自上而下：上层先画，下层在前遮挡） ----
+  const TIERS=5;
+  for(let i=0;i<TIERS;i++){
+    let x=175+ (TIERS-i)*6;
+    while(x<VW+80){
+      const top=cliffTop(x), sh=shoreY(x), band=sh-top;
+      const gap=band/(TIERS+0.35);
+      const baseY=top+gap*(i+0.95);
+      const sc=scaleAt(x);
+      const w=gap*rr(1.05,2.0);
+      const bh=gap*rr(0.95,1.25);
+      const modern = R()<0.26;
+
+      // 挑出的支柱（吊脚）
+      c.strokeStyle='rgba(44,36,52,.95)'; c.lineWidth=Math.max(1.6,2.6*sc);
+      for(let k=0;k<4;k++){
+        const px=x+w*(0.1+0.26*k);
+        c.beginPath(); c.moveTo(px,baseY); c.lineTo(px+rr(-2,2),baseY+gap*rr(.75,1.15)); c.stroke();
+      }
+      // 平台板
+      c.fillStyle='#2a2337'; c.fillRect(x-2,baseY-3,w+4,4*sc+2);
+
+      if(!modern){
+        // 木构楼身
+        const g=c.createLinearGradient(x,baseY-bh,x,baseY);
+        g.addColorStop(0,'#3b2b30'); g.addColorStop(1,'#241a22');
+        c.fillStyle=g; c.fillRect(x,baseY-bh,w,bh);
+        // 窗（暖）
+        const cols=Math.max(1,Math.floor(w/(11*sc)));
+        for(let k=0;k<cols;k++){
+          const wx=x+3+k*(w-6)/cols, wy=baseY-bh*0.72, ww=Math.max(3,(w-6)/cols-3*sc), wh=bh*0.34;
+          if(R()<.78){
+            c.fillStyle='rgba(255,182,96,0.72)'; c.fillRect(wx,wy,ww,wh);
+            glow(c,GL.amber,wx+ww/2,wy+wh/2,ww*1.5,.28);
+            if(R()<.16&&nearWindows.length<150) nearWindows.push({x:wx,y:wy,w:ww,h:wh,p:rr(0,6.3)});
+          }
+        }
+        // 瓦顶
+        tileRoof(c,x,baseY-bh,w,bh*0.52,'#1d1a24','rgba(120,110,140,.35)');
+        // 屋脊霓虹（新旧融合）
+        if(R()<.45){c.strokeStyle=pick(['rgba(60,230,255,.55)','rgba(255,80,150,.5)','rgba(70,255,190,.45)']);
+          c.lineWidth=1.4;c.beginPath();c.moveTo(x-w*.1,baseY-bh-1);
+          c.quadraticCurveTo(x+w*.5,baseY-bh-bh*.55,x+w*1.1,baseY-bh-1);c.stroke();}
+        // 檐下红灯笼
+        const ln=ri(1,3);
+        for(let k=0;k<ln;k++){
+          const lx=x+w*rr(.15,.85), ly=baseY-bh+rr(4,10);
+          lanterns.push({x:lx,y:ly+8*sc,r:3.4*sc,p:rr(0,6.3)});
+          c.strokeStyle='rgba(90,70,60,.8)';c.lineWidth=1;c.beginPath();c.moveTo(lx,ly);c.lineTo(lx,ly+7*sc);c.stroke();
+        }
+      }else{
+        // 现代舱体模块
+        const g=c.createLinearGradient(x,baseY-bh,x,baseY);
+        g.addColorStop(0,'#22304a'); g.addColorStop(1,'#111a2c');
+        c.fillStyle=g;
+        c.beginPath(); const r2=Math.min(bh*.3,10*sc);
+        c.roundRect(x,baseY-bh,w,bh,r2); c.fill();
+        c.strokeStyle=pick(['rgba(60,230,255,.7)','rgba(255,70,150,.6)']); c.lineWidth=1.4; c.stroke();
+        c.fillStyle='rgba(150,230,255,0.5)'; c.fillRect(x+w*.12,baseY-bh*.7,w*.76,bh*.3);
+        glow(c,GL.cyan,x+w/2,baseY-bh*.55,w*.7,.18);
+      }
+      // 台地间挡墙
+      c.fillStyle='rgba(14,12,22,.55)'; c.fillRect(x-2,baseY+2,w+4,gap*0.45);
+      x+=w+rr(2,gap*0.5);
+    }
+    // 台地串灯
+    let lx=200;
+    while(lx<VW){
+      const top=cliffTop(lx),sh=shoreY(lx),gap=(sh-top)/(TIERS+.35);
+      const y=top+gap*(i+0.95)-gap*0.15, seg=rr(70,150);
+      c.strokeStyle='rgba(255,190,120,.22)';c.lineWidth=1;
+      c.beginPath();c.moveTo(lx,y);c.quadraticCurveTo(lx+seg/2,y+8,lx+seg,y);c.stroke();
+      for(let k=1;k<6;k++){const t=k/6;const px=lx+seg*t, py=y+Math.sin(Math.PI*t)*8;
+        glow(c,GL.amber,px,py,3,.35);}
+      lx+=seg+rr(30,90);
+    }
+  }
+
+  // ---- 十八梯：之字形长梯 ----
+  (function stairs(){
+    const x0=1160, top=cliffTop(x0), sh=shoreY(x0);
+    let y=sh+4, dir=1, x=x0;
+    c.lineWidth=3;
+    while(y>top+16){
+      const dx=rr(46,74)*dir, dy=-rr(34,50);
+      c.strokeStyle='rgba(190,190,210,.30)';
+      c.beginPath();c.moveTo(x,y);c.lineTo(x+dx,y+dy);c.stroke();
+      // 台阶
+      c.strokeStyle='rgba(220,225,240,.14)'; c.lineWidth=1;
+      for(let k=0;k<7;k++){const t=k/7;c.beginPath();
+        c.moveTo(x+dx*t,y+dy*t);c.lineTo(x+dx*t+5,y+dy*t+5);c.stroke();}
+      c.lineWidth=3;
+      glow(c,GL.amber,x+dx,y+dy,7,.5);
+      x+=dx;y+=dy;dir*=-1;
+    }
+  })();
+
+  // ---- 轻轨高架梁 + 桥墩（穿楼建筑之前绘制） ----
+  (function rail(){
+    c.strokeStyle='#2b3350'; c.lineWidth=13;
+    c.beginPath(); c.moveTo(RAIL.ax-60,railY(RAIL.ax-60)); c.lineTo(RAIL.bx+60,railY(RAIL.bx+60)); c.stroke();
+    c.strokeStyle='rgba(90,180,220,.35)'; c.lineWidth=2;
+    c.beginPath(); c.moveTo(RAIL.ax-60,railY(RAIL.ax-60)-6); c.lineTo(RAIL.bx+60,railY(RAIL.bx+60)-6); c.stroke();
+    for(let x=RAIL.ax-40;x<RAIL.bx+60;x+=112){
+      if(x>THRU.x-30&&x<THRU.x+THRU.w+30) continue;
+      const y=railY(x), sc=scaleAt(x);
+      const top=cliffTop(x),sh=shoreY(x),gap=(sh-top)/5.35;
+      const foot=Math.min(sh-6, y+gap*rr(1.2,2.4));
+      c.fillStyle='#222a42';
+      c.beginPath();c.moveTo(x-7*sc,y+4);c.lineTo(x+7*sc,y+4);c.lineTo(x+10*sc,foot);c.lineTo(x-10*sc,foot);c.closePath();c.fill();
+      c.fillStyle='rgba(60,220,255,.25)';c.fillRect(x-1,y+6,2,foot-y-6);
+    }
+  })();
+
+  // ---- 穿楼住宅塔（轨道从中穿过） ----
+  (function through(){
+    const bx=THRU.x,bw=THRU.w, ry=railY(bx+bw/2);
+    const bTop=cliffTop(bx+bw/2)-58, bBot=shoreY(bx+bw/2)-6;
+    const g=c.createLinearGradient(bx,bTop,bx+bw,bBot);
+    g.addColorStop(0,'#232a44'); g.addColorStop(.5,'#161b30'); g.addColorStop(1,'#0e1122');
+    c.fillStyle=g; c.fillRect(bx,bTop,bw,bBot-bTop);
+    c.strokeStyle='rgba(120,200,240,.25)';c.lineWidth=1.5;c.strokeRect(bx,bTop,bw,bBot-bTop);
+    for(let y=bTop+10;y<bBot-10;y+=15){
+      if(Math.abs(y-ry)<26) continue;
+      for(let wx=bx+8;wx<bx+bw-10;wx+=15){
+        if(R()<.7){c.fillStyle=R()<.7?'rgba(255,196,120,.6)':'rgba(130,220,255,.5)';c.fillRect(wx,y,9,7);}
+      }
+      c.fillStyle='rgba(255,255,255,.05)';c.fillRect(bx,y+10,bw,1);
+    }
+    // 洞口（两侧）
+    const hh=30;
+    c.fillStyle='#05060c'; c.fillRect(bx-2,ry-hh/2-6,bw+4,hh+12);
+    c.strokeStyle='rgba(60,230,255,.65)';c.lineWidth=2;
+    c.strokeRect(bx-2,ry-hh/2-6,bw+4,hh+12);
+    glow(c,GL.cyan,bx+2,ry,34,.35); glow(c,GL.cyan,bx+bw-2,ry,34,.35);
+    // 楼顶设备与站台雨棚
+    c.fillStyle='#2a3252'; c.fillRect(bx+10,bTop-16,bw-20,16);
+    glow(c,GL.mag,bx+bw/2,bTop-20,40,.3);
+    signs.push({x:bx+bw-26,y:bTop+34,txt:'李子坝',col:'#ff3d8b',size:21,layer:'near',sp:1.05});
+  })();
+
+  // ---- 索道站（崖顶） ----
+  (function tramStation(){
+    const sx=1430,sw=180, top=576-42, bot=cliffTop(1520)+30;
+    c.fillStyle='#1a2138'; c.fillRect(sx,top,sw,bot-top);
+    c.strokeStyle='rgba(120,220,255,.45)';c.lineWidth=2;c.strokeRect(sx,top,sw,bot-top);
+    c.fillStyle='rgba(120,225,255,.22)';c.fillRect(sx+8,top+12,sw-16,44);
+    // 站房支柱落到台地
+    for(let k=0;k<3;k++){const px=sx+18+k*(sw-36)/2;
+      c.fillStyle='#20263c';c.fillRect(px-5,bot,10,shoreY(px)-bot-40);}
+    // 出线口
+    c.fillStyle='#0a0e1a'; c.fillRect(sx-14,top+26,20,26);
+    glow(c,GL.cyan,sx+sw/2,top+30,90,.28);
+    signs.push({x:sx+sw-34,y:top+72,txt:'索道',col:'#3ce6ff',size:24,layer:'near',sp:1.08});
+  })();
+
+  // ---- 崖壁升降筒 ----
+  (function lift(){
+    const x=LIFT.x,w=LIFT.w, top=cliffTop(x)-34, bot=shoreY(x)+6;
+    c.fillStyle='rgba(90,160,200,.12)'; c.fillRect(x,top,w,bot-top);
+    c.strokeStyle='rgba(110,220,255,.5)'; c.lineWidth=2; c.strokeRect(x,top,w,bot-top);
+    for(let y=top+14;y<bot;y+=26){c.fillStyle='rgba(110,220,255,.14)';c.fillRect(x,y,w,2);}
+    c.fillStyle='#1b2238'; c.fillRect(x-12,top-22,w+24,24);
+    glow(c,GL.cyan,x+w/2,top-10,40,.3);
+  })();
+
+  // ---- 江岸码头 / 趸船平台 ----
+  (function docks(){
+    for(let i=0;i<7;i++){
+      const x=rr(420,1880), y=shoreY(x)-4, sc=scaleAt(x);
+      const w=rr(50,120)*sc, h=rr(9,15)*sc;
+      c.fillStyle='#1a1726'; c.fillRect(x,y-h,w,h);
+      c.fillStyle='rgba(255,180,110,.5)'; c.fillRect(x,y-h,w,2);
+      for(let k=0;k<3;k++) glow(c,GL.amber,x+w*(k+.5)/3,y-h-3,7*sc,.4);
+      // 缆桩与跳板
+      c.strokeStyle='rgba(150,150,170,.35)';c.lineWidth=2*sc;
+      c.beginPath();c.moveTo(x+w*.2,y-h);c.lineTo(x-rr(14,34)*sc,y-h+rr(6,14)*sc);c.stroke();
+    }
+  })();
+
+  // 近层大气压暗（顶部略暗，底部保留）
+  const g3=c.createLinearGradient(0,400,0,1000);
+  g3.addColorStop(0,'rgba(120,140,200,0.12)');g3.addColorStop(1,'rgba(90,110,170,0.05)');
+  c.fillStyle=g3;c.globalCompositeOperation='source-atop';c.fillRect(0,0,VW,VH);c.globalCompositeOperation='source-over';
+
+  // 招牌（动态绘制，此处仅登记）
+  signs.push(
+    {x:1868,y:470,txt:'洪崖洞',col:'#ffb347',size:30,layer:'near',sp:1.1},
+    {x:262, y:520,txt:'朝天门',col:'#3ce6ff',size:22,layer:'near',sp:1.05},
+    {x:1010,y:560,txt:'麻辣火锅',col:'#ff3d3d',size:20,layer:'near',sp:1.05},
+    {x:1330,y:640,txt:'解放碑',col:'#46ffb4',size:19,layer:'near',sp:1.05},
+    {x:600, y:600,txt:'雾都',col:'#c8a6ff',size:18,layer:'near',sp:1.05},
+    {x:1690,y:560,txt:'山城步道',col:'#ffd27a',size:17,layer:'near',sp:1.05}
+  );
+  towers.slice(-9).forEach((t,i)=>{
+    if(i%2===0) signs.push({x:t.x+t.w-14,y:t.top+60,txt:pick(['云端','渝','天际','数据','龙门','九街']),
+      col:pick(['#3ce6ff','#ff3d8b','#46ffb4','#ffb347']),size:17,layer:'mid',sp:1.05});
+  });
+}
+
+/* ---------- 倒影源合成 ---------- */
+function buildRefl(){
+  const c=L_refl.getContext('2d');
+  c.drawImage(L_far,0,0); c.drawImage(L_mid,0,0); c.drawImage(L_near,0,0);
+}
+
+/* =======================================================
+   动态对象
+======================================================= */
+const state={rain:true,fog:true,holo:true,pan:true};
+let mx=0.5,my=0.5, tmx=0.5,tmy=0.5;
+
+const rain=[]; for(let i=0;i<420;i++) rain.push({x:rr(-200,VW+200),y:rr(-VH,VH),l:rr(14,42),s:rr(11,20),a:rr(.12,.42)});
+const splash=[];
+const embers=[]; for(let i=0;i<70;i++) embers.push({x:rr(200,VW),y:rr(600,900),v:rr(.25,.9),p:rr(0,6.3),r:rr(.8,2.2)});
+const drones=[];
+for(let i=0;i<26;i++){
+  const d=R();
+  drones.push({x:rr(-200,VW+200),y:rr(200,720),sp:rr(22,80)*(d<.5?1:-1),z:rr(.25,1),c:R()<.5?GL.cyan:GL.mag,trail:rr(20,60)});
+}
+const boats=[
+  {t:R(),sp:0.022,a:{x:300,y:748},b:{x:1260,y:1030},type:'barge'},
+  {t:R(),sp:0.030,a:{x:1500,y:1004},b:{x:230,y:736},type:'ferry'},
+  {t:R(),sp:0.016,a:{x:420,y:800},b:{x:1880,y:1070},type:'barge'}
+];
+const tramCabs=[{t:0.12,dir:1},{t:0.62,dir:-1},{t:0.38,dir:1}];
+const bridgeTrain={t:0.0,dir:1};
+const railTrain={x:RAIL.ax-260,dir:1};
+const liftCab={t:0.3,dir:1};
+const cars=[]; for(let i=0;i<18;i++) cars.push({t:R(),dir:R()<.5?1:-1,sp:rr(.05,.1)});
+
+/* 斜拉桥几何（二次贝塞尔，左下近 -> 右上远） */
+const BR={p0:{x:-190,y:1062},pc:{x:640,y:868},p2:{x:1512,y:848}};
+function brPt(t){const u=1-t;return{
+  x:u*u*BR.p0.x+2*u*t*BR.pc.x+t*t*BR.p2.x,
+  y:u*u*BR.p0.y+2*u*t*BR.pc.y+t*t*BR.p2.y};}
+function brTan(t){const u=1-t;return Math.atan2(
+  2*u*(BR.pc.y-BR.p0.y)+2*t*(BR.p2.y-BR.pc.y),
+  2*u*(BR.pc.x-BR.p0.x)+2*t*(BR.p2.x-BR.pc.x));}
+function brS(t){return lerp(1.0,0.34,ss(t));}
+
+/* =======================================================
+   绘制：桥（每帧，含车流与列车）
+======================================================= */
+function drawBridge(T){
+  const c=ctx;
+  // 桥墩（先画，位于水中）
+  [0.13,0.30,0.47,0.63,0.80].forEach(t=>{
+    const p=brPt(t), s=brS(t), w=26*s, h=170*s;
+    const g=c.createLinearGradient(0,p.y,0,p.y+h);
+    g.addColorStop(0,'#232a42'); g.addColorStop(1,'#0d1120');
+    c.fillStyle=g;
+    c.beginPath();c.moveTo(p.x-w/2,p.y);c.lineTo(p.x+w/2,p.y);
+    c.lineTo(p.x+w*0.78,p.y+h);c.lineTo(p.x-w*0.78,p.y+h);c.closePath();c.fill();
+    // 墩身倒影（以自身水线为轴）
+    const rg=c.createLinearGradient(0,p.y+h,0,p.y+h+70*s);
+    rg.addColorStop(0,'rgba(20,26,44,.55)');rg.addColorStop(1,'rgba(20,26,44,0)');
+    c.fillStyle=rg;c.fillRect(p.x-w*0.78,p.y+h,w*1.56,70*s);
+    // 水花
+    c.globalAlpha=.25+.12*Math.sin(T*2+t*9);
+    c.strokeStyle='rgba(190,225,255,.6)';c.lineWidth=1.5*s;
+    c.beginPath();c.ellipse(p.x,p.y+h,w*1.3,5*s,0,0,7);c.stroke();
+    c.globalAlpha=1;
+  });
+  // 桥面
+  c.beginPath(); c.moveTo(BR.p0.x,BR.p0.y);
+  for(let i=1;i<=40;i++){const p=brPt(i/40);c.lineTo(p.x,p.y);}
+  for(let i=40;i>=0;i--){const t=i/40,p=brPt(t);c.lineTo(p.x,p.y+22*brS(t));}
+  c.closePath();
+  const dg=c.createLinearGradient(0,820,0,1080);
+  dg.addColorStop(0,'#1b2134');dg.addColorStop(1,'#0c1020');
+  c.fillStyle=dg;c.fill();
+  // 桥面上缘高光 + 灯带
+  c.beginPath();for(let i=0;i<=40;i++){const p=brPt(i/40);i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y);}
+  c.strokeStyle='rgba(140,220,255,.45)';c.lineWidth=2;c.stroke();
+  // 路灯
+  for(let i=0;i<=22;i++){
+    const t=i/22,p=brPt(t),s=brS(t);
+    c.strokeStyle='rgba(160,170,190,.45)';c.lineWidth=1.6*s;
+    c.beginPath();c.moveTo(p.x,p.y);c.lineTo(p.x,p.y-26*s);c.stroke();
+    glow(c,GL.amber,p.x,p.y-27*s,13*s,.65);
+  }
+  // 主塔 + 斜拉索
+  [0.30,0.63].forEach(t=>{
+    const p=brPt(t),s=brS(t),H=300*s;
+    c.fillStyle='#252d48';
+    c.beginPath();c.moveTo(p.x-9*s,p.y+8);c.lineTo(p.x+9*s,p.y+8);c.lineTo(p.x+5*s,p.y-H);c.lineTo(p.x-5*s,p.y-H);c.closePath();c.fill();
+    c.strokeStyle='rgba(120,230,255,.5)';c.lineWidth=1.4*s;
+    c.beginPath();c.moveTo(p.x,p.y-H*.45);c.lineTo(p.x,p.y-H);c.stroke();
+    glow(c,GL.red,p.x,p.y-H-3,7*s,.8);
+    for(let k=1;k<=8;k++){
+      const dt=0.055*k*(1-t*.4);
+      [t-dt,t+dt].forEach(tt=>{
+        if(tt<0||tt>1)return; const q=brPt(tt);
+        c.strokeStyle=`rgba(150,200,240,${0.35-k*0.022})`;c.lineWidth=1;
+        c.beginPath();c.moveTo(p.x,p.y-H+6);c.lineTo(q.x,q.y+2);c.stroke();
+      });
+    }
+  });
+  // 车流光带
+  cars.forEach(v=>{
+    v.t+=v.sp*v.dir*0.006; if(v.t>1.02)v.t=-0.02; if(v.t<-0.02)v.t=1.02;
+    const t=clamp(v.t,0,1),p=brPt(t),s=brS(t),ang=brTan(t);
+    const off=v.dir>0?6*s:-6*s;
+    c.save();c.translate(p.x+Math.sin(ang)*-off,p.y+8*s+Math.cos(ang)*off*0);c.rotate(ang);
+    glow(c,v.dir<0?GL.white:GL.red,0,0,9*s,.8);
+    c.fillStyle=v.dir<0?'rgba(255,250,230,.85)':'rgba(255,80,60,.8)';
+    c.fillRect(-9*s,-1.6*s,18*s,3.2*s);
+    c.restore();
+  });
+  // 磁浮列车（沿桥面）
+  bridgeTrain.t+=0.00105*bridgeTrain.dir;
+  if(bridgeTrain.t>1.12){bridgeTrain.t=-0.12;}
+  for(let i=0;i<5;i++){
+    const t=bridgeTrain.t-i*0.045; if(t<-0.05||t>1.05) continue;
+    const tc=clamp(t,0,1),p=brPt(tc),s=brS(tc),ang=brTan(tc);
+    c.save();c.translate(p.x,p.y-9*s);c.rotate(ang);
+    c.fillStyle='#dfe9f5';
+    c.beginPath();c.roundRect(-34*s,-11*s,68*s,20*s,6*s);c.fill();
+    c.fillStyle='rgba(40,60,90,.9)';c.fillRect(-30*s,-7*s,60*s,7*s);
+    c.fillStyle='rgba(120,235,255,.95)';c.fillRect(-30*s,-7*s,60*s,2*s);
+    for(let k=0;k<5;k++){c.fillStyle='rgba(180,240,255,.9)';c.fillRect(-26*s+k*11*s,-5*s,7*s,4.5*s);}
+    if(i===0){glow(c,GL.white,34*s,-2*s,22*s,.9);
+      c.fillStyle='rgba(255,255,240,.10)';c.beginPath();c.moveTo(34*s,-4*s);c.lineTo(150*s,-24*s);c.lineTo(150*s,16*s);c.closePath();c.fill();}
+    c.restore();
+    glow(c,GL.cyan,p.x,p.y-6*s,30*s,.18);
+  }
+}
+
+/* =======================================================
+   水面
+======================================================= */
+function waterPath(c){
+  c.beginPath(); c.moveTo(0,shoreY(0));
+  for(let x=0;x<=VW;x+=12) c.lineTo(x,shoreY(x));
+  c.lineTo(VW,VH); c.lineTo(0,VH); c.closePath();
+}
+function drawWater(T){
+  const c=ctx;
+  c.save(); waterPath(c); c.clip();
+  const g=c.createLinearGradient(0,690,0,1080);
+  g.addColorStop(0,'#131a30'); g.addColorStop(.35,'#0c1326'); g.addColorStop(1,'#060a16');
+  c.fillStyle=g; c.fillRect(0,660,VW,VH-660);
+
+  // 倒影：按列以该列岸线为镜轴
+  const SL=12, H=330;
+  c.globalAlpha=.40;
+  for(let x=0;x<VW;x+=SL){
+    const sy=shoreY(x+SL/2);
+    const wob=Math.sin(T*1.6+x*0.017)*2.4+Math.sin(T*0.7+x*0.005)*3.2;
+    c.save(); c.translate(0,sy); c.scale(1,-0.82);
+    c.drawImage(L_refl, x,sy-H,SL,H, x+wob,-H,SL,H);
+    c.restore();
+  }
+  c.globalAlpha=1;
+  // 月柱
+  const mg=c.createLinearGradient(0,700,0,1080);
+  mg.addColorStop(0,'rgba(225,220,245,.20)');mg.addColorStop(1,'rgba(225,220,245,0)');
+  c.fillStyle=mg;
+  c.beginPath();c.moveTo(400,700);c.lineTo(460,700);c.lineTo(520,1080);c.lineTo(330,1080);c.closePath();c.fill();
+
+  // 波纹
+  for(let i=0;i<150;i++){
+    const p=i/150, y=lerp(706,1080,p*p*0.9+p*0.1);
+    const w=lerp(22,120,p), x=((i*197+Math.sin(T*0.5+i)*40)%VW);
+    if(y<shoreY(x)) continue;
+    c.globalAlpha=lerp(.05,.22,p)*(0.6+0.4*Math.sin(T*2+i));
+    c.strokeStyle='rgba(190,230,255,.9)'; c.lineWidth=lerp(.8,2.2,p);
+    c.beginPath();c.moveTo(x,y);c.lineTo(x+w,y+Math.sin(T+i)*1.5);c.stroke();
+  }
+  c.globalAlpha=1;
+  // 水雾
+  if(state.fog) for(let i=0;i<14;i++){
+    const x=((i*260+T*16)%(VW+560))-280, y=740+((i*37)%200);
+    c.globalAlpha=.10+.05*Math.sin(T*.5+i);
+    c.drawImage(FOG,x,y-40,620,110);
+  }
+  c.globalAlpha=1;
+  c.restore();
+}
+
+/* ---------- 船 ---------- */
+function drawBoats(T){
+  const c=ctx;
+  boats.forEach(b=>{
+    b.t+=b.sp*0.0032; if(b.t>1)b.t=0;
+    const t=b.t, x=lerp(b.a.x,b.b.x,t), y=lerp(b.a.y,b.b.y,t);
+    const s=lerp(0.34,1.05,ss((y-720)/330));
+    const dirRight = b.b.x>b.a.x;
+    c.save(); c.translate(x,y); c.scale(dirRight?s:-s,s);
+    // 尾迹
+    c.globalAlpha=.30; c.strokeStyle='rgba(200,230,255,.8)'; c.lineWidth=1.6;
+    for(let k=1;k<=3;k++){c.beginPath();c.moveTo(-40,2);
+      c.quadraticCurveTo(-120-k*36,2+k*7,-210-k*60,2+k*17);c.stroke();
+      c.beginPath();c.moveTo(-40,2);c.quadraticCurveTo(-120-k*36,2-k*5,-210-k*60,2-k*12);c.stroke();}
+    c.globalAlpha=1;
+    if(b.type==='barge'){
+      c.fillStyle='#11182a';c.beginPath();
+      c.moveTo(-46,-6);c.lineTo(44,-6);c.lineTo(36,8);c.lineTo(-40,8);c.closePath();c.fill();
+      c.fillStyle='#1c2740';c.fillRect(-40,-18,26,12);
+      c.fillStyle='rgba(255,190,110,.9)';c.fillRect(-36,-15,6,5);c.fillRect(-26,-15,6,5);
+      for(let k=0;k<5;k++){c.fillStyle='#2a1f33';c.fillRect(-8+k*10,-14,9,8);}
+      glow(c,GL.white,46,-8,9,.85); glow(c,GL.red,-48,-10,7,.7);
+    }else{
+      c.fillStyle='#141c30';c.beginPath();
+      c.moveTo(-34,-4);c.lineTo(34,-4);c.lineTo(26,8);c.lineTo(-28,8);c.closePath();c.fill();
+      c.fillStyle='#1d2a44';c.fillRect(-24,-20,48,16);
+      for(let k=0;k<7;k++){c.fillStyle='rgba(130,225,255,.85)';c.fillRect(-21+k*7,-17,5,6);}
+      c.strokeStyle='rgba(255,80,140,.8)';c.lineWidth=2;c.beginPath();c.moveTo(-26,-22);c.lineTo(26,-22);c.stroke();
+      glow(c,GL.mag,0,-24,26,.35); glow(c,GL.white,36,-6,8,.8);
+    }
+    c.restore();
+    // 倒影
+    c.save(); c.globalAlpha=.30; c.translate(x,y+8*s); c.scale(dirRight?s:-s,-s*0.7);
+    c.fillStyle='#20304a'; c.fillRect(-40,-16,86,16);
+    glow(c,GL.amber,-20,-10,16,.5);
+    c.restore(); c.globalAlpha=1;
+  });
+}
+
+/* ---------- 索道 ---------- */
+function drawTram(T){
+  const c=ctx;
+  // 左岸支撑塔（远岸）
+  c.fillStyle='#1a2136';
+  c.beginPath();c.moveTo(TRAM.ax-16,700);c.lineTo(TRAM.ax+16,700);c.lineTo(TRAM.ax+7,TRAM.ay-16);c.lineTo(TRAM.ax-7,TRAM.ay-16);c.closePath();c.fill();
+  c.strokeStyle='rgba(120,200,240,.35)';c.lineWidth=1;
+  for(let y=TRAM.ay;y<700;y+=26){const w=lerp(8,16,(y-TRAM.ay)/(700-TRAM.ay));
+    c.beginPath();c.moveTo(TRAM.ax-w,y);c.lineTo(TRAM.ax+w,y+13);c.moveTo(TRAM.ax+w,y);c.lineTo(TRAM.ax-w,y+13);c.stroke();}
+  glow(c,GL.red,TRAM.ax,TRAM.ay-18,7,.8);
+  // 缆索（承载索 + 牵引索）
+  c.strokeStyle='rgba(200,220,245,.55)'; c.lineWidth=2.2;
+  c.beginPath();for(let i=0;i<=60;i++){const p=tramPt(i/60);i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y);}c.stroke();
+  c.strokeStyle='rgba(160,190,220,.25)'; c.lineWidth=1;
+  c.beginPath();for(let i=0;i<=60;i++){const p=tramPt(i/60);const y=p.y+9;i?c.lineTo(p.x,y):c.moveTo(p.x,y);}c.stroke();
+  // 吊厢
+  tramCabs.forEach(cab=>{
+    cab.t+=0.00035*cab.dir;
+    if(cab.t>1){cab.t=1;cab.dir=-1;} if(cab.t<0){cab.t=0;cab.dir=1;}
+    const p=tramPt(cab.t), s=lerp(0.5,1.08,cab.t);
+    // 吊架（垂直悬挂）
+    c.strokeStyle='rgba(210,225,245,.75)';c.lineWidth=2.2*s;
+    c.beginPath();c.moveTo(p.x,p.y);c.lineTo(p.x,p.y+22*s);c.stroke();
+    c.fillStyle='#cdd8e6';c.fillRect(p.x-7*s,p.y-4*s,14*s,7*s);
+    // 厢体
+    const w=52*s,h=30*s, x=p.x-w/2, y=p.y+22*s;
+    c.fillStyle='#e6413f';
+    c.beginPath();c.roundRect(x,y,w,h,7*s);c.fill();
+    c.fillStyle='rgba(255,240,200,.92)';c.fillRect(x+5*s,y+6*s,w-10*s,h*0.42);
+    c.strokeStyle='rgba(255,220,180,.6)';c.lineWidth=1*s;c.strokeRect(x+5*s,y+6*s,w-10*s,h*0.42);
+    c.fillStyle='rgba(60,230,255,.8)';c.fillRect(x+4*s,y+h-5*s,w-8*s,2*s);
+    glow(c,GL.amber,p.x,y+h*0.4,34*s,.35);
+  });
+}
+
+/* ---------- 轻轨列车（穿楼遮挡） ---------- */
+function drawRailTrain(T){
+  const c=ctx;
+  railTrain.x+=0.85*railTrain.dir;
+  if(railTrain.x>RAIL.bx+340) railTrain.x=RAIL.ax-340;
+  const ang=Math.atan2(RAIL.by-RAIL.ay,RAIL.bx-RAIL.ax);
+  c.save();
+  // 排除穿楼内部（even-odd）
+  c.beginPath(); c.rect(0,0,VW,VH); c.rect(THRU.x+6,0,THRU.w-12,VH); c.clip('evenodd');
+  for(let i=0;i<4;i++){
+    const x=railTrain.x-i*74, y=railY(x), s=scaleAt(x)*0.95;
+    c.save();c.translate(x,y);c.rotate(ang);
+    c.fillStyle='#e8eef7';
+    c.beginPath();c.roundRect(-34*s,-15*s,68*s,26*s,5*s);c.fill();
+    c.fillStyle='#2b3d5c';c.fillRect(-31*s,-11*s,62*s,9*s);
+    c.fillStyle='rgba(160,235,255,.95)';
+    for(let k=0;k<6;k++) c.fillRect(-28*s+k*10.5*s,-10*s,7*s,7*s);
+    c.fillStyle='rgba(60,200,255,.85)';c.fillRect(-34*s,4*s,68*s,2.4*s);
+    c.fillStyle='#1b2334';c.fillRect(-30*s,11*s,60*s,5*s); // 跨座式梁包裹
+    if(i===0) glow(c,GL.white,34*s,-3*s,15*s,.9);
+    c.restore();
+    glow(c,GL.cyan,x,y,26*s,.12);
+  }
+  c.restore();
+}
+
+/* ---------- 升降筒舱 ---------- */
+function drawLift(T){
+  const c=ctx, x=LIFT.x+LIFT.w/2;
+  const top=cliffTop(LIFT.x)-24, bot=shoreY(LIFT.x)-14;
+  liftCab.t+=0.0026*liftCab.dir;
+  if(liftCab.t>1){liftCab.t=1;liftCab.dir=-1;} if(liftCab.t<0){liftCab.t=0;liftCab.dir=1;}
+  const e=ss(liftCab.t), y=lerp(bot,top,e);
+  c.fillStyle='rgba(230,240,255,.9)';
+  c.beginPath();c.roundRect(x-LIFT.w/2+4,y-16,LIFT.w-8,26,4);c.fill();
+  c.fillStyle='rgba(70,190,240,.9)';c.fillRect(x-LIFT.w/2+7,y-12,LIFT.w-14,10);
+  glow(c,GL.cyan,x,y-4,30,.4);
+}
+
+/* ---------- 全息 ---------- */
+function drawHolo(T){
+  if(!state.holo) return;
+  const c=ctx;
+  c.globalCompositeOperation='lighter';
+  // 环绕巨塔的全息龙
+  const cx=1120,cy=300,rx=250,ry=74;
+  for(let i=0;i<92;i++){
+    const p=i/92, a=T*0.28-p*2.4;
+    const x=cx+Math.cos(a)*rx, y=cy+Math.sin(a)*ry+Math.sin(a*2+p*4)*22-p*8;
+    const r=lerp(11,2.5,p)*(0.85+0.25*Math.sin(T*3+i));
+    glow(c,i<6?GL.cyan:GL.mag,x,y,r*2.1,lerp(.5,.08,p));
+  }
+  { const a=T*0.28, x=cx+Math.cos(a)*rx, y=cy+Math.sin(a)*ry;
+    glow(c,GL.white,x+6,y-4,4,.9); glow(c,GL.white,x+2,y+4,3.5,.8);
+    c.strokeStyle='rgba(120,240,255,.5)';c.lineWidth=1.4;
+    c.beginPath();c.moveTo(x,y);c.quadraticCurveTo(x+40,y-18,x+78,y-4);c.stroke();
+    c.beginPath();c.moveTo(x,y+4);c.quadraticCurveTo(x+38,y+22,x+72,y+14);c.stroke(); }
+  // 塔顶全息环
+  holoRings.forEach(h=>{
+    const k=0.7+0.3*Math.sin(T*1.4+h.p);
+    c.strokeStyle=`rgba(90,230,255,${0.18*k})`;c.lineWidth=2;
+    c.beginPath();c.ellipse(h.x,h.y+Math.sin(T+h.p)*6,h.r,h.r*0.22,0,0,7);c.stroke();
+    c.strokeStyle=`rgba(255,80,160,${0.12*k})`;
+    c.beginPath();c.ellipse(h.x,h.y+26+Math.sin(T+h.p+1)*6,h.r*0.7,h.r*0.16,0,0,7);c.stroke();
+  });
+  // 江面上方全息广告帆
+  const bx=760,by=470;
+  c.globalAlpha=.5+.12*Math.sin(T*5);
+  c.strokeStyle='rgba(120,235,255,.5)';c.lineWidth=1.5;
+  c.strokeRect(bx,by,150,88);
+  c.fillStyle='rgba(60,200,255,.07)';c.fillRect(bx,by,150,88);
+  c.globalAlpha=1;
+  c.globalCompositeOperation='source-over';
+  c.save();c.globalAlpha=.75+.2*Math.sin(T*7);
+  c.fillStyle='#8ef0ff';c.font='600 26px "PingFang SC","Microsoft YaHei",sans-serif';
+  c.fillText('两江',bx+18,by+40); c.fillText('环流',bx+18,by+74);
+  c.font='11px sans-serif';c.fillStyle='rgba(180,245,255,.8)';c.fillText('HYDRO-LOOP',bx+84,by+80);
+  c.restore();
+}
+
+/* ---------- 招牌 ---------- */
+function drawSigns(T,offNear,offMid){
+  const c=ctx;
+  signs.forEach((s,i)=>{
+    const flick = (Math.sin(T*13+i*2.1)>-0.75) ? 1 : 0.25;
+    const ox2 = s.layer==='near'?offNear:offMid;
+    c.save(); c.translate(s.x+ox2.x, s.y+ox2.y);
+    c.font=`700 ${s.size}px "PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif`;
+    c.textAlign='center';
+    // 立柱
+    c.fillStyle='rgba(12,14,24,.72)';
+    c.fillRect(-s.size*0.72,-s.size*0.85,s.size*1.44,s.size*1.18*s.txt.length+6);
+    c.strokeStyle=s.col; c.globalAlpha=0.55*flick; c.lineWidth=1.2;
+    c.strokeRect(-s.size*0.72,-s.size*0.85,s.size*1.44,s.size*1.18*s.txt.length+6);
+    c.globalAlpha=flick;
+    c.shadowColor=s.col; c.shadowBlur=18; c.fillStyle=s.col;
+    for(let k=0;k<s.txt.length;k++) c.fillText(s.txt[k],0,k*s.size*1.18+s.size*0.28);
+    c.shadowBlur=0; c.globalAlpha=1;
+    c.restore();
+  });
+}
+
+/* ---------- 雨 / 飞行器 / 余烬 ---------- */
+function drawRain(T,dt){
+  if(!state.rain) return;
+  const c=ctx, slant=-0.26+Math.sin(T*0.3)*0.05;
+  c.lineCap='round';
+  rain.forEach(p=>{
+    p.y+=p.s*dt*60; p.x+=p.s*slant*dt*60;
+    if(p.y>VH+40||p.x<-260){p.y=rr(-200,-20);p.x=rr(-200,VW+200);}
+    const sy=shoreY(clamp(p.x,0,VW));
+    if(p.y>sy && p.y<sy+16 && R()<0.04) splash.push({x:p.x,y:p.y,r:1,a:.5});
+    c.strokeStyle=`rgba(190,225,255,${p.a})`; c.lineWidth=1.1;
+    c.beginPath();c.moveTo(p.x,p.y);c.lineTo(p.x-p.l*slant,p.y-p.l);c.stroke();
+  });
+  for(let i=splash.length-1;i>=0;i--){
+    const s=splash[i]; s.r+=34*dt; s.a-=1.3*dt;
+    if(s.a<=0){splash.splice(i,1);continue;}
+    c.strokeStyle=`rgba(200,235,255,${s.a})`;c.lineWidth=1;
+    c.beginPath();c.ellipse(s.x,s.y,s.r,s.r*0.28,0,0,7);c.stroke();
+  }
+}
+function drawDrones(T,dt){
+  const c=ctx;
+  drones.forEach(d=>{
+    d.x+=d.sp*dt*d.z;
+    if(d.x>VW+240)d.x=-240; if(d.x<-240)d.x=VW+240;
+    const y=d.y+Math.sin(T*0.9+d.x*0.004)*9;
+    c.globalCompositeOperation='lighter';
+    const dir=Math.sign(d.sp);
+    const grd=c.createLinearGradient(d.x-dir*d.trail*d.z,y,d.x,y);
+    grd.addColorStop(0,'rgba(0,0,0,0)');
+    grd.addColorStop(1,d.c===GL.cyan?'rgba(80,220,255,.45)':'rgba(255,90,170,.4)');
+    c.strokeStyle=grd;c.lineWidth=2*d.z;
+    c.beginPath();c.moveTo(d.x-dir*d.trail*d.z,y);c.lineTo(d.x,y);c.stroke();
+    glow(c,d.c,d.x,y,7*d.z,.9);
+    c.globalCompositeOperation='source-over';
+    if(d.z>.7){c.fillStyle='rgba(210,230,250,.55)';c.fillRect(d.x-4*d.z,y-1.5*d.z,8*d.z,3*d.z);}
+  });
+}
+function drawEmbers(T,dt){
+  const c=ctx;
+  c.globalCompositeOperation='lighter';
+  embers.forEach(e=>{
+    e.y-=e.v*dt*40; e.x+=Math.sin(T*0.6+e.p)*0.25;
+    if(e.y<430){e.y=rr(760,920);e.x=rr(220,VW);}
+    glow(c,GL.amber,e.x,e.y,e.r*3.2,0.30*(1-(760-e.y)/420));
+  });
+  c.globalCompositeOperation='source-over';
+}
+
+/* ---------- 飞艇 ---------- */
+const airship={x:1500,y:250};
+function drawAirship(T,dt){
+  const c=ctx;
+  airship.x-=7*dt; if(airship.x<-420) airship.x=VW+420;
+  const x=airship.x, y=airship.y+Math.sin(T*0.4)*7;
+  c.save();c.translate(x,y);
+  c.fillStyle='#1d2340';c.beginPath();c.ellipse(0,0,150,34,0,0,7);c.fill();
+  c.fillStyle='rgba(120,200,255,.10)';c.beginPath();c.ellipse(0,-8,140,22,0,0,7);c.fill();
+  c.fillStyle='#141a2e';c.fillRect(-26,30,52,14);
+  for(let k=0;k<5;k++){c.fillStyle='rgba(255,200,130,.8)';c.fillRect(-20+k*9,34,5,5);}
+  c.fillStyle='#232a4a';c.beginPath();c.moveTo(140,-4);c.lineTo(178,-26);c.lineTo(172,6);c.closePath();c.fill();
+  c.globalAlpha=.8+.2*Math.sin(T*4);
+  c.fillStyle='#3ce6ff';c.font='700 20px "PingFang SC",sans-serif';c.textAlign='center';
+  c.shadowColor='#3ce6ff';c.shadowBlur=16;c.fillText('雾 都 巡 航',0,6);c.shadowBlur=0;
+  c.globalAlpha=1;
+  glow(c,GL.red,-150,0,8,.8); glow(c,GL.jade,150,0,8,.7);
+  c.restore();
+}
+
+/* =======================================================
+   主循环
+======================================================= */
+let last=performance.now(), fpsT=0, frames=0;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now; const T=now/1000;
+  frames++; fpsT+=dt; if(fpsT>0.5){document.getElementById('fps').textContent=Math.round(frames/fpsT);frames=0;fpsT=0;}
+
+  if(state.pan){ tmx=0.5+Math.sin(T*0.07)*0.42; tmy=0.5+Math.sin(T*0.05+1)*0.3; }
+  mx+=(tmx-mx)*0.045; my+=(tmy-my)*0.045;
+  const px=(mx-0.5), py=(my-0.5);
+  const off=d=>({x:-px*46*d, y:-py*22*d});
+
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,CW,CH);
+  ctx.setTransform(SC,0,0,SC,OX,OY);
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,VW,VH); ctx.clip();
+
+  const oSky=off(0.12), oFar=off(0.34), oMid=off(0.62), oNear=off(0.92), oWat=off(1.1), oBr=off(1.3);
+
+  // 1 天空
+  ctx.drawImage(L_sky,oSky.x,oSky.y);
+  // 2 远景
+  ctx.save();ctx.translate(oFar.x,oFar.y);
+  ctx.drawImage(L_far,0,0);
+  farLights.forEach(f=>{glow(ctx,f.c,f.x,f.y,3.4,0.25+0.25*Math.sin(T*2+f.p));});
+  ctx.restore();
+  drawAirship(T,dt);
+  // 3 雾（远-中之间）
+  if(state.fog) for(let i=0;i<7;i++){
+    const x=((i*330+T*11)%(VW+700))-350;
+    ctx.globalAlpha=.09+.04*Math.sin(T*.4+i);
+    ctx.drawImage(FOG,x,520+((i*53)%80),760,150);
+  } ctx.globalAlpha=1;
+  // 4 巨塔
+  ctx.save();ctx.translate(oMid.x,oMid.y);
+  ctx.drawImage(L_mid,0,0);
+  midWindows.forEach(w=>{const k=Math.sin(T*w.s+w.p);
+    if(k>0.2){ctx.fillStyle='rgba(255,225,170,.75)';ctx.fillRect(w.x,w.y,3,4);}
+    else if(k<-0.85){ctx.fillStyle='rgba(10,12,26,.9)';ctx.fillRect(w.x,w.y,3,4);}});
+  aviation.forEach(a=>{const k=(Math.sin(T*2.1+a.p)>0.6)?1:0.12; glow(ctx,GL.red,a.x,a.y,7,k*0.95);});
+  ctx.restore();
+  drawHolo(T);
+  // 5 雾（中-近之间）
+  if(state.fog) for(let i=0;i<6;i++){
+    const x=((i*400+T*19)%(VW+800))-400;
+    ctx.globalAlpha=.10+.05*Math.sin(T*.6+i*1.7);
+    ctx.drawImage(FOG,x,620+((i*67)%110),820,160);
+  } ctx.globalAlpha=1;
+  // 6 崖城
+  ctx.save();ctx.translate(oNear.x,oNear.y);
+  ctx.drawImage(L_near,0,0);
+  lanterns.forEach(l=>{const k=0.65+0.35*Math.sin(T*1.7+l.p);
+    ctx.fillStyle='rgba(230,60,45,.95)';ctx.beginPath();ctx.ellipse(l.x,l.y,l.r*0.8,l.r,0,0,7);ctx.fill();
+    glow(ctx,GL.red,l.x,l.y,l.r*4.6,0.42*k);});
+  nearWindows.forEach(w=>{if(Math.sin(T*1.3+w.p)>0.55){ctx.fillStyle='rgba(20,14,18,.8)';ctx.fillRect(w.x,w.y,w.w,w.h);}});
+  drawRailTrain(T);
+  drawLift(T);
+  ctx.restore();
+  // 7 索道（跨江，在崖城之前）
+  ctx.save();ctx.translate(oNear.x*1.05,oNear.y*1.05); drawTram(T); ctx.restore();
+  // 8 水面
+  ctx.save();ctx.translate(oWat.x,oWat.y); drawWater(T); ctx.restore();
+  // 9 船（水上、桥后）
+  ctx.save();ctx.translate(oWat.x,oWat.y); drawBoats(T); ctx.restore();
+  // 10 桥
+  ctx.save();ctx.translate(oBr.x,oBr.y); drawBridge(T); ctx.restore();
+  // 11 招牌
+  drawSigns(T,oNear,oMid);
+  // 12 大气
+  drawEmbers(T,dt);
+  drawDrones(T,dt);
+  drawRain(T,dt);
+  // 近景雾脚
+  if(state.fog) for(let i=0;i<6;i++){
+    const x=((i*420+T*30)%(VW+900))-450;
+    ctx.globalAlpha=.10+.05*Math.sin(T*.9+i);
+    ctx.drawImage(FOG,x,880+((i*41)%120),900,190);
+  } ctx.globalAlpha=1;
+  // 色调 + 暗角
+  const tg=ctx.createLinearGradient(0,0,0,VH);
+  tg.addColorStop(0,'rgba(40,10,70,0.20)');tg.addColorStop(.55,'rgba(20,40,80,0.06)');tg.addColorStop(1,'rgba(60,10,40,0.25)');
+  ctx.fillStyle=tg;ctx.fillRect(0,0,VW,VH);
+  const vg=ctx.createRadialGradient(VW/2,VH/2,VH*0.32,VW/2,VH/2,VH*1.0);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,0.62)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,VW,VH);
+  // 扫描线
+  ctx.globalAlpha=0.045; ctx.fillStyle='#000';
+  for(let y=0;y<VH;y+=4) ctx.fillRect(0,y,VW,1);
+  ctx.globalAlpha=1;
+
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- 尺寸 ---------- */
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  CW=Math.floor(innerWidth*DPR); CH=Math.floor(innerHeight*DPR);
+  cvs.width=CW; cvs.height=CH;
+  SC=Math.max(CW/VW,CH/VH);
+  OX=(CW-VW*SC)/2; OY=(CH-VH*SC)/2;
+}
+addEventListener('resize',resize);
+addEventListener('pointermove',e=>{ if(state.pan)return; tmx=e.clientX/innerWidth; tmy=e.clientY/innerHeight; });
+
+/* ---------- UI ---------- */
+function bind(id,key){
+  const b=document.getElementById(id);
+  const upd=()=>b.classList.toggle('off',!state[key]);
+  b.onclick=()=>{state[key]=!state[key];upd();};
+  upd();
+}
+bind('bRain','rain'); bind('bFog','fog'); bind('bHolo','holo'); bind('bPan','pan');
+
+/* ---------- 启动 ---------- */
+try{
+  resize();
+  buildSky(); buildFar(); buildMid(); buildNear(); buildRefl();
+  requestAnimationFrame(frame);
+}catch(err){ console.error(err); }
+setTimeout(()=>{const b=document.getElementById('boot'); if(!b) return; b.style.opacity=0; setTimeout(()=>b.remove(),850);},420);
+})();
+</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a4130b5abeb933',t:'MTc4OTI3MDIzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><!-- source: deepdemos.top | author: event | title: 雾峡·九叠层 -->
+</body>
+</html>

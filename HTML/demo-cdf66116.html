@@ -1,0 +1,2724 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/demo-cdf66116/ve330c72903ec/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0e17">
+<title>电车难题 · Trolley Dilemma — HTML Demo</title>
+<style>
+  html,body{margin:0;padding:0;background:#05070d;height:100%;overflow:hidden;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;touch-action:none}
+  canvas{background:#0a0e17;box-shadow:0 0 60px rgba(56,182,255,.15);border-radius:6px;cursor:default;
+    image-rendering:auto;touch-action:none;-webkit-user-select:none;user-select:none}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="1280" height="720"></canvas></div>
+
+<script>
+
+'use strict';
+/* ============ 电车难题 · 单文件Demo  (柴油朋克×深夜霓虹, 内容占位矢量美术) ============ */
+/* 数据与逻辑全部静态表驱动，后续平移到 Godot 时一一对应。 */
+/* ========================================================================== */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const W=1280, H=720;
+/* 高分屏清晰化：画布内部分辨率 ×2 再缩放显示 */
+const DPR=(typeof window!=='undefined'&&window.devicePixelRatio&&window.devicePixelRatio>=1.5)?2:1;
+if(DPR>1){cv.width=W*DPR;cv.height=H*DPR;ctx.scale(DPR,DPR);}
+(function fit(){
+  function rs(){const s=Math.min(innerWidth/W, innerHeight/H);cv.style.width=(W*s)+'px';cv.style.height=(H*s)+'px';}
+  addEventListener('resize',rs);rs();
+})();
+/* ---------- 工具 ---------- */
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const rndi=(a,b)=>Math.floor(rnd(a,b+1));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const chance=p=>Math.random()<p;
+const sum=a=>a.reduce((x,y)=>x+y,0);
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=rndi(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+/* ---------- 调色板（柴油朋克·深夜霓虹） ---------- */
+const COL={
+  bg:'#0a0e17', panel:'#0d1322', panel2:'#111a2e', line:'#1d2c4d',
+  txt:'#e8f1ff', dim:'#8fa3c8', deep:'#55617e',
+  warn:'#ffd166', bad:'#ff5a5a', good:'#6dff9e',
+  horn:'#ffb648', steel:'#b9c6d9', steam:'#9fb6d9'
+};
+/* ---------- 输入 ---------- */
+const mouse={x:0,y:0,down:false,clicked:false,hover:false};
+let btns=[];                 // 每帧注册的可点按钮
+let hoverId=null;
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mouse.x=(e.clientX-r.left)*(W/r.width);mouse.y=(e.clientY-r.top)*(H/r.height);});
+cv.addEventListener('mousedown',e=>{mouse.down=true;});
+cv.addEventListener('mouseup',e=>{mouse.down=false;mouse.clicked=true;});
+cv.addEventListener('mouseleave',()=>{mouse.x=-99;mouse.y=-99;});
+function btn(x,y,w,h,label,fn,opt={}){
+  const over=mouse.x>=x&&mouse.x<=x+w&&mouse.y>=y&&mouse.y<=y+h;
+  btns.push({x,y,w,h,label,opt,over,fn});   // 不立即触发：交给同帧顶层层级裁决
+  return over;
+}
+/* ---------- 绘制原语 ---------- */
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function panel(x,y,w,h,opt={}){
+  const r=opt.r??10, a=opt.a??0.92, fill=opt.fill??COL.panel;
+  ctx.globalAlpha=a; rr(x,y,w,h,r); ctx.fillStyle=fill; ctx.fill();
+  ctx.strokeStyle=opt.stroke??COL.line; ctx.lineWidth=1; ctx.stroke();
+  if(opt.glow){ctx.save();ctx.shadowColor=opt.glow;ctx.shadowBlur=14;rr(x,y,w,h,r);ctx.strokeStyle=opt.glow;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();}
+  ctx.globalAlpha=1;
+}
+function txt(s,x,y,size,color='#e8f1ff',opt={}){
+  ctx.font=(opt.bold?'bold ':'')+size+'px '+ (opt.font??'"Segoe UI","Microsoft YaHei",sans-serif');
+  ctx.textAlign=opt.align??'left'; ctx.textBaseline=opt.base??'top';
+  if(opt.glow){ctx.save();ctx.shadowColor=opt.glow;ctx.shadowBlur=12;ctx.fillStyle=color;ctx.fillText(s,x,y);ctx.restore();}
+  else{ctx.fillStyle=color;ctx.fillText(s,x,y);}
+}
+function glowText(s,x,y,size,color,blur=14,align='center',base='top'){
+  ctx.save();ctx.font=(size>0?'bold ':'')+Math.abs(size)+'px "Segoe UI","Microsoft YaHei",sans-serif';
+  ctx.textAlign=align;ctx.textBaseline=base;ctx.shadowColor=color;ctx.shadowBlur=blur;
+  ctx.fillStyle=color;ctx.fillText(s,x,y);ctx.restore();
+}
+function hudBtn(x,y,w,h,label,color,fn,sub){
+  const over=btn(x,y,w,h,label,fn);
+  rr(x,y,w,h,8);ctx.fillStyle=over?color:color+'88';ctx.fill();
+  ctx.strokeStyle='#ffffff55';ctx.lineWidth=1;ctx.stroke();
+  txt(label,x+w/2,y+h/2-7,15,'#0a0e17',{align:'center',base:'middle',bold:true});
+  if(sub)txt(sub,x+w/2,y+h-3,10,'#0a0e17',{align:'center',base:'middle'});
+}
+function bar(x,y,w,h,ratio,color,opt={}){
+  ratio=clamp(ratio,0,1);
+  rr(x,y,w,h,opt.r??4);ctx.fillStyle=opt.back??'#1a2333';ctx.fill();
+  if(ratio>0){const bw=Math.max(2,w*ratio);rr(x+1,y+1,bw-2,h-2,(opt.r??4)-1);ctx.fillStyle=color;ctx.fill();}
+  if(opt.glow){ctx.save();ctx.shadowColor=color;ctx.shadowBlur=8;rr(x+1,y+1,Math.max(2,w*ratio)-2,h-2,(opt.r??4)-1);ctx.strokeStyle=color;ctx.lineWidth=1;ctx.stroke();ctx.restore();}
+  ctx.strokeStyle='#2a3a5a';ctx.lineWidth=1;rr(x,y,w,h,opt.r??4);ctx.stroke();
+}
+/* 点击音效占位（正式版接音频） */
+let sfx=(k)=>{}; /* 第N块会注入WebAudio实现 */
+/* ---------- 进度 ---------- */
+let now=0,lastT=0;
+function loop(t){
+  const dt=clamp((t-lastT)/1000,0,0.05); lastT=t; now=t;
+  step(dt); draw();
+  mouse.clicked=false; mouse.hover=false;
+  requestAnimationFrame(loop);
+}
+/* 子类实现 step/draw —— 放在后续脚本块 */
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第2块：状态机 + 运行数据模型 + 场景路由骨架 ============ */
+/* ---------- 品质 ---------- */
+const QNAMES=['白','蓝','紫','金'];
+const QM=[1,1.5,2.2,3.2]; // 品质倍率（作用于伤害/撞击/生命加成类数值）
+const QCOL=['#cfd8e6','#4aa7ff','#b06cff','#ffc94d'];
+/* ---------- 槽位 ---------- */
+const SLOTS=[
+  {id:'weapon',label:'武器'},{id:'engine',label:'引擎'},
+  {id:'front',label:'车头'},{id:'aux1',label:'辅助Ⅰ'},{id:'aux2',label:'辅助Ⅱ'}
+];
+/* ========================================================================== */
+/* 数据（表驱动；正式版在 Godot 中以 Resource 复刻）
+   part: {id,name,cat,slot,price,desc,st{...},w?{武器参数}}       品质存实例上
+   st 字段: spd速度加成 / ram撞击加成 / acc加速度 / hp车体上限
+           deck甲板 / coin资金% / wdmg武器伤害% / wrate武器攻速%
+           pen护甲穿透 / stall撞击硬直减免 / restore撞击击杀回耐久(比例)
+           cabCut驾驶室袭击减免 / boardSlow车顶怪减速 / arc撞击电弧伤害
+           freezeOnRam撞冻秒 / zapD 无人机雷击周期 / luck掉宝 / crit暴击率
+           critMul暴击伤害 / shieldCd回滚CD / erase抹除率 / cheap廉价
+   w 字段: dmg单发伤害 / rps每秒发数 / rng射程 / kind弹型 / pierce穿透 /
+           chain弹射数 / splash溅射半径 / slow减速% / doub第二发概率 /
+           crit必暴 / refund击杀返款 / pen2穿甲 */
+const CATS=[
+{id:'red',  name:'红炉社',     color:'#FF5A3E', icon:'火',
+ s3:'撞击伤害+22%；撞击击杀恢复4%车体耐久',
+ s5:'红炉喷发：每10秒车头喷射锥形烈焰',
+ parts:[
+  {name:'铆钉加农炮', slot:'weapon', price:18, st:{}, w:{dmg:34,rps:0.7,rng:540,kind:'shell'}, desc:'慢速高伤单体，专治撞不动的硬骨头。'},
+  {name:'蒸汽转轮机炮', slot:'weapon', price:20, st:{}, w:{dmg:16,rps:2.6,rng:470,kind:'bolt'}, desc:'中速连射，喷吐蒸汽弹丸。'},
+  {name:'过载活塞组', slot:'engine', price:22, st:{spd:0.4,ram:26,acc:1.35}, desc:'速度与撞击兼具，红炉招牌动力。'},
+  {name:'犁形排障器', slot:'front', price:21, st:{ram:20,pen:0.5}, desc:'撞击+穿甲50%，把路障犁成两半。'},
+  {name:'泄压阀', slot:'aux', price:16, st:{stall:0.6}, desc:'撞击硬直大幅缩短，连撞更流畅。'},
+  {name:'灼热炉渣斗', slot:'aux', price:17, st:{restore:0.04}, desc:'撞击击杀回血4%车体耐久。'},
+ ]},
+{id:'blue', name:'青鸦电气', color:'#38B6FF', icon:'雷',
+ s3:'武器攻速+25%，25%攻击溅射相邻目标',
+ s5:'天雷逐轨：每9秒劈下3道落雷',
+ parts:[
+  {name:'电弧放射塔', slot:'weapon', price:20, st:{}, w:{dmg:18,rps:1.1,rng:540,kind:'chain',chain:2}, desc:'电弧弹射2个目标。'},
+  {name:'磁轨速射枪', slot:'weapon', price:18, st:{}, w:{dmg:9,rps:5,rng:430,kind:'bolt'}, desc:'射速拉满，弹雨洗地。'},
+  {name:'电磁驱动', slot:'engine', price:22, st:{spd:0.85,ram:8,acc:1.6}, desc:'快得离谱，创得温柔。'},
+  {name:'感应电围栏', slot:'front', price:21, st:{ram:6,arc:10}, desc:'撞击瞬间对全部车顶怪弹射小电弧。'},
+  {name:'电容器组', slot:'aux', price:16, st:{wrate:0.15}, desc:'武器攻速+15%。'},
+  {name:'无人机充电桩', slot:'aux', price:17, st:{zapD:6}, desc:'每6秒雷击最近的车顶怪。'},
+ ]},
+{id:'steel',name:'黑钢机车厂', color:'#FFB648', icon:'钢',
+ s3:'车体上限+70；驾驶室袭击-30%；车顶怪减速12%',
+ s5:'甩车制动：每12秒急刹甩落全部车顶怪并眩晕轨道',
+ parts:[
+  {name:'双联重机枪', slot:'weapon', price:21, st:{}, w:{dmg:24,rps:1.9,rng:520,kind:'bolt',pen2:0.5}, desc:'高伤中速，穿甲弹链。'},
+  {name:'防空霰弹炮', slot:'weapon', price:19, st:{}, w:{dmg:14,rps:0.9,rng:300,kind:'shell',splash:100}, desc:'范围溅射，清爬车怪海。'},
+  {name:'重型柴油机', slot:'engine', price:23, st:{spd:0.22,ram:24,acc:0.9,hp:25}, desc:'坦克级动力，附赠车体上限+25。'},
+  {name:'复合装甲排障梁', slot:'front', price:22, st:{ram:16,hp:20,reflectCut:0.7}, desc:'撞击更狠，反震-70%。'},
+  {name:'铆接甲板', slot:'aux', price:20, st:{deck:-1}, desc:'车顶容量-1：能扒上车的怪更少。'},
+  {name:'缓冲联轴器', slot:'aux', price:16, st:{cabCut:0.4}, desc:'驾驶室袭击伤害-40%。'},
+ ]},
+{id:'junk', name:'拾荒者互助会', color:'#B6F34C', icon:'废',
+ s3:'资金获取+30%，商店首件9折',
+ s5:'拾荒无人机：每5秒啄击轨道怪并提升掉落',
+ parts:[
+  {name:'生锈掷弹筒', slot:'weapon', price:17, st:{}, w:{dmg:20,rps:0.55,rng:360,kind:'shell',splash:130}, desc:'慢速范围轰炸。'},
+  {name:'.50改装步枪', slot:'weapon', price:20, st:{}, w:{dmg:46,rps:0.5,rng:640,kind:'shell',refund:2}, desc:'大口径点杀，击杀返2资金。'},
+  {name:'二手改造引擎', slot:'engine', price:17, st:{spd:0.3,ram:14,acc:1,cheap:1}, desc:'物美价廉，拾荒人的浪漫。'},
+  {name:'废料推土铲', slot:'front', price:18, st:{ram:10,coin:0.15}, desc:'撞死越多，铲回越多资金。'},
+  {name:'磁力吊臂', slot:'aux', price:16, st:{coin:0.25}, desc:'资金获取+25%。'},
+  {name:'幸运挂件盒', slot:'aux', price:18, st:{luck:1}, desc:'掉落物品质更容易上浮。'},
+ ]},
+{id:'ice', name:'冰原教团·液氮派', color:'#5EF0E0', icon:'冰',
+ s3:'武器命中附带霜缓35%；轨道怪接近-15%',
+ s5:'极寒之夜：每14秒全场冻结3秒，冻结中被撞必杀',
+ parts:[
+  {name:'冷聚变喷口', slot:'weapon', price:19, st:{}, w:{dmg:15,rps:1.2,rng:440,kind:'frost',slow:0.25}, desc:'攻击大幅减速。'},
+  {name:'雪崩榴弹', slot:'weapon', price:18, st:{}, w:{dmg:13,rps:0.8,rng:340,kind:'shell',splash:95,slow:0.4}, desc:'范围伤害并溅射霜缓。'},
+  {name:'液氮冷却活塞', slot:'engine', price:21, st:{spd:0.35,ram:16,acc:1.1}, desc:'撞击后车顶怪集体冻僵片刻。'},
+  {name:'霜封撞角', slot:'front', price:21, st:{ram:10,freezeOnRam:3}, desc:'撞不死的会冻住3秒；冻结中被撞必杀。'},
+  {name:'制冰机', slot:'aux', price:17, st:{freezeT:8}, desc:'每8秒冻住最近车顶怪1.2秒。'},
+  {name:'极寒尾气', slot:'aux', price:16, st:{boardSlow:0.25}, desc:'车顶怪移速-25%。'},
+ ]},
+{id:'para', name:'悖论车队', color:'#FF4FD8', icon:'∞',
+ s3:'列车速度+25%，武器暴击率+20%',
+ s5:'时间倒带：每18秒存档，驾驶室被袭则倒带并幽灵冲撞',
+ parts:[
+  {name:'相位双管枪', slot:'weapon', price:22, st:{}, w:{dmg:20,rps:1.6,rng:500,kind:'bolt',doub:0.2}, desc:'20%概率追加第二发。'},
+  {name:'时序狙击', slot:'weapon', price:26, st:{}, w:{dmg:110,rps:0.18,rng:780,kind:'rail',crit:1}, desc:'一发入魂，必暴击。'},
+  {name:'时间曲率引擎', slot:'engine', price:24, st:{spd:0.95,ram:34,acc:1.5,cabUp:0.25}, desc:'最快最猛，但驾驶室更怕被袭。'},
+  {name:'存在性保险杠', slot:'front', price:23, st:{ram:8,erase:0.12}, desc:'撞击有12%概率直接“抹除”目标。'},
+  {name:'回滚匣', slot:'aux', price:20, st:{shieldCd:22}, desc:'每22秒免疫一次驾驶室袭击。'},
+  {name:'因果倒置钟', slot:'aux', price:21, st:{crit:0.12,critMul:0.5}, desc:'暴击率+12%，暴击伤害+50%。'},
+ ]},
+];
+const CATMAP={};CATS.forEach(c=>CATMAP[c.id]=c);
+function makePart(def,q){return {id:def.name,def,cat:def.cat??findCatOf(def),slot:def.slot,q:q??0};}
+function findCatOf(def){for(const c of CATS)if(c.parts.includes(def))return c.id;return null;}
+/* ========================================================================== */
+/* 收藏品 */
+const COLLECT=[
+ {name:'危险品运输证',desc:'武器伤害+8%',fn:r=>r.collect.wdmg+=0.08},
+ {name:'飙车罚单',desc:'速度+12%，商店物价+15%',fn:r=>{r.collect.spd+=0.12;r.collect.tax+=0.15;}},
+ {name:'免检通行证',desc:'商店每次免费刷新一次',fn:r=>r.collect.freeReroll+=1},
+ {name:'员工餐补',desc:'战斗结算资金+10%',fn:r=>r.collect.battleCoin+=0.1},
+ {name:'减速带豁免权',desc:'撞击硬直-30%',fn:r=>r.collect.stall+=0.3},
+ {name:'乘客甲板保险',desc:'车顶怪移速-18%',fn:r=>r.collect.boardSlow+=0.18},
+ {name:'扳手猫',desc:'每场战斗首次驾驶室袭免疫',fn:r=>r.collect.cat+=1},
+ {name:'首席乘务员徽章',desc:'驾驶室袭击伤害-25%',fn:r=>r.collect.cabCut+=0.25},
+ {name:'发条心脏',desc:'车体上限+18',fn:r=>{r.bonusHp+=18;}},
+ {name:'黑匣子',desc:'车体归零时以35%耐久复活一次',fn:r=>r.collect.blackbox=true},
+ {name:'老式汽笛',desc:'战斗开场首波轨道怪HP-25%',fn:r=>r.collect.whistle=true},
+ {name:'折叠车票',desc:'战斗结算15%概率额外掉白配件',fn:r=>r.collect.ticket=true},
+ {name:'幸运马蹄铁',desc:'掉落品质概率上浮',fn:r=>r.collect.luck+=1},
+ {name:'哲学学士学位',desc:'抉择类事件多一个选项',fn:r=>r.collect.degree=true},
+ {name:'反光背心',desc:'撞击未死目标爬车速度-25%',fn:r=>r.collect.boardSlow+=0.07},
+];
+/* ========================================================================== */
+/* 运行数据 */
+function baseCollect(){return {wdmg:0,spd:0,tax:0,freeReroll:0,battleCoin:0,stall:0,boardSlow:0,cat:0,cabCut:0,blackbox:false,whistle:false,ticket:false,luck:0,degree:false};}
+function newRun(){
+  const r={
+    zone:1,        // 当前准备进入的区域号(1..16)
+    money:30, hp:110, hpMax:110, bonusHp:0, rerolls:0, collBuys:0, catLv:{},
+    deck:4,        // 车顶容量(基础4)
+    equip:{weapon:null,engine:null,front:null,aux1:null,aux2:null},
+    bench:[],      // 货厢(板凳), 上限6
+    coll:[], collect:baseCollect(),
+    stats:{kills:0,ramKills:0,coinEarn:0,zonesDone:0},
+    dead:false, win:false,
+    curse:null,    // 当前诅咒: {name,desc,until:区域号,kind,v}
+    passenger:null,// 幽灵乘客
+  };
+  recalc(r);
+  return r;
+}
+let RUN=null;
+/* 属性汇总(由装备+收藏+诅咒计算) → r.st */
+function recalc(r){
+  const st={spd:0,ram:0,acc:1,hp:0,deck:0,coin:0,wdmg:0,wrate:0,pen:0,stall:0,restore:0,
+            cabCut:0,boardSlow:0,arc:0,freezeOnRam:0,zapD:0,luck:0,crit:0,critMul:0,shieldCd:0,erase:0,
+            splashChance:0,approachCut:0,cabUp:0,shopCut:0};
+  for(const s of SLOTS){const p=r.equip[s.id];if(!p)continue;applySt(st,p.def.st,p.q);}
+  // 收藏
+  const c=r.collect;
+  st.wdmg+=c.wdmg; st.spd+=c.spd; st.stall+=c.stall; st.boardSlow+=c.boardSlow;
+  st.cabCut+=c.cabCut; st.luck+=c.luck; st.crit+=c.crit; st.critMul+=c.critMul;
+  // 诅咒
+  if(r.curse){if(r.curse.kind==='coin')st.coin-=r.curse.v;else if(r.curse.kind==='hp')st.hp-=r.curse.v;}
+  // —— 阵营羁绊(先统计再叠加，避免回环) ——
+  r.catCount={};for(const s of SLOTS){const p=r.equip[s.id];if(p)r.catCount[p.cat]=(r.catCount[p.cat]||0)+1;}
+  const cnt=id=>r.catCount[id]||0;
+  if(cnt('red')>=3){st.ram=Math.round(st.ram*1.22+6);st.restore+=0.04;}
+  if(cnt('blue')>=3){st.wrate+=0.25;st.splashChance+=0.25;}
+  if(cnt('steel')>=3){st.hp+=70;st.cabCut+=0.3;st.boardSlow+=0.12;}
+  if(cnt('junk')>=3){st.coin+=0.3;}
+  if(cnt('ice')>=3){st.approachCut+=0.15;}
+  if(cnt('para')>=3){st.spd+=0.25;st.crit+=0.2;}
+  // 修复区·羁绊强化等级加成(无上限，逐级增强对应阵营风格)
+  const lvA=id=>(r.catLv&&r.catLv[id])||0;
+  st.ram+=4*lvA('red');st.restore+=0.005*lvA('red');
+  st.wrate+=0.04*lvA('blue');st.splashChance+=0.01*lvA('blue');
+  st.hp+=18*lvA('steel');st.cabCut+=0.02*lvA('steel');st.boardSlow+=0.01*lvA('steel');
+  st.coin+=0.06*lvA('junk');
+  st.approachCut+=0.03*lvA('ice');
+  st.spd+=0.04*lvA('para');st.crit+=0.02*lvA('para');
+  r.st=st;
+  r.hpMax=110+(r.bonusHp||0)+st.hp;
+  if(r.hp>r.hpMax)r.hp=r.hpMax;
+  r.deck=4+st.deck;
+  r.equipList=SLOTS.map(s=>r.equip[s.id]).filter(Boolean);
+  return st;
+}
+function applyStFlat(st,k,q){let v=st[k]||0;if(['ram','hp','arc'].includes(k))v*=QM[q];return v;}
+function applySt(out,st,q){
+  for(const k in st){let v=st[k];
+    if(['ram','hp','arc'].includes(k))v*=QM[q];
+    if(k==='wdmg'||k==='wrate'){out[k]+=v;continue;}
+    out[k]+=v;}
+}
+/* 引擎/部件在战斗里的“汇总成具体数值”在 battle 内计算 */
+function catSyn(r,id){return r.catCount&&r.catCount[id]||0;}
+function synergyInfo(r){
+  const list=[];for(const c of CATS){const n=catSyn(r,c.id);
+    if(n>=3)list.push({c,n,lv:n>=5?2:1});}
+  return list;
+}
+/* ---------- 全局难曲线常量 ---------- */
+const ZMAX=30;
+const BOSSZ=[8,15,22,30];
+function bossGap(z){const b=BOSSZ.find(x=>x>=z);return b===undefined?0:b-z;}
+const ZONE_LEN=2200;
+const hpMul=z=>1+0.05*(z-1);
+const dmgMul=z=>1+0.045*(z-1);
+const isBossZone=z=>BOSSZ.includes(z);            // #4 #8 #12 (16为最终)
+/* ========================================================================== */
+/* 屏幕路由 */
+let scr='title';       // title|ready|choose|battle|shop|repair|event|bossgo|result
+let scrT=0;
+function setScr(s){scr=s;scrT=0;}
+let flow=[];           // 已生成的下阶段候选(展示用)
+function startGame(){RUN=newRun();starterOpts=rollStarters();starterPick=0;equipOpen=false;sellMode=false;notes=[];recalc(RUN);setScr('ready');}
+/* 占位函数——后续脚本块填充 */
+function step(dt){}
+function draw(){}
+requestAnimationFrame(loop);
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第3块：经济/掉落/流程 与 静态场景(标题/整备/抉择/结算/换装) ============ */
+function allPartDefs(){const a=[];for(const c of CATS)a.push(...c.parts.map(p=>({...p,cat:c.id})));return a;}
+/* ---------- 经济 ---------- */
+function partValue(def,q){return Math.round(def.price*(1+0.55*q));}
+function shopPrice(def,q,r){const tax=r.collect.tax||0;return Math.round(def.price*(1+0.55*q)*(1+tax));}
+function sellPrice(def,q){return Math.max(1,Math.round(partValue(def,q)*0.5));}
+function addMoney(r,v){v*= (1+(r.st?r.st.coin:0));v=Math.round(v);if(v>0)r.stats.coinEarn+=v;r.money+=v;}
+function qroll(r,base){
+  // 品质权重：随区域与幸运漂移
+  let w=[70,22,7,1]; const shift=(r.st.luck||0)*4+Math.floor((r.zone-1)/2);
+  w=[Math.max(10,w[0]-shift*6),w[1]+shift*2,w[2]+shift*2,Math.min(14,w[3]+shift*1)];
+  let t=sum(w),x=Math.random()*t,q=0;
+  for(let i=0;i<4;i++){x-=w[i];if(x<=0){q=i;break;}}
+  return clamp(q+(base||0),0,3);
+}
+function rollPartDef(){return pick(allPartDefs());}
+function rollPart(r,pool){const def=pool?pick(pool):rollPartDef();return makePart(def,qroll(r));}
+/* 收藏品获得 */
+function giveCollect(r,idx){
+  if(idx===undefined)idx=rndi(0,COLLECT.length-1);
+  const c=COLLECT[idx];r.coll.push({def:c});if(c.fn)c.fn(r);recalc(r);
+  try{fxNote('收藏品获得: '+c.name+' —— '+c.desc);}catch(_){}
+  return c;
+}
+function partDropRoll(r,forceQ){ // 返回 品质 或 -1
+  const p=[0.6,0.28,0.09,0.03]; // 基础
+  let w=p.slice(); const lk=(r.st.luck||0);
+  w=[Math.max(0.2,w[0]-lk*0.08),w[1]+lk*0.04,w[2]+lk*0.03,w[3]+lk*0.015];
+  let t=sum(w),x=Math.random()*t;
+  for(let i=0;i<4;i++){x-=w[i];if(x<=0)return Math.min(3,forceQ!==undefined?forceQ:i);}
+  return -1;
+}
+/* ---------- 掉落结算(怪物死亡调用) ---------- */
+function monsterDrop(r,mon,battleCtx){
+  addMoney(r,mon.coin*(0.9+0.06*(r.zone-1)));
+  battleCtx.pickups.push({kind:'coin',x:mon.x,y:mon.groundY,t:v=>addMoney(r,v)});
+}
+/* ---------- 换装 ---------- */
+function benchAdd(r,p){if(r.bench.length>=6)return false;r.bench.push(p);return true;}
+function equipSwap(r,p){ // 把 p 装进同类型第一个槽(空则替换),旧件进货厢
+  const slotId=p.slot==='aux'?null:p.slot;
+  if(p.slot==='aux'){
+    if(!r.equip.aux1){r.equip.aux1=p;return null;}
+    if(!r.equip.aux2){r.equip.aux2=p;return null;}
+    const old=r.equip.aux1;r.equip.aux1=p;return old;
+  }
+  const old=r.equip[slotId];r.equip[slotId]=p;return old;
+}
+function equipPartFromBench(r,p){
+  const i=r.bench.indexOf(p);if(i<0)return;
+  r.bench.splice(i,1);
+  const old=equipSwap(r,p);
+  if(old)benchAdd(r,old);
+  recalc(r);
+}
+function unequip(r,slotId){
+  const p=r.equip[slotId];if(!p)return false;
+  r.equip[slotId]=null;benchAdd(r,p);recalc(r);return true;
+}
+/* ---------- 拉杆抉择：下一站候选 ---------- */
+function genCandidates(r){
+  const z=r.zone;
+  // 本3区段内已出现的战斗数（Boss不计段）——用 zone 段位置推断：segPos = (z-1)%4
+  const seg=(z-1)%4;
+  const opts=[];
+  // 战斗保底：每段(4区)至少要1战斗 => 若本段尚未战斗则必给一个战斗
+  const forceFight=seg>=1&&!r._segFight;
+  const types=[];
+  if(forceFight||chance(0.55))types.push('battle');
+  types.push(pick(['shop','event']));
+  if(chance(0.6))types.push(pick(['repair','event','shop']));
+  if(chance(0.25)&&!r._segFight)types.push('battle');
+  types.push('battle'); // 保证至少有2可选
+  if(r.curse)types.push('repair'); // 有诅咒时修复权重提高
+  // 去重+洗牌+截取
+  const uniq=[...new Set(types)];
+  shuffle(uniq);
+  const pickN=uniq.length>=3?3:uniq.length;
+  return uniq.slice(0,pickN).map(t=>({type:t}));
+}
+/* ---------- 场景绘制 ---------- */
+function sceneBg(){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#070a14');g.addColorStop(.55,'#0a0e17');g.addColorStop(1,'#0c1220');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  // 远处城市剪影+霓虹
+  ctx.globalAlpha=.5;
+  for(let i=0;i<26;i++){
+    const hx=(i*73+13)%W, hh=60+((i*37)%150), hw=34+((i*11)%30);
+    ctx.fillStyle=i%4===0?COL.panel2:COL.panel;
+    ctx.fillRect(hx,H-430+hh-160,hw,170-hh+40); // 简单天际线
+    if(i%5===0){ctx.fillStyle=COL.dim;ctx.fillRect(hx+hw/2,H-430+hh-160-4,3,4);}
+  }
+  // 广告霓虹光斑
+  const neon=[[120,'#FF5A3E'],[380,'#38B6FF'],[700,'#FF4FD8'],[980,'#B6F34C']];
+  for(const [x,c] of neon){ctx.fillStyle=c+'22';ctx.fillRect(x,60,180,16);}
+  ctx.globalAlpha=1;
+  // 铁轨(远景层)
+  ctx.strokeStyle='#16203a';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,610);ctx.lineTo(W,610);ctx.stroke();
+}
+function drawRails(offset){
+  ctx.strokeStyle='#101a30';ctx.lineWidth=2;
+  for(let x=-(offset%60);x<W;x+=60){ctx.beginPath();ctx.moveTo(x,640);ctx.lineTo(x,618);ctx.stroke();}
+  ctx.strokeStyle='#2c3f66';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(0,632);ctx.lineTo(W,632);ctx.moveTo(0,648);ctx.lineTo(W,648);ctx.stroke();
+}
+function topBar(r){
+  // 顶部信息条(非战斗用)
+  panel(16,14,560,54,{r:8});
+  txt('区域 '+r.zone+' / '+ZMAX,30,26,15,'#ffffff',{glow:'#38B6FF'});
+  bar(120,30,200,12,r.hp/r.hpMax,r.hp/r.hpMax<.3?'#ff5a5a':'#6dff9e',{glow:r.hp/r.hpMax<.3?'#ff5a5a':'#6dff9e'});
+  txt(Math.ceil(r.hp)+'/'+r.hpMax,332,27,12,COL.dim);
+  txt('资金 ',440,26,14,COL.dim);
+  glowText('$'+r.money,485,24,18,'#ffd166',12,'left','top');
+    if(r.curse){txt('诅咒:'+r.curse.name,16,80,12,'#ff8a8a');}
+  drawSynergy(r);
+  const mb=btn(W-46,12,34,34,'',()=>{muted=!muted;if(!muted)ensureAC();});
+  rr(W-46,12,34,34,17);ctx.fillStyle=muted?'#10141f':'#141d30';ctx.fill();ctx.strokeStyle=muted?'#4a5a7a':'#7fd4ff';ctx.lineWidth=1.5;rr(W-46,12,34,34,17);ctx.stroke();
+  txt(muted?'✕':'♪',W-29,21,15,muted?'#5a6a86':'#7fd4ff',{align:'center'});
+}
+function drawSynergy(r){
+  const n=synergyInfo(r); let x=586;
+  txt('羁绊',x,22,14,COL.dim); x+=42;
+  if(!n.length){txt('（同阵营≥3触发加成/≥5解锁大招 · 每房后都可整备换装）',x,25,11,COL.deep); return;}
+  for(const s of n){
+    const c=s.c,w=96;
+    const over=mouse.x>=x&&mouse.x<=x+w&&mouse.y>=12&&mouse.y<=60;
+    rr(x,12,w,46,8);ctx.fillStyle=over?'#1c2a48':'#0f1830';ctx.fill();
+    ctx.strokeStyle=c.color+'88';ctx.lineWidth=1;rr(x,12,w,46,8);ctx.stroke();
+    ctx.save();ctx.shadowColor=c.color;ctx.shadowBlur=over?10:6;
+    txt(c.name,x+w/2,18,13,c.color,{align:'center',bold:true});ctx.restore();
+    bar(x+w/2-20,38,40,5,s.n/5,c.color);
+    txt(s.n+'件'+(s.n>=5?'·大招':s.n>=3?'·已激活':'·缺'+(3-s.n)),x+w/2,48,10,s.n>=3?'#e8f1ff':COL.dim,{align:'center'});
+    if(over)TIP=synLines(c,s.n);
+    x+=w+8;
+  }
+  txt('(悬停/面板可看层数细节)',x+8,30,10,COL.deep);
+}
+function panelTitle(s,x,y,color){glowText(s,x,y,26,color||'#e8f1ff',16);}
+/* 通用换装弹窗：返回false表示没开 */
+let equipOpen=false;
+function equipScreen(r,from,onClose){ // from:'ready'|'repair'|'choose'
+  MODAL_IDX=btns.length;   // 打开面板后, 其下层按钮不再响应点击
+  panel(240,70,800,560,{r:14,glow:'#38B6FF'});
+  panelTitle('整备车间',640,90,'#7fd4ff');
+  txt('点击“货厢”中的部件装入对应槽位；点击已装部件可卸下。货厢上限6。',640,130,13,COL.dim,{align:'center'});
+    // 左：已装备
+  txt('— 已装配（'+r.equipList.length+'/5）—',300,165,15,'#9fb6ff');
+  SLOTS.forEach((s,i)=>{
+    const p=r.equip[s.id];
+    const y=195+i*64;
+    const over=btn(290,y,300,52,'',()=>{if(p)unequip(r,s.id);});
+    panel(290,y,300,52,{r:8,fill:p?COL.panel2:'#0a0f1c'});
+    txt(s.label,306,y+6,13,p?COL.txt:COL.deep);
+    if(p){partChip(306,y+26,p,14,false);}
+    if(p&&over)txt('→ 卸下',556,y+18,12,'#ffd166',{align:'right'});
+    else if(!p)txt('空',566,y+18,12,COL.deep,{align:'right'});
+  });
+  // 右：货厢
+  txt('— 货厢（'+r.bench.length+'/6）—',650,165,15,'#9fb6ff');
+  if(!r.bench.length)txt('货厢空空。战斗/商店弄点货来吧。',650,220,13,COL.deep);
+  r.bench.slice(0,6).forEach((p,i)=>{
+    const cx=650+(i%2)*270, y=195+Math.floor(i/2)*150;
+    const over=btn(cx,y,255,136,'',()=>equipPartFromBench(r,p));
+    panel(cx,y,255,136,{r:8,fill:over?COL.panel2:'#0a0f1c'});
+    partMini(cx+10,y+8,p);
+    if(over)txt('点击装配 ▶',cx+128,y+118,11,'#ffd166',{align:'center'});
+  });
+  hudBtn(300,600,112,40,'收藏品','#5b3f86',()=>{synOpen=false;colOpen=!colOpen;});
+  hudBtn(420,600,112,40,'羁绊详情','#27405f',()=>{colOpen=false;synOpen=!synOpen;});
+  if(hudBtn(560,600,160,42,'完成', '#38B6FF',()=>{equipOpen=false;colOpen=false;synOpen=false;MODAL_IDX=0;if(onClose)onClose();})){}
+}
+function partBadges(p,x,y,sz){
+  sz=sz||12;
+  ctx.font='bold 10px "Segoe UI","Microsoft YaHei",sans-serif';
+  const c=CATMAP[p.cat], q=QNAMES[p.q];
+  const pw=10+ctx.measureText(c.name).width;
+  ctx.fillStyle=QCOL[p.q]; rr(x,y,sz,sz,3);ctx.fill();
+  txt(q,x+sz/2,y+1,sz>12?12:9,q==='金'?'#3a2c10':'#0a0e17',{align:'center',bold:true});
+  ctx.fillStyle=c.color; rr(x+sz+5,y,pw,sz,3);ctx.fill();
+  txt(c.name,x+sz+5+pw/2,y+1,10,'#0a0e17',{align:'center',bold:true});
+}
+function partChip(x,y,p,w,compact){
+  const s=compact?9:12;
+  partBadges(p,x,y+1,s);
+  txt(p.def.name,x+s*2+34,y+1,compact?11:13,'#ffffff',{glow:QCOL[p.q]});
+}
+function partMini(x,y,p){
+  const c=CATMAP[p.cat].color;
+  partBadges(p,x,y,12);
+  txt(p.def.name,x,y+26,14,'#ffffff',{glow:c});
+  txt(slotLabel(p.slot),x,y+44,11,QCOL[p.q]);
+  const lines=partLines(p).slice(0,3);
+  lines.forEach((l,i)=>txt(l,x,y+60+i*13,10,COL.dim));
+}
+function slotLabel(s){const f=SLOTS.find(x=>x.id===s);return f?f.label:s==='aux'?'辅助':s;}
+function statLinesOf(st,w){
+  const map={spd:['速度',v=>'+'+Math.round(v*100)+'%'],
+    ram:['撞击',v=>'+'+Math.round(v)],
+    acc:['加速',v=>'×'+v.toFixed(2)],
+    hp:['车体上限',v=>'+'+Math.round(v)],
+    deck:['车顶',v=>(v>0?'+':'')+Math.round(v)],
+    coin:['资金',v=>'+'+Math.round(v*100)+'%'],
+    wdmg:['武器伤害',v=>'+'+Math.round(v*100)+'%'],
+    wrate:['武器攻速',v=>'+'+Math.round(v*100)+'%'],
+    pen:['穿甲',v=>Math.round(v*100)+'%'],
+    stall:['硬直减免',v=>'-'+Math.round(v*100)+'%'],
+    restore:['撞击回血',v=>Math.round(v*100)+'%'],
+    cabCut:['驾驶室减伤',v=>'-'+Math.round(v*100)+'%'],
+    boardSlow:['车顶减速',v=>'-'+Math.round(v*100)+'%'],
+    arc:['撞击电弧',v=>Math.round(v)+'伤'],
+    freezeOnRam:['撞冻',v=>v+'s'],
+    zapD:['雷击',v=>v+'s/次'],
+    luck:['掉宝',v=>'+'],
+    crit:['暴击率',v=>'+'+Math.round(v*100)+'%'],
+    critMul:['暴伤',v=>'+'+Math.round(v*100)+'%'],
+    shieldCd:['回滚',v=>v+'s'],
+    erase:['抹除',v=>Math.round(v*100)+'%'],
+    cabUp:['代价',v=>'驾驶室+'+Math.round(v*100)+'%'],
+    cheap:['特价',v=>'商店-20%']};
+  const out=[];
+  for(const k in st){const m=map[k];if(!m)continue;out.push(m[0]+' '+m[1](st[k]));}
+  if(w){out.push('攻击 '+w.dmg+'/发 · '+w.rps+'发/s'+(w.rng?' · '+Math.round(w.rng)+'射程':''));
+    if(w.pierce||w.pen2)out.push('穿甲'+(w.pen2||0)*100+'%');
+    if(w.chain)out.push('弹射×'+w.chain);
+    if(w.splash)out.push('溅射'+w.splash);
+    if(w.slow)out.push('减速'+Math.round(w.slow*100)+'%');
+    if(w.doub)out.push('追加发射'+Math.round(w.doub*100)+'%');
+    if(w.crit)out.push('必暴击');
+    if(w.refund)out.push('击杀返款');
+  }
+  return out;
+}
+function partLines(p){
+  const lines=[];
+  const st=scaledSt(p);
+  lines.push(...statLinesOf(st,p.def.w));
+  if(lines.length>5)lines.length=5;
+  return lines;
+}
+function scaledSt(p){
+  const o={};for(const k in p.def.st){let v=p.def.st[k];
+    if(['ram','hp','arc'].includes(k))v*=QM[p.q];
+    o[k]=v;}
+  return o;
+}
+/* ========================================================= */
+/* 标题 */
+function drawTitle(){
+  sceneBg();
+  drawRails(now/30);
+  glowText('电 车 难 题',640,150,64,'#8fd0ff',30);
+  glowText('TROLLEY DILEMMA',640,235,20,'#38B6FF',10);
+  txt('柴油朋克 × 深夜霓虹 · 肉鸽 × 自走棋 Demo',640,300,15,COL.dim,{align:'center'});
+  // 小引子
+  txt('怪物挡路？创死它。没创死？它爬上你的车顶——',640,360,15,'#9fb6c9',{align:'center'});
+  txt('武器塔自动补刀，可别让它闯进驾驶室。',640,384,15,'#9fb6c9',{align:'center'});
+  txt('每到一个岔路，拉动拉杆选择你的下一站。',640,408,15,'#9fb6c9',{align:'center'});
+  hudBtn(470,470,340,54,'▶ 开始一局（约10分钟）','#FFB648',startGame);
+  if(hudBtn(470,540,340,40,'操作与规则','#1d2c4d',()=>{setScr('help');})){}
+  txt('占位矢量美术 · 正式美术将用 GPT-image2 生成（见 PROMPTS.md）',640,660,12,COL.deep,{align:'center'});
+}
+function drawHelp(){
+  sceneBg();panel(150,60,980,600,{r:14});
+  panelTitle('规则速览',640,86,'#7fd4ff');
+  const lines=[
+    '【核心循环】拉杆选站 → 驶入区域 → 创怪/捡货/清车顶 → 收益 → 再拉杆。16个区域，每4区一个Boss，第16区决战。',
+    '【撞击】怪物接触车头=撞击结算。伤害不够就杀不死它：它会扒上车顶走向驾驶室（车顶满则被撞退再来）。',
+    '【武器塔】自动索敌。优先打离驾驶室最近的车顶怪，其次打射程内轨道怪；浮空/远程怪只能靠它点掉。',
+    '【汽笛】战斗中按 [空格] 或点右上角按钮：眩晕车顶怪1.2秒并把轨道怪推远。',
+    '【羁绊】身上同阵营配件 ≥3 件触发基础加成，≥5 件解锁阵营专属“额外攻击/动作”。只有5个装备槽，怎么取舍？',
+    '【无人机商店】区域里可购买配件/收藏品，也可卖出换钱。',
+    '【收藏品】永久生效可叠加；事件区则是真实的“电车难题”——每个选择都有代价。',
+    '【耐久】驾驶室被袭/反震/爆炸都会扣车体。归零即本局结束。修复区是你的救命稻草。',
+    '【测试参数】URL后加 ?money=999 或 ?zone=8 可直接调试。',
+  ];
+  lines.forEach((l,i)=>txt(l,200,150+i*46,15,i%2?COL.txt:'#b9c6d9'));
+  hudBtn(520,600,240,44,'返回', '#38B6FF',()=>setScr('title'));
+}
+/* 后勤整备 */
+let starterOpts=[];let starterPick=0;
+function drawReady(){
+  sceneBg();drawRails(now/30);
+  panelTitle('起点 · 后勤整备',640,70,'#ffd166');
+  txt('夜晚的调度室：把你的第一件“家伙”装上列车。',640,120,14,COL.dim,{align:'center'});
+  txt('资金 $'+RUN.money+'　·　装备槽：武器/引擎/车头/辅助×2　·　货厢上限6',640,145,13,'#9fb6c9',{align:'center'});
+  const n=starterOpts.length;
+  starterOpts.forEach((p,i)=>{
+    const cx=220+i*290,y=200;
+    const over=btn(cx,y,250,230,'',()=>{starterPick=i;});
+    panel(cx,y,250,230,{r:12,fill:starterPick===i?'#16233f':over?'#12203a':'#0c1424',glow:starterPick===i?CATMAP[p.cat].color:null});
+    const c=CATMAP[p.cat];
+    txt('['+QNAMES[p.q]+']',cx+14,y+10,13,QCOL[p.q]);
+    txt(p.def.name,cx+14+ctx.measureText('['+QNAMES[p.q]+']').width,y+10,16,'#fff',{glow:c.color});
+    txt(c.name,cx+14,y+40,12,c.color);
+    txt(slotLabel(p.slot),cx+150,y+40,12,COL.dim);
+    partLines(p).forEach((l,i2)=>txt(l,cx+14,y+70+i2*22,12,COL.dim));
+  });
+  txt('（武器：自动攻击的车顶炮塔；引擎：速度/撞击；车头：撞击与防御；辅助：五花八门）',640,455,12,COL.deep,{align:'center'});
+  if(hudBtn(420,500,440,52,'确认启程 →','#FFB648',()=>{
+    const p=starterOpts[starterPick];
+    equipSwap(RUN,p);recalc(RUN);RUN._segFight=false;
+    setScr('choose');nextChoose(RUN);
+  })){}
+  if(hudBtn(420,566,440,36,'重新推荐','#1d2c4d',()=>starterOpts=rollStarters())){}
+  const deg=equipOpen;
+  if(hudBtn(930,566,120,36,deg?'关闭整备':'整备车间','#22365c',()=>equipOpen=!equipOpen)){}
+  if(deg)equipScreen(RUN,'ready');
+}
+function rollStarters(){
+  const cats=shuffle(CATS.slice()).slice(0,3);
+  return cats.map(c=>{const def=pick(c.parts);return makePart(def,0);});
+}
+/* 抉择画面 */
+let candidates=[],choInfo=[];
+function nextChoose(r){
+  if(BOSSZ.includes(r.zone-1))r._segFight=false; // 过了Boss进入新阶段
+  candidates=genCandidates(r);
+}
+function drawRouteMap(r){
+  const x0=80,x1=W-80,n=ZMAX;
+  for(let i=0;i<n;i++){
+    const cx=x0+(x1-x0)*i/(n-1);
+    const no=i+1;
+    const isB=BOSSZ.includes(no), isLast=no===ZMAX;
+    ctx.beginPath();ctx.arc(cx,100,isB?9:5,0,7);
+    ctx.fillStyle=no<r.zone?'#33466e':(no===r.zone?'#ffd166':(isB?'#ff5a5a':'#1b2742'));
+    ctx.fill();
+    if(isB||isLast){txt(isLast?'终':no,cx,114,9,isLast?'#ffd166':'#ff8a8a',{align:'center'});}
+  }
+  if(r.zone<=ZMAX){txt('当前 #'+r.zone, x0-10, 96, 11, '#8fa3c8', {align:'right'});}
+}
+function drawResult(){
+  sceneBg();
+  const r=RUN, win=r.win;
+  glowText(win?'安全到站（试运行通过）':'裁决号 报废了……',640,172,win?38:42,win?'#6dff9e':'#ff5a5a',20);
+  txt(win?'终点站汽笛长鸣。这一次，所有怪物都成了车轮下的注脚。':'车体耐久归零，铁轨把你吞没在深夜。',640,240,15,'#9fb6c9',{align:'center'});
+  panel(300,288,680,352,{r:16,glow:win?'#6dff9e':'#ff5a5a'});
+  glowText('—— 结算报表 ——',640,322,'#e8f1ff',18);
+  const s=r.stats;
+  const rows=[['抵达区域',String(r.zone)+' / '+ZMAX],['击杀怪物',s.kills],['其中撞击处刑',s.ramKills],['累计收入资金',s.coinEarn],['收集配件',r.coll.length],['装备羁绊',synergyInfo(r).map(x=>x.c.name+'×'+x.n).join('　')||'无']];
+  rows.forEach((row,i)=>{
+    const y=356+i*38;
+    if(i%2===0){ctx.fillStyle='#ffffff08';rr(330,y-4,620,32,6);ctx.fill();}
+    let vv=String(row[1]);
+    if(vv.length>20)vv=vv.slice(0,19)+'…';
+    txt(row[0],350,y+6,15,COL.dim);
+    txt(vv,910,y+6,15,vv.length>=12?'#ffd166':'#ffffff',{align:'right'});
+  });
+  hudBtn(470,660,340,50,'再 来 一 局','#FFB648',()=>startGame());
+}
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第4块：战斗系统 ============ */
+/* 只露出“裁决号”车头：短车身 → 给右侧怪物留足空间 */
+const G={FRONT:472,CAB:150,TURRET:335,ROOF:468,TRAIN_TOP:452,TRAIN_BOT:612,RAIL:628};
+/* ---------- 怪物定义 ---------- */
+const MDEFS=[
+ {id:'aunt',name:'挡路阿伯',hp:26,armor:0,spd:150,board:55,size:1,coin:3,cab:6,color:'#c9a06c',tags:[],w:40,h:46},
+ {id:'commuter',name:'暴怒通勤客',hp:60,armor:2,spd:205,board:122,size:1,coin:5,cab:11,color:'#e07b5a',tags:[],w:42,h:52},
+ {id:'ticket',name:'检票员',hp:55,armor:0,spd:140,board:95,size:1,coin:6,cab:9,color:'#6ea8fe',tags:['ranged'],w:40,h:48},
+ {id:'cement',name:'水泥裹脚青年',hp:145,armor:14,spd:62,board:26,size:1,coin:7,cab:8,color:'#8f9bb3',tags:[],w:46,h:60},
+ {id:'miner',name:'拾荒矿工',hp:42,armor:0,spd:190,board:85,size:1,coin:11,cab:7,color:'#b6f34c',tags:[],w:42,h:48},
+ {id:'kamikaze',name:'自爆苦力',hp:58,armor:0,spd:250,board:150,size:1,coin:5,cab:8,color:'#ffd166',tags:['explode'],w:40,h:46},
+ {id:'crab',name:'钢筋棘刺蟹',hp:82,armor:22,spd:185,board:72,size:1,coin:7,cab:10,color:'#b08cff',tags:['reflect'],w:52,h:42},
+ {id:'hanger',name:'轨道上吊者',hp:52,armor:0,spd:0,board:0,size:1,coin:0,cab:0,color:'#9fb6ff',tags:['float'],w:40,h:64,steal:12},
+ {id:'signal',name:'雾中号志灯',hp:85,armor:0,spd:55,board:70,size:1,coin:8,cab:6,color:'#ffb648',tags:['summon'],w:48,h:60},
+ {id:'stationmaster',name:'双头站长',hp:460,armor:18,spd:118,board:42,size:2,coin:30,cab:17,color:'#c66fe0',tags:[],w:66,h:76},
+ {id:'midnight',name:'午夜乘客',hp:280,armor:8,spd:235,board:168,size:1,coin:22,cab:25,color:'#ff4f8b',tags:[],w:44,h:60},
+ {id:'worm',name:'车厢蠕虫',hp:70,armor:6,spd:90,board:40,size:1,coin:0,cab:8,color:'#c66fe0',tags:[],w:38,h:34},
+ {id:'stowaway',name:'偷渡者列车',hp:660,armor:34,spd:70,board:0,size:3,coin:48,cab:18,color:'#8b9dc3',tags:['train'],w:120,h:64},
+];
+const MDMAP={};MDEFS.forEach(d=>MDMAP[d.id]=d);
+/* ---------- 战斗上下文 ---------- */
+let BAT=null;
+function newBattle(r,kind,bossId){
+  const b={kind,            // 'fight'|'boss'
+    t:0, travel:0, len:kind==='boss'?0:6400+Math.min(12,r.zone)*520,
+    enemies:[], parts:[], coins:[], fx:[], embers:[], trails:[],
+    evIdx:0, events:[], spawnedAll:false,
+    sc:{hp:hpMul(r.zone),dmg:dmgMul(r.zone)},
+    maxV:0, speedCur:0,
+    wCd:0, hornCd:0, hornT:0, freezeAll:0, frenzyT:0,
+    catT:{}, deckUsed:0, catUsed:false, blackUsed:false,
+    shieldT:999, saveArmed:false, junkT:5, iceFreezeT:8, zapT:6,
+    gained:[], done:false, failed:false, overT:0,
+    whistleUsed:false,
+    boss:null, judge:null, judgeChoice:null, screenShake:0,
+  };
+  b.maxV = 300*(1+r.st.spd*0.7);
+  b.speedCur = b.maxV;
+  if(kind==='boss')setupBoss(b,r,bossId);
+  else buildEvents(b,r);
+  b.hornCd=0; b.shieldT = (r.st.shieldCd>0?0:999);
+  return b;
+}
+/* 普通战斗事件(按行进距离触发) */
+function buildEvents(b,r){
+  const z=r.zone, ev=[], len=b.len;
+  const p1=['aunt','commuter','miner'];
+  const p2=p1.concat(['ticket','cement']);
+  const p3=p2.concat(['kamikaze','crab','hanger']);
+  const p4=p3.concat(['signal']);
+  const pool=pickZPool(z);
+  const nW=3+Math.min(5,Math.ceil(z/2));          // 波数
+  const budget=Math.round(9+ z*1.15);
+  let placed=0;
+  for(let i=0;i<nW&&placed<budget;i++){
+    const d=120+ (len-320)*(i+ (Math.random()<.5?0: .35))/(nW+0.0) + rnd(-40,40);
+    const cnt=Math.min(budget-placed, 2+ (z>=4?1:0)+ (i%2===0&&z>=7?1:0));
+    ev.push({d,kind:'wave',cnt}); placed+=cnt;
+  }
+  if(z>=4&&chance(.55))ev.push({d:len*.42,kind:'elite',def:pick(['stationmaster','midnight'])});
+  if(z>=8&&chance(.4))ev.push({d:len*.3,kind:'elite',def:'stowaway'});
+  if(z>=12&&chance(.5))ev.push({d:len*.65,kind:'elite',def:'midnight'});
+  // 路上拾取
+  const nC=3+rndi(0,3), nP=1+(chance(.7)?1:0);
+  for(let i=0;i<nC;i++)ev.push({d:rnd(140,len-140),kind:'coin',v:rndi(7,15)});
+  for(let i=0;i<nP;i++)ev.push({d:rnd(200,len-200),kind:'part'});
+  ev.sort((a,b2)=>a.d-b2.d);
+  b.events=ev;
+  function pickZPool(z){
+    if(z<=1)return p1;
+    if(z<=2)return p2;
+    if(z<=4)return p3;
+    if(z<=6)return p4.concat(p1);
+    if(z<=9)return p4.concat(['commuter','cement','kamikaze']);
+    return p4.concat(['crab','kamikaze','midnight','stationmaster']);
+  }
+}
+/* ---------- 怪物实例 ---------- */
+function spawnTrack(b,defId,x,opts={}){
+  const d=MDMAP[defId]; if(!d)return null;
+  const r=RUN;
+  let hp=d.hp*b.sc.hp;
+  if(b.kind!=='boss'&&!b.whistleUsed&&r.collect.whistle){hp*=0.75;b.whistleUsed=true;}
+  const e={d,st:'track',x:x??G.FRONT+520+rnd(0,300),y:G.RAIL-10,hp:Math.round(hp),maxHp:Math.round(hp),
+    spd:d.spd*(1-(r.st.approachCut||0)), boardSpd:d.board, walk:0,ramCd:0,pushT:0,slow:0,frz:0,sumT:rnd(2,5),
+    cabDmg:d.cab*b.sc.dmg, size:d.size, shootT:0, bob:rnd(0,6), drift:true, hitOnce:false};
+  if(d.tags.includes('float')){e.y=300+rnd(0,120);e.floatY=e.y;e.hover=true;}
+  b.enemies.push(e);return e;
+}
+function spawnBoard(b,defId,x,carryHp){
+  const d=MDMAP[defId];if(!d)return null;
+  const r=RUN;
+  if(b.deckUsed+d.size>r.deck)return null;
+  const fresh=Math.round(d.hp*b.sc.hp*0.9);
+  const hp0=(carryHp&&carryHp>0)?Math.max(1,Math.min(fresh,Math.round(carryHp))):fresh;
+  const e={d,st:'board',x:x??G.FRONT-24,y:G.ROOF,hp:hp0,maxHp:fresh,
+    boardSpd:d.board*(1-(r.st.boardSlow||0)),walk:0,slow:0,frz:0,cabDmg:d.cab*b.sc.dmg,size:d.size,drift:false};
+  b.deckUsed+=d.size;b.enemies.push(e);return e;
+}
+function deckFree(b){return RUN.deck-b.deckUsed;}
+/* ---------- 伤害与死亡 ---------- */
+function fxText(b,x,y,s,color){b.fx.push({x,y,s,color,t:0,life:1.4});}
+function hurtTrain(b,amt,src){
+  const r=RUN;
+  amt=Math.round(amt);
+  if(!isFinite(amt))amt=0;
+  if(amt<=0)return;
+  if(src==='cab'&&b.saveArmed){b.saveArmed=false;fxText(b,300,300,'时间倒带——袭击被取消!','#FF4FD8');ghostRam(b);return;}
+  if(src==='cab'&&b.shieldT<=0&&RUN.st.shieldCd>0){b.shieldT=RUN.st.shieldCd;fxText(b,300,300,'回滚匣·免疫!','#38B6FF');return;}
+  if(src==='cab'&&RUN.collect.cat>0&&!b.catUsed){b.catUsed=true;fxText(b,300,300,'扳手猫挡住了袭击! (每场一次)','#ffd166');return;}
+  hpNote(b,'-'+amt,'#ff6a5a');
+  r.hp-=amt;b.screenShake=Math.min(10,b.screenShake+3);
+  if(r.hp<=0){r.hp=0;
+    if(!b.blackUsed&&r.collect.blackbox){b.blackUsed=true;r.hp=Math.round(r.hpMax*0.35);hpNote(b,'复活+'+Math.round(r.hpMax*0.35),'#6dff9e');fxText(b,640,330,'黑匣子紧急重启!','#6dff9e');return;}
+    b.failed=true;b.overT=1;}
+}
+function killEnemy(b,e,cause){
+  const r=RUN;
+  e.dead=true;
+  r.stats.kills++;
+  if(cause==='ram'){r.stats.ramKills++;sfx&&sfx('ramKill');if(r.st.restore>0){const h=Math.round(r.hpMax*r.st.restore);r.hp=Math.min(r.hpMax,r.hp+h);hpNote(b,'+'+h,'#6dff9e');fxText(b,e.x,e.st==='board'?350:430,'+'+h,'#6dff9e');}}
+  if(e.d.tags.includes('explode')&&cause==='ram'){hurtTrain(b,12*b.sc.dmg,'explode');fxText(b,e.x,380,'自爆! -12','#ffd166');b.screenShake=Math.max(b.screenShake,5);}
+  // 掉钱：Boss全额；撞击处刑全额；武器补刀车顶怪六成(被“甩”到车头前)
+  if(e.isBoss||cause==='ram'||e.st==='board'){
+    let v=e.isBoss
+      ? Math.round((e.d.coin||90)*(1+0.2*(r.zone-1)))
+      : Math.round(e.d.coin*(0.9+0.05*(r.zone-1))*(1+0.4*e.size)*(e.st==='board'?0.6:1));
+    if(e.isBoss)b.coins.push({x:G.FRONT+40,y:540,v,drift:true});
+    else if(e.st==='board')b.coins.push({x:G.FRONT+40+rnd(0,40),y:538,v,drift:true});
+    else b.coins.push({x:e.x+20,y:560,v,drift:true});
+  }
+  // 奇美拉弱点：击杀车顶蠕虫可震落主体装甲片
+  if(b.boss&&b.boss.d.id==='chimera'&&!b.boss.dead&&e.st==='board'&&cause!=='ram'){
+    b.boss.hp-=100;fxText(b,b.boss.x,b.boss.y-40,'装甲片震落! 主体-100','#c66fe0');
+    if(b.boss.hp<=0){b.boss.hp=0;}
+  }
+  // —— 配件掉落（概率低；精英/Boss/偷渡列车必掉，品质更高）——
+  if(!e.d.tags.includes('float')){
+    const eliteDrop=e.isBoss||e.d.tags.includes('train')||e.d.id==='stationmaster'||e.d.id==='midnight';
+    if(e.isBoss){
+      const p=makePart(rollPartDef(),Math.min(3,qroll(r,1)+1));givePart(r,p);fxText(b,e.x,300,'Boss掉落:'+p.def.name,'#ffc94d');
+      if(chance(0.5)){giveCollect(r);fxText(b,e.x,340,'获得收藏品!','#FF4FD8');}
+    }else if(eliteDrop){
+      const p=makePart(rollPartDef(),Math.min(3,qroll(r,1)));givePart(r,p);fxText(b,e.x,300,'精英掉落:'+p.def.name,'#b06cff');
+    }else if(chance(0.05+(r.st.luck||0)*0.03)){
+      const p=makePart(rollPartDef(),partDropRoll(r));givePart(r,p);fxText(b,e.x,330,'掉落:'+p.def.name,'#ffc94d');
+    }
+    if(r.collect.ticket&&chance(0.04)){givePart(r,makePart(rollPartDef(),0));}
+  }
+  if(e.st==='board')b.deckUsed-=e.size;
+}
+function givePart(r,p){
+  if(!benchAdd(r,p)){addMoney(r,sellPrice(p.def,p.q));return null;}
+  if(scr==='battle'&&BAT)BAT.gained.push(p);
+  return p;
+}
+function ghostRam(b){
+  const dmg=(32+RUN.st.ram)*0.8;
+  for(const e of b.enemies)if(!e.dead){e.hp-=dmg;if(e.hp<=0)killEnemy(b,e,'skill');}
+  fxText(b,640,300,'幽灵列车冲撞!','#FF4FD8');
+}
+/* ---------- 撞击 ---------- */
+function resolveRam(b,e){
+  const r=RUN, st=r.st;
+  // 撞击力量随当前车速波动：越快越痛（撞完减速 → 需要引擎/泄压阀回速）
+  const spF=clamp((b.speedCur/(b.maxV||1))*1.1,0.55,1.3);
+  let dmg=(32+st.ram)*spF*(0.9+0.2*Math.random());
+  dmg=Math.round(dmg);
+  const effArmor=Math.max(0,Math.round(e.d.armor*(1-st.pen)));
+  dmg=Math.max(1,dmg-effArmor);
+  if(e.frz>0){dmg=1e9;}          // 冻结中被撞必杀
+  e.hp-=dmg;
+  // 抹除
+  if(e.hp>0&&st.erase>0&&chance(st.erase)){e.hp=0;fxText(b,e.x,300,'存在性抹除!','#FF4FD8');}
+  sparks(b,G.FRONT-10,570,Math.min(26,6+Math.round(dmg/14)));
+  fxText(b,G.FRONT-60,430,e.hp<=0?'处刑! -'+dmg:'冲击 -'+dmg,'#ffb648');
+  sfx&&sfx('ram');
+  b.screenShake=Math.max(b.screenShake,e.isBoss?10:5+Math.min(5,dmg/30));
+  // 反震
+  if(e.hp>0&&e.d.tags.includes('reflect')&&!(e.frz>0)){hurtTrain(b,Math.round(8*(1-st.reflectCut)*b.sc.dmg),'reflect');fxText(b,e.x,380,'反震!','#b08cff');}
+  if(e.hp<=0){killEnemy(b,e,'ram');return;}
+  // 撞击未死 → 硬直(降速，等引擎回速)
+  const stallAmt=0.24*(1-(st.stall||0));
+  b.speedCur*=(1-stallAmt);
+  if(b.speedCur<0.5)b.speedCur=0.5;
+  const frozen=e.frz>0;
+  if(e.isBoss){e.ramCd=9999;return;}       // Boss的第一撞在 bossMove 里继续处理击飞/扒车
+  if(frozen){e.x+=70;e.pushT=0.9;e.ramCd=1.4;return;}
+  if(e.d.tags.includes('train')){e.x+=90;e.pushT=0.9;e.ramCd=1.3;return;}
+  if(st.freezeOnRam>0){e.frz=Math.max(e.frz,st.freezeOnRam);fxText(b,e.x,340,'霜封!','#5EF0E0');e.x+=80;e.ramCd=1.6;return;}
+  /* 没被撞死 */
+  if(!e.hitOnce){
+    // 第一撞未死：被高速撞击击飞到屏幕右侧，随后折返狂奔
+    e.hitOnce=true;
+    const d=e.d.size>=2?340:480;
+    e.kbV=d/0.85; e.pushT=0.85;
+    e.x=Math.min(W+80,e.x+30);
+    e.ramCd=0.6;
+    fxText(b,e.x,340,'被撞飞!!','#ffd166');
+    sfx&&sfx('knock');
+    b.screenShake=Math.max(b.screenShake,7);
+    return;
+  }
+  // 第二撞及以后仍不死 → 扒上车(甲板有位置)；否则继续被创
+  if(deckFree(b)>=e.size){
+    const nb=spawnBoard(b,e.d.id,e.x,e.hp);
+    if(nb){e.dead=true;fxText(b,e.x,300,'它爬上来了!','#ff8a8a');sfx&&sfx('board');b.screenShake=Math.max(b.screenShake,5);return;}
+  }
+  e.x=Math.min(W+60,e.x+(e.d.size>=2?160:260));
+  e.kbV=(e.d.size>=2?160:260)/0.7;e.pushT=0.7;
+  e.ramCd=0.5;
+  fxText(b,e.x,330,'车顶已满·撞开!','#ffd166');
+  return;
+}
+function sparks(b,x,y,n){for(let i=0;i<n;i++)b.embers.push({x,y,vx:rnd(-120,120),vy:rnd(-300,-40),t:0,life:rnd(.3,.7),c:'#ffd166'});}
+/* ---------- 武器自动索敌 ---------- */
+function updateWeapon(b,dt){
+  const r=RUN,p=r.equip.weapon;
+  if(!p){b.wCd=0;return;}
+  const w=p.def.w;
+  let rate=w.rps*(1+r.st.wrate||0);
+  if(b.frenzyT>0)rate*=3;
+  b.wCd-=dt;
+  if(b.wCd>0)return;
+  const tgt=pickTarget(b,w.rng);
+  if(!tgt){b.wCd=0; if(!b.wMaxCd)b.wMaxCd=0.1; return;} // 无目标=满弹待发
+  b.wCd=1/rate;b.wMaxCd=1/rate;
+  fireShot(b,p,tgt);
+}
+function pickTarget(b,rng){
+  // 索敌优先级：车顶(甲板) > 飞天(浮空) > 地面轨道怪
+  const lo=G.TURRET-rng, hi=G.TURRET+rng;
+  let board=null,fly=null,gnd=null;
+  for(const e of b.enemies){
+    if(e.dead)continue;
+    if(e.st==='board'&&e.x>=lo&&e.x<=hi){if(!board||e.x<board.x)board=e;continue;}
+    if(e.st==='track'&&e.d.tags&&e.d.tags.includes('float')&&e.x>=lo&&e.x<=hi+90){if(!fly||e.x<fly.x)fly=e;continue;}
+    if(e.st==='track'&&(!e.d.tags||!e.d.tags.includes('float'))&&e.x>=G.FRONT-30&&e.x<=hi){if(!gnd||e.x<gnd.x)gnd=e;}
+  }
+  return board||fly||gnd;
+}
+function fireShot(b,p,tgt){
+  const r=RUN,w=p.def.w,st=r.st;
+  let dmg=w.dmg*QM[p.q]*(1+st.wdmg)*1.35; // 武器加强(原'激光刮痧')
+  let crit=w.crit===1||chance(st.crit);
+  if(crit)dmg*=(2+(st.critMul||0));
+  dmg*=rnd(0.9,1.1);
+  dmg-=Math.max(0,Math.round((tgt.d.armor*0.5)*(1-(w.pen2||0)))); // 弹丸穿甲效率50%，慢速大口径更吃香
+  dmg=Math.max(1,Math.round(dmg));
+  const c=CATMAP[p.cat].color;
+  sfx&&sfx('shot');tracers(b,G.TURRET,G.ROOF-16,tgt,dmg,c,crit);
+  applyDamage(b,tgt,dmg,'weapon',{splash:w.splash,slow:w.slow,chain:w.chain});
+  // 阵营3件特效注入
+  if(cntCat('blue')>=3&&st.splashChance>0&&chance(st.splashChance)){
+    for(const e2 of b.enemies)if(e2!==tgt&&!e2.dead&&Math.abs(e2.x-tgt.x)<70)applyDamage(b,e2,Math.max(1,Math.round(dmg*0.5)),'weapon',{});
+  }
+  if(cntCat('ice')>=3){ // 寒潮：命中必带霜缓
+    if(tgt.slow<tgt.d&&tgt.slow<3)tgt.slow=2;
+  }
+  if(w.doub&&chance(w.doub)){const t2=pickTarget(b,w.rng);if(t2)applyDamage(b,t2,dmg,'weapon',{});}
+  if(w.refund&&tgt.hp-dmg<=0){addMoney(r,2);}
+  function cntCat(id){return r.catCount[id]||0;}
+}
+function applyDamage(b,e,dmg,src,opt={}){
+  if(e.dead)return;
+  if(e.isBoss&&e.wImmune&&src==='weapon'){fxText(b,e.x,e.y-40,'相位/装甲免疫','#9fb6ff');return;}
+  if(e.frz>0&&opt.shatter){} 
+  e.hp-=dmg;
+  if(opt.slow&&e.slow<3)e.slow=2;
+  if(e.hp<=0)killEnemy(b,e,src);
+  if(opt.splash){
+    for(const e2 of b.enemies){
+      if(e2===e||e2.dead)continue;
+      const dx=e2.st==='board'?Math.abs(e2.x-e.x):Math.abs(e2.x-e.x);
+      if(dx<opt.splash){const d2=Math.max(1,Math.round(dmg*0.55));e2.hp-=d2;if(opt.slow&&e2.slow<3)e2.slow=2;if(e2.hp<=0)killEnemy(b,e2,src);}
+    }
+  }
+  if(opt.chain&&opt.chain>0){
+    let from=e;
+    for(let i=0;i<opt.chain;i++){
+      let nx=null;
+      for(const e2 of b.enemies)if(!e2.dead&&e2!==from&&Math.abs(e2.x-from.x)<190){if(!nx||Math.abs(e2.x-from.x)<Math.abs(nx.x-from.x))nx=e2;}
+      if(!nx)break;
+      nx.hp-=Math.max(1,Math.round(dmg*0.7));if(nx.hp<=0)killEnemy(b,nx,src);from=nx;
+    }
+  }
+}
+function tracers(b,x0,y0,e,dmg,c,crit){
+  const tx=e.st==='board'?e.x:e.x;
+  const ty=e.st==='board'?G.ROOF-14:Math.min(G.ROOF+60,e.y+10);
+  b.parts.push({x0,y0,x1:tx,y1:ty,c,crit,t:0,life:0.12});
+}
+/* ---------- 阵营5件特殊动作 ---------- */
+function runAbilities(b,dt){
+  const r=RUN;
+  const lv2=[];for(const c of CATS)if((r.catCount[c.id]||0)>=5)lv2.push(c.id);
+  for(const id of lv2){
+    b.catT[id]=(b.catT[id]||cdOf(id))-dt;
+    if(b.catT[id]<=0){b.catT[id]=cdOf(id);ability(b,id);}
+  }
+  // 拾荒无人机 5件：每5s啄击（并入能力循环，cd5）
+  if(lv2.includes('junk')){b.junkT-=dt;
+    if(b.junkT<=0){b.junkT=5;const tgt=pickTarget(b,900);if(tgt){applyDamage(b,tgt,Math.max(1,Math.round(16*b.sc.dmg*(1+(r.st.wdmg||0)))),'skill',{});fxText(b,tgt.x,250,'啄击!','#B6F34C');sfx&&sfx('zap2');}}}
+  // 制冰机辅助
+  if(r.st.freezeT>0){b.iceFreezeT-=dt;if(b.iceFreezeT<=0){b.iceFreezeT=r.st.freezeT;
+    let nx=null;for(const e of b.enemies)if(e.st==='board'&&!e.dead){if(!nx||e.x<nx.x)nx=e;}
+    if(nx)nx.frz=Math.max(nx.frz,1.2);}}
+  // 充电桩雷击
+  if(r.st.zapD>0){b.zapT-=dt;if(b.zapT<=0){b.zapT=r.st.zapD;let nx=null;for(const e of b.enemies)if(e.st==='board'&&!e.dead){if(!nx||e.x<nx.x)nx=e;}
+    if(nx){nx.hp-=Math.max(1,Math.round(14*b.sc.dmg*(1+r.st.wdmg)));fxText(b,nx.x,300,'⚡','#38B6FF');if(nx.hp<=0)killEnemy(b,nx,'skill');}}}
+  function cdOf(id){return {red:10,blue:9,steel:12,ice:14,para:18,junk:5}[id]||10;}
+}
+function ability(b,id){
+  const r=RUN,st=r.st;
+  sfx&&sfx('boom');
+  if(id==='red'){
+    const dmg=Math.round((32+st.ram)*2.2*b.sc.dmg);
+    fxText(b,640,200,'红炉喷发!!','#FF5A3E');
+    b.abilityAnim='red';b.animT=0.5;
+    for(const e of b.enemies.slice())if((e.st==='track'||(e.isBoss&&e.st==='board'))&&e.x>G.FRONT-230&&e.x<G.FRONT+760){
+      e.hp-=dmg;if(e.hp<=0)killEnemy(b,e,'skill');else{const burn=Math.round(5*b.sc.dmg);e.burn=(e.burn||0)+4;e.burnDps=burn;}
+    }
+    // 点燃车顶怪1只
+    for(const e of b.enemies.slice())if(e.st==='board'&&!e.dead){e.burn=(e.burn||0)+4;e.burnDps=Math.round(5*b.sc.dmg);break;}
+  }else if(id==='blue'){
+    fxText(b,640,200,'天雷逐轨!!','#38B6FF');b.abilityAnim='blue';b.animT=0.6;
+    const cands=b.enemies.filter(e=>!e.dead);
+    shuffle(cands);
+    const dmg=Math.round(26*b.sc.dmg*(1+st.wdmg));
+    cands.slice(0,3).forEach(e=>{e.hp-=dmg;fxText(b,e.x,300,'⚡'+dmg,'#7fd4ff');b.embers.push({x:e.x,y:300,vx:0,vy:60,t:0,life:.4,c:'#7fd4ff'});
+      for(const e2 of b.enemies)if(e2!==e&&!e2.dead&&Math.abs(e2.x-e.x)<90){e2.hp-=Math.round(dmg*0.5);if(e2.hp<=0)killEnemy(b,e2,'skill');}
+      if(e.hp<=0)killEnemy(b,e,'skill');});
+  }else if(id==='steel'){
+    fxText(b,640,200,'甩车制动!!','#FFB648');b.abilityAnim='steel';b.animT=0.5;b.screenShake=Math.max(b.screenShake,6);
+    for(const e of b.enemies.slice())if(e.st==='board'&&!e.dead){e.hp-=Math.round(e.maxHp*0.9);if(e.hp<=0)killEnemy(b,e,'skill');else e.frz=Math.max(e.frz,1);}
+    for(const e of b.enemies.slice())if(e.st==='track'){e.pushT=Math.max(e.pushT,1.2);e.x+=40;}
+  }else if(id==='ice'){
+    fxText(b,640,200,'极寒之夜!! 全场冻结','#5EF0E0');b.abilityAnim='ice';b.animT=0.6;
+    b.freezeAll=3;
+    for(const e of b.enemies)if(!e.dead)e.frz=Math.max(e.frz,3);
+  }else if(id==='para'){
+    fxText(b,640,200,'时间倒带·已存档','#FF4FD8');b.abilityAnim='para';b.animT=0.6;b.saveArmed=true;
+  }else if(id==='junk'){
+    // 由拾荒无人机事件处理
+  }
+}
+/* ---------- 驾驶室袭击 ---------- */
+function cabStrike(b,e){
+  const r=RUN;
+  let dmg=Math.round((e.cabDmg)*(1-(r.st.cabCut||0))*(1+(r.st.cabUp||0)));
+  fxText(b,G.CAB+60,300,'驾驶室遭袭! -'+dmg,'#ff5a5a');
+  hurtTrain(b,dmg,'cab');sfx&&sfx('cab');
+  b.deckUsed-=e.size;
+  e.dead=true;
+}
+/* ---------- Boss 定义与脑 ---------- */
+function setupBoss(b,r,id){
+  const z=r.zone;
+  const defs={
+    gate:{name:'卫戍巨像·站长老闸门',hp:820,armor:12,cab:14,coin:90,color:'#FFB648',w:150,h:150},
+    ghost:{name:'幽灵列车·班次404',hp:700,armor:8,cab:12,coin:90,color:'#9fb6ff',w:170,h:120},
+    chimera:{name:'货运奇美拉·千足编组',hp:1140,armor:16,cab:10,coin:90,color:'#c66fe0',w:200,h:110},
+    judge:{name:'电车难题·裁决者',hp:1200,armor:9,cab:18,coin:120,color:'#e8f1ff',w:180,h:170},
+  };
+  const d=defs[id];
+  const hp=Math.round(d.hp*(1+0.085*(z-1)));
+  const e={d:{...d,id,name:d.name,coin:90,size:3,tags:['boss']},st:'track',isBoss:true,
+    x:G.FRONT+640,y:G.RAIL-80,hp,hp0:hp,maxHp:hp,spd:0,pushT:0,ramCd:0,slow:0,frz:0,cling:false,hitOnce:false,
+    cabDmg:d.cab*hpMul(z),size:3,halt:true,brainT:2,phase:'A',phTimer:0,summonT:3,wImmune:false,ghostOn:false,drift:true};
+  b.boss=e;b.enemies.push(e);
+  if(id==='ghost'){e.phase='solid';e.phTimer=6;}
+  if(id==='judge'){b.judge={th:[0.66,0.33,0.01],done:0};}
+  fxText(b,640,170,'⚠ '+d.name+' 逼近!','#ff5a5a');
+}
+function updateBoss(b,dt){
+  const e=b.boss;if(!e)return;
+  const r=RUN;
+  e.brainT-=dt;
+  const bossId=(e.d.id);
+  if(!e.cling)return; // 入场阶段不执行召唤/阶段(先等那一下冲撞)
+  if(bossId==='gate'){
+    if(e.brainT<=0){e.brainT=4.5;
+      const frac=e.hp/e.maxHp;
+      const n=frac>0.66?2:frac>0.33?3:4;
+      for(let i=0;i<n;i++)spawnBoard(b,pick(['aunt','commuter','commuter']),G.FRONT-20-rnd(0,40));
+      fxText(b,e.x-80,200,'召唤爬车怪 ×'+n,'#FFB648');
+    }
+  }else if(bossId==='ghost'){
+    e.phTimer=(e.phTimer||0)-dt;
+    if(e.phase==='solid'&&e.phTimer<=0){e.phase='ghost';e.wImmune=true;e.phTimer=2.2;fxText(b,640,230,'虚化·炮火失效 & 加速逼近 2.6s','#9fb6ff');}
+    else if(e.phase==='ghost'&&e.phTimer<=0){e.phase='solid';e.wImmune=false;e.phTimer=4.4;fxText(b,640,230,'实化·可输出窗口 4.0s','#ffd166');}
+    if(e.brainT<=0){e.brainT=4.5;
+      for(let i=0;i<2;i++){
+        const w=spawnBoard(b,pick(['commuter','aunt','cement']),G.FRONT-40);
+        if(w){w.pushT=0;w.kbV=0;}   // 幽灵乘客只会朝驾驶室爬
+      }
+      fxText(b,e.x-70,200,'幽灵乘客爬上机车','#9fb6ff');
+    }
+  }else if(bossId==='chimera'){
+    if(e.summonT<=0){e.summonT=4.5;
+      if(!spawnBoard(b,'worm'))spawnTrack(b,'worm',G.FRONT+120+rnd(0,120));
+      fxText(b,e.x-80,200,'放出车厢蠕虫','#c66fe0');
+    }else e.summonT-=dt;
+  }else if(bossId==='judge'){
+    if(e.summonT<=0){e.summonT=5.5;
+      spawnTrack(b,'aunt');if(chance(.35))spawnBoard(b,'commuter');}
+    else e.summonT-=dt;
+    // 阶段→道德审判
+    if(b.judge&&!b.judge.wait){
+      const frac=e.hp/e.maxHp;
+      if(b.judge.done<b.judge.th.length&&frac<=b.judge.th[b.judge.done]&&frac>0.001){
+        b.judge.done++;b.judge.wait=true;b.judgeChoice=[];
+      }
+    }
+    if(b.judge&&b.judge.wait){return;} // 暂停(由界面处理)
+  }
+}
+/* ---------- 战斗主更新 ---------- */
+function stepBattle(dt){
+  const b=BAT,r=RUN;
+  if(!b)return;
+  b.t+=dt;
+  b.overT-=dt;
+  if(b.abilityAnim)b.animT=(b.animT||0)-dt;
+  b.screenShake=Math.max(0,b.screenShake-dt*20);
+  for(const f of b.fx.slice()){f.t+=dt;if(f.t>f.life)b.fx.splice(b.fx.indexOf(f),1);}
+  for(const m of b.embers.slice()){m.t+=dt;if(m.t>m.life)b.embers.splice(b.embers.indexOf(m),1);}
+  // 判定结束
+  if(b.done){return;}
+  if(b.failed){return;}
+  if(b.judge&&b.judge.wait){drawJudgeLater=false;return;} // 暂停战斗直到选择
+  // 速度(新引擎在 newBattle 设定 maxV/speedCur；此处统一)
+  const st=r.st;
+  const maxV=b.maxV||(300*(1+st.spd));
+  b.maxV=maxV;
+  b.speedCur= b.speedCur??maxV;
+  b.speedCur+=(maxV-b.speedCur)*Math.min(1,dt*(0.55*(st.acc||1)));
+  b.speedCur=clamp(b.speedCur,0.35,maxV);
+  const travel=b.speedCur*dt;
+  b.travel+=travel;
+  // 全局冻结计时
+  if(b.freezeAll>0)b.freezeAll-=dt;
+  // 事件触发
+  while(b.evIdx<b.events.length&&b.travel>=b.events[b.evIdx].d){
+    const ev=b.events[b.evIdx++];execEvent(b,ev);
+  }
+  if(b.evIdx>=b.events.length)b.spawnedAll=true;
+  // 更新敌人
+  updateEnemies(b,dt,travel);
+  // 武器/能力/主动
+  updateWeapon(b,dt);
+  runAbilities(b,dt);
+  // 汽笛冷却
+  if(b.hornCd>0)b.hornCd-=dt;if(b.hornT>0)b.hornT-=dt;
+  if(b.frenzyT>0)b.frenzyT-=dt;
+  // 回滚匣计时
+  if(r.st.shieldCd>0){b.shieldT-=dt;}
+  // Boss脑
+  if(b.kind==='boss'&&b.boss&&!b.boss.dead)updateBoss(b,dt);
+  // 驾驶室袭击/boss推进车头撞击
+  bossPoke(b,dt);
+  // 结束条件(普通)
+  if(b.kind==='fight'){
+    const noEnemies=!b.enemies.some(e=>!e.dead);
+    if(b.spawnedAll&&noEnemies&&b.travel>=b.len*0.45){b.done=true;b.overT=0.4;battleReward(b);}
+    if(b.travel>=b.len*1.9&&!b.enemies.some(e=>!e.dead)){b.done=true;battleReward(b);}
+  }
+  if(b.kind==='boss'){
+    if(b.boss&&b.boss.dead){b.done=true;battleReward(b);fxText(b,640,150,'Boss 击破!','#ffd166');}
+  }
+  // 超时兜底(普通战)：拖太久则放生残敌直接结算
+  if(b.kind==='fight'&&b.t>95){
+    for(const e of b.enemies)if(!e.dead)e.dead=true;
+    if(!b.done){b.done=true;battleReward(b);fxText(b,640,200,'时间到·甩下残敌清站','#9fb6c9');}
+  }
+}
+function bossPoke(b,dt){
+  const be=b.boss;if(!be||be.dead)return;
+  if(be.d.id==='gate'){be.pokeT=(be.pokeT||0)+dt;if(be.pokeT>3.0){be.pokeT=0;const dm=Math.round(7*b.sc.dmg);hurtTrain(b,dm,'boss');fxText(b,G.FRONT,300,'闸门冲撞 -'+dm,'#ffb648');}}
+  if(be.d.id==='ghost'){if(be.phase==='ghost')return;be.pokeT=(be.pokeT||0)+dt;if(be.pokeT>3.2){be.pokeT=0;const dm=Math.round(5*b.sc.dmg);hurtTrain(b,dm,'boss');fxText(b,G.FRONT,300,'幽灵头槌 -'+dm,'#9fb6ff');}}
+  if(be.d.id==='judge'&&!(b.judge&&b.judge.wait)){be.pokeT=(be.pokeT||0)+dt;if(be.pokeT>3.6){be.pokeT=0;const dm=Math.round(8*b.sc.dmg);hurtTrain(b,dm,'boss');fxText(b,G.FRONT,300,'法槌震击 -'+dm,'#e8f1ff');}}
+}
+function execEvent(b,ev){
+  if(ev.kind==='wave'){
+    const pool=poolByZone();
+    const n=ev.cnt;
+    for(let i=0;i<n;i++){spawnTrack(b,pick(pool),G.FRONT+420+rnd(0,700)+i*30);}
+  }else if(ev.kind==='elite'){
+    const e=spawnTrack(b,ev.def,G.FRONT+620+rnd(0,200));
+    if(e)fxText(b,e.x,230,'⚠ '+e.d.name,'#ff8a8a');
+  }else if(ev.kind==='coin'){
+    b.coins.push({x:G.FRONT+300+rnd(0,500),y:560,v:Math.round(ev.v*(1+(RUN.st.coin||0))),drift:true});
+  }else if(ev.kind==='part'){
+    b.partsTrack.push({x:G.FRONT+300+rnd(0,400),y:540,opened:false});
+  }
+  function poolByZone(){
+    const z=RUN.zone;
+    if(z<=1)return ['aunt','commuter','miner'];
+    if(z<=2)return ['aunt','commuter','ticket','miner','cement'];
+    if(z<=4)return ['commuter','ticket','kamikaze','crab','hanger','miner'];
+    if(z<=7)return ['commuter','kamikaze','crab','hanger','signal','miner'];
+    return ['commuter','kamikaze','crab','hanger','signal','midnight','cement','stationmaster'];
+  }
+}
+function updateEnemies(b,dt,travel){
+  const r=RUN;
+  for(const e of b.enemies.slice()){
+    if(e.dead)continue;
+    if(e.burn>0){e.burn-=dt;e.hp-=e.burnDps*dt;if(e.hp<=0){killEnemy(b,e,'skill');continue;}}
+    if(e.slow>0)e.slow-=dt;
+    if(e.frz>0)e.frz-=dt;
+    if(e.ramCd>0)e.ramCd-=dt;
+    const frozen=(e.frz>0||b.freezeAll>0);
+    if(e.isBoss){bossMove(b,e,dt,travel);continue;}   // Boss: 入场→被冲撞→扒上机车
+    if(e.st==='board'){
+      if(frozen)continue;
+      if(e.pushT>0){e.pushT-=dt;continue;}
+      const slow=e.slow>0?0.55:1;
+      e.x-=e.boardSpd*slow*dt;
+      if(e.x<=G.CAB+6){cabStrike(b,e);continue;}
+      continue;
+    }
+    if(e.d.tags.includes('float')){                    // 浮空灵体：穿过列车偷钱
+      e.x-=travel+50*dt;
+      e.y=e.floatY+Math.sin(b.t*2+e.bob)*14;
+      if(e.x<G.CAB-120){addMoney(r,-e.d.steal);fxText(b,G.CAB,260,'被偷了 $'+e.d.steal+'!','#9fb6ff');e.dead=true;continue;}
+      continue;
+    }
+    if(e.pushT>0){                                     // 被撞飞/踉跄：向后滑行(带惯性)
+      e.pushT-=dt;
+      if(e.kbV>0){e.x+=e.kbV*dt;e.kbV*=Math.max(0,1-5.5*dt);if(e.kbV<4)e.kbV=0;}
+      continue;
+    }
+    if(e.d.tags.includes('ranged')){                   // 检票员：全程移动，边跑边开火(不会驻点发呆)
+      if(e.x<G.FRONT+430){
+        e.shootT-=dt;
+        if(e.shootT<=0){e.shootT=2.6;const dmg2=Math.round(3*b.sc.dmg);hurtTrain(b,dmg2,'ranged');fxText(b,e.x,e.y-66,'射击 -'+dmg2,'#6ea8fe');b.parts.push({x0:e.x,y0:e.y-46,x1:G.FRONT-8,y1:G.ROOF+26,c:'#6ea8fe',t:0,life:.16});sfx&&sfx('shot');}
+      }
+      // 继续走通用移动逻辑(照常被撞/被击退/折返)
+    }
+    if(e.d.tags.includes('summon')){e.sumT-=dt;if(e.sumT<=0){e.sumT=5.5;spawnTrack(b,'aunt',e.x+50);fxText(b,e.x,240,'召唤 挡路阿伯','#ffb648');}}
+    // 轨道怪：撞前静止矗立(只有世界滚动) → 被撞后折返狂奔
+    const own=(e.hitOnce?(e.slow>0?0.55:1):0.2)*e.spd*dt; // 未撞前贴地缓行，撞飞后折返狂奔
+    e.x-=travel+own;
+    if(e.x<=G.FRONT-2&&e.ramCd<=0){
+      resolveRam(b,e);
+      if(e.dead||e.st==='board')continue;
+    }
+    if(e.x<G.FRONT-24&&!e.dead)e.x=G.FRONT-24;
+  }
+  b.enemies=b.enemies.filter(e=>!e.dead);
+  // 金币与部件箱漂移
+  for(const c of b.coins.slice()){
+    if(c.drift)c.x-=travel;
+    c.y=Math.min(c.y+8*dt,585);
+    if(c.x<=G.FRONT-20){addMoney(r,c.v);b.fx.push({x:G.FRONT-40,y:320,s:'+$'+c.v,color:'#ffd166',t:0,life:1});sfx&&sfx('coin');b.coins.splice(b.coins.indexOf(c),1);}
+  }
+  if(!b.partsTrack)b.partsTrack=[];
+  for(const pt of b.partsTrack.slice()){
+    pt.x-=travel;
+    if(pt.x<=G.FRONT-20&&!pt.opened){pt.opened=true;
+      const p=makePart(rollPartDef(),qroll(r));
+      givePart(r,p);fxText(b,G.FRONT-40,300,'拾取配件:'+p.def.name+' ['+QNAMES[p.q]+']','#ffc94d');sfx&&sfx('box');
+      b.partsTrack.splice(b.partsTrack.indexOf(pt),1); // 拾取后立刻从画面消失
+      continue;
+    }
+  }
+  b.partsTrack=b.partsTrack.filter(p=>p.x>-80);
+  for(const pr of b.parts.slice()){pr.t+=dt;if(pr.t>pr.life)b.parts.splice(b.parts.indexOf(pr),1);}
+}
+function bossMove(b,e,dt,travel){
+  if(e.cling){                       // 已扒上机车车顶：走向驾驶室(幽灵虚化期加速冲刺)
+    if(e.frz>0||b.freezeAll>0)return;
+    if(e.pushT>0){e.pushT-=dt;return;}   // 眩晕/被破袭打退
+    let spd=e.boardSpd||10;
+    if(e.phase==='ghost')spd*=2.4;
+    if(e.slow>0)spd*=0.55;
+    e.x-=spd*dt;
+    if(e.x<=G.CAB+10){               // 摸到驾驶室→大破袭后被顶开
+      hurtTrain(b,e.cabDmg,'boss');
+      fxText(b,G.CAB+80,250,'BOSS 破袭驾驶室!','#ff5a5a');
+      sfx&&sfx('cab');b.screenShake=Math.max(b.screenShake,10);
+      e.x=G.FRONT-110;e.pushT=1.2;
+    }
+    return;
+  }
+  if(e.pushT>0){                     // 首撞后被击飞僵直 → 扑上车
+    e.pushT-=dt;
+    if(e.pushT<=0){
+      e.cling=true;e.st='board';e.x=G.FRONT-78;
+      if(e.d.id==='gate')e.boardSpd=11; if(e.d.id==='ghost')e.boardSpd=11;
+      if(e.d.id==='chimera')e.boardSpd=8; if(e.d.id==='judge')e.boardSpd=11;
+      fxText(b,640,185,'它扒上来了!! 火力全开','#ff8a8a');sfx&&sfx('board');
+      b.screenShake=Math.max(b.screenShake,9);
+    }
+    return;
+  }
+  if(e.ramCd>0){e.ramCd-=dt;e.x-=travel*0.15;return;}
+  e.x-=travel;                    // 静止矗立在轨道上，被高速车头撞上
+  if(e.x<=G.FRONT-2){
+    e.ramCd=9999;
+    resolveRam(b,e);                 // 第一撞：巨型冲撞
+    if(!e.dead){
+      e.x=G.FRONT+260;e.pushT=1.5;e.hitOnce=true;
+      b.screenShake=Math.max(b.screenShake,13);
+      fxText(b,e.x-70,320,'巨型冲撞! 它被撞飞出去','#ffd166');
+      sfx&&sfx('knock');
+    }
+  }
+}
+/* 战斗奖励：普通战结算给基础配件+根据收藏附加 */
+function battleReward(b){
+  if(b.rewarded)return;b.rewarded=true;
+  const r=RUN;
+  if(b.kind==='fight'){
+    if(r.collect.ticket&&chance(0.15)){givePart(r,makePart(rollPartDef(),0));}
+    r._segFight=true;
+  }else{
+    // Boss战利品主要在击杀瞬间结算(配件/收藏品/战利金)；此处补一笔阶段奖金
+    addMoney(r,30+15*(r.zone-1));
+  }
+}
+/* ---------- 主调度: battle step/draw 由第5块 dispatcher 调用 ---------- */
+let drawJudgeLater=true;
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第5块：战斗绘制 + 商店/修复/事件/推进/总调度 ============ */
+/* ---------- 列车绘制：单机车头·柴油朋克精修版 ---------- */
+let trainPuff=0;
+function drawTrain(b){
+  const r=RUN;
+  const F=G.FRONT, roof=G.ROOF, bot=G.TRAIN_BOT;
+  const ratio=clamp((b?b.speedCur/(b.maxV||1):1),0.2,1);   // 速度感系数
+  const bob=b?Math.sin(b.travel*0.05)*1.4:0;
+  ctx.save();
+  /* 高速拖影（速度越快越明显） */
+  if(ratio>0.5){
+    const steps=[18,40,66];
+    for(const d of steps){
+      ctx.globalAlpha=(ratio-0.5)*0.16*(1-d/70);
+      body(-d,false); ctx.globalAlpha=1;
+    }
+  }
+  /* 主车体 */
+  ctx.save();ctx.translate(0,bob);
+  body(0,true);
+  ctx.restore();
+  /* —— 武器塔（独立于车体拖影之上） —— */
+  const wp=r.equip.weapon;
+  const wc=wp?CATMAP[wp.cat].color:'#44547a';
+  ctx.save();ctx.shadowColor=wc;ctx.shadowBlur=10;
+  rr(G.TURRET-30,roof-30,60,30,7);ctx.fillStyle='#121a2e';ctx.fill();ctx.strokeStyle=wc;ctx.lineWidth=2;rr(G.TURRET-30,roof-30,60,30,7);ctx.stroke();
+  // 座圈
+  ctx.beginPath();ctx.arc(G.TURRET,roof-15,11,0,7);ctx.fillStyle='#0b0f1c';ctx.fill();ctx.strokeStyle=wc;ctx.stroke();
+  let aimT=null;
+  if(b){
+    for(const e of b.enemies)if(e.st==='board'&&!e.dead&&e.x>G.CAB){if(!aimT||e.x<aimT.x)aimT=e;}
+    if(!aimT)for(const e of b.enemies)if(e.st==='track'&&!e.dead&&e.x>F-20){if(!aimT||e.x<aimT.x)aimT=e;}
+  }
+  // 炮管始终可见：无目标时水平指向车头前方
+  {
+    const ty=aimT?(aimT.st==='board'?roof-26:Math.min(roof+10,G.RAIL-40)):roof-6;
+    const ang=aimT?Math.atan2(ty-(roof-18),aimT.x-G.TURRET):0;
+    const bl=aimT?40:34;
+    ctx.strokeStyle=wc;ctx.lineWidth=8;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(G.TURRET,roof-18);ctx.lineTo(G.TURRET+Math.cos(ang)*bl,roof-18+Math.sin(ang)*bl);ctx.stroke();
+    ctx.lineCap='butt';
+    {
+      const px=G.TURRET+Math.cos(ang)*(bl+8), py=roof-18+Math.sin(ang)*(bl+8);
+      const pr=(b&&b.t)?(3.2+1.1*Math.sin(b.t*9)):3.6;
+      ctx.fillStyle='#ffd166';
+      ctx.save();ctx.shadowColor='#ffd166';ctx.shadowBlur=aimT?16:8;
+      ctx.beginPath();ctx.arc(px,py,aimT?4.5:pr,0,7);ctx.fill();ctx.restore();
+    }
+  }
+  ctx.restore();
+  ctx.restore();
+
+  /* ========== 内联：整体机车绘制（ox 为拖影偏移） ========== */
+  function body(ox,full){
+    ctx.save();ctx.translate(ox,0);
+    const L=56, N=F;               // 车尾→鼻尖
+    const baseY=560, wheelY=602, wheelR=25;
+    const engCol=r.equip.engine?CATMAP[r.equip.engine.cat].color:'#ffb648';
+    const fCol=r.equip.front?CATMAP[r.equip.front.cat].color:'#8fa3c8';
+    /* 底架与油箱 */
+    rr(L+4,baseY-4,N-L,52,6);ctx.fillStyle='#0d1119';ctx.fill();
+    ctx.fillStyle='#141b2b';ctx.fillRect(230,baseY+36,190,18);
+    ctx.strokeStyle='#2a3a5c';ctx.lineWidth=1.5;ctx.strokeRect(230,baseY+36,190,18);
+    /* 车轮（带辐条转动） */
+    const spin=b? (b.travel*0.05)%(Math.PI*2):0;
+    const wxs=[120,250,396];
+    for(const wx of wxs){
+      ctx.beginPath();ctx.arc(wx,wheelY,wheelR,0,7);ctx.fillStyle='#0a0e16';ctx.fill();
+      ctx.strokeStyle='#3a4d78';ctx.lineWidth=5;ctx.stroke();
+      ctx.save();ctx.translate(wx,wheelY);ctx.rotate(spin);
+      ctx.strokeStyle='#5a7096';ctx.lineWidth=3;
+      for(let s=0;s<3;s++){ctx.rotate(Math.PI*2/3);ctx.beginPath();ctx.moveTo(-8,0);ctx.lineTo(wheelR-7,0);ctx.stroke();}
+      ctx.restore();
+      // 与轨道的火花
+      if(full&&b&&Math.random()<ratio*0.10){b.embers.push({x:wx-6,y:wheelY+wheelR-4,vx:rnd(-90,-20),vy:rnd(-160,-30),t:0,life:rnd(0.2,0.45),c:'#ffd166'});}
+    }
+    ctx.beginPath();ctx.arc(452,wheelY-6,14,0,7);ctx.fillStyle='#0a0e16';ctx.fill();ctx.strokeStyle='#3a4d78';ctx.lineWidth=4;ctx.stroke();
+    /* 车体主体(长罩→鼻) */
+    const g=ctx.createLinearGradient(0,470,0,560);
+    g.addColorStop(0,'#2c3a58');g.addColorStop(0.5,'#1a243c');g.addColorStop(1,'#101623');
+    ctx.beginPath();
+    ctx.moveTo(L,470);ctx.lineTo(448,470);ctx.lineTo(N+14,512);ctx.lineTo(N+18,556);
+    ctx.lineTo(N-6,562);ctx.lineTo(N-6,560);ctx.lineTo(L,560);ctx.closePath();
+    ctx.fillStyle=g;ctx.fill();
+    ctx.strokeStyle='#3d4f78';ctx.lineWidth=2;ctx.stroke();
+    /* 前鼻(倾斜挡板) */
+    ctx.beginPath();ctx.moveTo(448,470);ctx.lineTo(N+14,512);ctx.lineTo(N+18,556);ctx.lineTo(N-10,562);ctx.lineTo(N-10,560);ctx.closePath();
+    ctx.fillStyle='#151c2e';ctx.fill();
+    /* 侧铆钉与蒙皮线 */
+    ctx.fillStyle='#33446a';
+    for(let x=120;x<430;x+=34)for(let y=482;y<552;y+=24){ctx.beginPath();ctx.arc(x,y,1.8,0,7);ctx.fill();}
+    ctx.strokeStyle='#2a3856';ctx.lineWidth=1;
+    for(let y=492;y<552;y+=30){ctx.beginPath();ctx.moveTo(210,y);ctx.lineTo(445,y);ctx.stroke();}
+    /* 阵营色 饰条(引擎/车头部件联动) */
+    if(full){
+      ctx.save();ctx.shadowColor=engCol;ctx.shadowBlur=8;
+      ctx.strokeStyle=engCol;ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(214,556);ctx.lineTo(N-8,556);ctx.stroke();ctx.restore();
+      txt('裁决号',300,516,13,'#7d8fb0');     // 名牌
+      txt('№ 难题-0',300,532,9,'#4d5f85');
+    }
+    /* 驾驶室(左端) */
+    rr(L,470,150,90,4);ctx.fillStyle='#111827';ctx.fill();
+    ctx.strokeStyle='#3d4f78';ctx.lineWidth=2;rr(L,470,150,90,4);ctx.stroke();
+    // 侧窗暖光
+    for(let i=0;i<3;i++){
+      const flick=full&&b?(0.55+0.25*Math.sin(b.t*7+i*1.7)):0.5;
+      ctx.save();ctx.shadowColor='#ffcf8a';ctx.shadowBlur=12;
+      rr(72+i*40,484,28,40,3);ctx.fillStyle='rgba(255,207,138,'+(flick).toFixed(2)+')';ctx.fill();ctx.restore();
+      ctx.strokeStyle='#2a3856';ctx.lineWidth=1.5;rr(72+i*40,484,28,40,3);ctx.stroke();
+    }
+    // 前斜风挡
+    ctx.beginPath();ctx.moveTo(206,474);ctx.lineTo(228,474);ctx.lineTo(228,556);ctx.lineTo(206,556);ctx.closePath();
+    ctx.fillStyle='#0c1424';ctx.fill();ctx.strokeStyle='#3d4f78';ctx.stroke();
+    // 车顶(罩顶走道)
+    ctx.strokeStyle='#2c3a58';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(58,roof);ctx.lineTo(N-2,roof);ctx.stroke();
+    ctx.fillStyle='#22304c';ctx.fillRect(64,roof-6,382,6);
+    for(let x=90;x<430;x+=26){ctx.beginPath();ctx.arc(x,roof-3,2,0,7);ctx.fillStyle='#40527a';ctx.fill();}
+    /* 排气管与蒸汽(尾部) */
+    ctx.fillStyle='#151c2e';ctx.fillRect(238,roof-16,10,16);ctx.fillRect(254,roof-16,10,16);
+    if(full&&b){ // 蒸汽喷吐（确定性循环，无需状态）
+      for(let k=0;k<3;k++){
+        const age=(b.t*1.9+ k*0.55)%1.6;
+        if(age<1.1){
+          const px=236+(k%2?24:0)+age*30, py=roof-18-age*46;
+          const al=Math.max(0,1-age/1.1)*0.16;
+          ctx.globalAlpha=al;ctx.fillStyle='#93a7c2';
+          ctx.beginPath();ctx.arc(px,py,(5+age*14),0,7);ctx.fill();
+          ctx.globalAlpha=1;
+        }
+      }
+    }
+    /* 头灯与光束 */
+    if(full){
+      ctx.save();ctx.shadowColor='#ffe9b0';ctx.shadowBlur=22;
+      ctx.beginPath();ctx.arc(N+2,516,11,0,7);ctx.fillStyle='#fff3cf';ctx.fill();ctx.restore();
+      const beam=ctx.createLinearGradient(N+8,0,N+430,0);
+      beam.addColorStop(0,'rgba(255,235,170,0.30)');beam.addColorStop(1,'rgba(255,235,170,0)');
+      ctx.fillStyle=beam;
+      ctx.beginPath();ctx.moveTo(N+10,506);ctx.lineTo(N+430,470);ctx.lineTo(N+430,560);ctx.lineTo(N+10,526);ctx.closePath();ctx.fill();
+      // 前灯双小灯
+      ctx.fillStyle='#ffe9b0';ctx.beginPath();ctx.arc(N-6,556,3.5,0,7);ctx.fill();
+    }
+    /* 排障器(撞角)·随车头部件换色 */
+    ctx.save();ctx.shadowColor=fCol;ctx.shadowBlur=6;
+    ctx.strokeStyle=fCol;ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(N-4,600);ctx.lineTo(N+20,606);ctx.lineTo(N-4,612);ctx.moveTo(N-10,596);ctx.lineTo(N+30,602);ctx.lineTo(N-10,608);ctx.stroke();
+    ctx.restore();
+    /* 挂钩缓冲器 */
+    ctx.fillStyle='#1a2236';ctx.fillRect(L-14,568,20,18);ctx.fillStyle='#ff8f5a';ctx.beginPath();ctx.arc(L-8,577,4,0,7);ctx.fill();
+    ctx.restore();
+  }
+}
+/* ---------- 敌人绘制 ---------- */
+function drawEnemy(b,e){
+  if(e.dead)return;
+  const frozen=e.frz>0||b.freezeAll>0;
+  const slow=e.slow>0;
+  let x,y,w,h;
+  if(e.st==='board'){x=e.x;y=G.ROOF-e.d.h+6;}
+  else if(e.isBoss){x=e.x- (e.d.w?e.d.w/2:70);y=G.RAIL-40-e.d.h;}
+  else if(e.d.tags.includes('float')){x=e.x- e.d.w/2;y=e.y;}
+  else{x=e.x- e.d.w/2;y=G.RAIL-30-e.d.h;}
+  if(e.isBoss)w=e.d.w,h=e.d.h;else w=e.d.w,h=e.d.h;
+  ctx.save();
+  const col=e.d.color;
+  if(e.isBoss&&e.wImmune){ctx.globalAlpha=0.5+0.25*Math.sin(b.t*14);}
+  ctx.shadowColor=col;ctx.shadowBlur=frozen?22:12;
+  // 主体(圆角块+头)
+  rr(x,y,w,h,8);ctx.fillStyle='#10141f';ctx.fill();
+  ctx.strokeStyle=col;ctx.lineWidth=2.5;rr(x,y,w,h,8);ctx.stroke();
+  // 眼睛
+  ctx.fillStyle=frozen?'#8ff7ff':(slow?'#b6f34c':'#fff');
+  ctx.beginPath();ctx.arc(x+w*0.3,y+h*0.35,4,0,7);ctx.arc(x+w*0.62,y+h*0.35,4,0,7);ctx.fill();
+  if(e.isBoss){ // Boss细节
+    ctx.strokeStyle=col;ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(x+8,y+h-4);ctx.lineTo(x+12,y+h-30);ctx.lineTo(x+24,y+h-4);ctx.moveTo(x+w-8,y+h-4);ctx.lineTo(x+w-12,y+h-30);ctx.lineTo(x+w-24,y+h-4);ctx.stroke();
+  }
+  ctx.restore();
+  // HP条
+  const bw=Math.max(24,w*0.8),ratio=e.hp/e.maxHp;
+  bar(x+w/2-bw/2, y-10, bw,5, ratio, ratio>0.5?'#6dff9e':ratio>0.25?'#ffd166':'#ff5a5a',{back:'#00000066'});
+  if(e.burn>0){ctx.fillStyle='#ff5a3e88';rr(x,y,w,6,2);ctx.fill();}
+  if(frozen){txt('❄',x+w/2,y-24,12,'#7fe9ff',{align:'center'});}
+}
+/* ---------- 战斗场景 ---------- */
+function battleBg(b){
+  ctx.fillStyle='#070a12';ctx.fillRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,300,0,H);
+  g.addColorStop(0,'#0a101f');g.addColorStop(.7,'#0b1220');g.addColorStop(1,'#0d1424');
+  ctx.fillStyle=g;ctx.fillRect(0,300,W,H-300);
+  const vis=b.travel;   // 背景与怪物共用同一速度基准→看起来'贴地'
+  // 地平线剪影
+  ctx.globalAlpha=.35;
+  for(let i=0;i<18;i++){const hx=((i*127+ b.travel*3.6*0.10)%(W+300))-150,hh=70+((i*53)%120);
+    ctx.fillStyle='#0d1526';ctx.fillRect(hx,420-hh,60,hh);}
+  ctx.globalAlpha=1;
+  // 远山/工厂灯
+  const lamp=[[260,'#FF5A3E'],[560,'#38B6FF'],[900,'#FF4FD8'],[1160,'#B6F34C']];
+  for(const [lx,c] of lamp){const ox=((lx-b.travel*3.6*0.18)%W+W)%W;
+    ctx.save();ctx.shadowColor=c;ctx.shadowBlur=14;ctx.fillStyle=c;ctx.beginPath();ctx.arc(ox,330,3,0,7);ctx.fill();ctx.restore();}
+  // 铁轨与路基
+  ctx.fillStyle='#0c1220';ctx.fillRect(0,592,W,128);
+  ctx.fillStyle='#131a2c';
+  for(let x=-(vis%64);x<W;x+=64){ctx.fillRect(x,612,30,10);}
+  ctx.strokeStyle='#33466e';ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(0,628);ctx.lineTo(W,628);ctx.moveTo(0,648);ctx.lineTo(W,648);ctx.stroke();
+  // 速度拖线（贴地高速感）
+  const spr=clamp((b.speedCur/(b.maxV||1)),0,1);
+  if(spr>0.25){
+    ctx.save();
+    for(let i=0;i<9;i++){
+      const ly=594+i*10, len=56+ (i%3)*26, off=(vis*(1.5+i*0.3)+i*197)% (len+150);
+      const a=(spr-0.25)*0.55* (1 - i/10);
+      ctx.globalAlpha=a;ctx.fillStyle=i%2?'#3d5a96':'#4a6fb0';
+      ctx.fillRect(off-len,ly,Math.min(len,off),2);
+    }
+    ctx.restore();ctx.globalAlpha=1;
+  }
+  // 高速掠过的电杆/路灯（近层，更快）
+  for(let i=0;i<5;i++){
+    const px=W-((vis*1.15+i*320)%(W+260))-80;
+    if(px>-30&&px<W){
+      ctx.strokeStyle='#1d2b4a';ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(px,596);ctx.lineTo(px,470);ctx.stroke();
+      ctx.fillStyle='#ffe9b0';ctx.beginPath();ctx.arc(px,468,3,0,7);ctx.fill();
+    }
+  }
+}
+function drawBattle(){
+  const b=BAT,r=RUN;
+  if(!b){setScr('title');return;}
+  battleBg(b);
+  if(b.screenShake>0){ctx.save();ctx.translate(rnd(-b.screenShake,b.screenShake)*0.9,rnd(-b.screenShake,b.screenShake)*0.6);}
+  drawTrain(b);
+  // 炮塔装填指示环
+  if(RUN.equip.weapon&&b.wMaxCd){const cf=1-clamp(b.wCd/b.wMaxCd,0,1);const cxx=G.TURRET,cyy=G.ROOF-24;
+    ctx.save();ctx.strokeStyle='#2c3a5c';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cxx,cyy,13,0,Math.PI*2);ctx.stroke();
+    if(cf>0.01){ctx.strokeStyle='#ffd166';ctx.beginPath();ctx.arc(cxx,cyy,13,-Math.PI/2,-Math.PI/2+cf*Math.PI*2);ctx.stroke();}
+    ctx.restore();}
+  drawJunkDrone();
+  // 轨道怪/浮空/boss
+  for(const e of b.enemies)if(e.st!=='board')drawEnemy(b,e);
+  // 车顶怪(按离驾驶室远→近绘制)
+  const bos=b.enemies.filter(e=>e.st==='board').sort((a,c)=>c.x-a.x);
+  for(const e of bos)drawEnemy(b,e);
+  // 金币
+  for(const c of b.coins){
+    const pulse=0.72+0.28*Math.sin(b.t*7+c.x);
+    const near=c.x<G.FRONT+150&&c.drift;
+    ctx.save();
+    ctx.shadowColor='#ffd166';ctx.shadowBlur=near?22:12;
+    ctx.globalAlpha=Math.min(1,pulse+0.15);
+    ctx.fillStyle='#a97a08';ctx.beginPath();ctx.arc(c.x,c.y,6.2,0,7);ctx.fill();
+    ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(c.x,c.y,4.6,0,7);ctx.fill();
+    ctx.strokeStyle='#fff3cf';ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(c.x,c.y,6.8,0,7);ctx.stroke();
+    if(pulse>0.9){ctx.fillStyle='#fff8dc';ctx.beginPath();ctx.arc(c.x-1.6,c.y-1.9,1.4,0,7);ctx.fill();}
+    ctx.font='bold 8px "Segoe UI","Microsoft YaHei",sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#7a5500';
+    ctx.fillText('$',c.x,c.y+0.6);
+    ctx.restore();
+    ctx.globalAlpha=1;
+    if(near){c.x-=Math.min(150,(G.FRONT-30-c.x)*0.9)*0.016;}
+  }  // 配件箱
+  for(const pt of (b.partsTrack||[])){ctx.save();ctx.shadowColor='#ffc94d';ctx.shadowBlur=10;ctx.fillStyle='#4a3310';rr(pt.x-16,pt.y-13,32,26,5);ctx.fill();
+  ctx.strokeStyle='#ffc94d';ctx.lineWidth=2;rr(pt.x-16,pt.y-13,32,26,5);ctx.stroke();
+  ctx.fillStyle='#ffe9b0';ctx.fillRect(pt.x-10,pt.y-7,20,3);
+  txt('配件',pt.x,pt.y+6,12,'#ffc94d',{align:'center',glow:'#ffc94d'});
+  ctx.restore();}
+  // 弹道
+  for(const pr of b.parts){if(pr.life>0.4)continue;const a=1-pr.t/pr.life;
+    ctx.save();ctx.globalAlpha=a;ctx.strokeStyle=pr.c;ctx.shadowColor=pr.c;ctx.shadowBlur=6;ctx.lineWidth=pr.crit?4:2;
+    ctx.beginPath();ctx.moveTo(pr.x0,pr.y0);ctx.lineTo(pr.x1,pr.y1);ctx.stroke();ctx.restore();}
+  // 余烬
+  for(const m of b.embers){const a=1-m.t/m.life;ctx.globalAlpha=a;ctx.fillStyle=m.c;ctx.beginPath();ctx.arc(m.x,m.y,2,0,7);ctx.fill();}
+  ctx.globalAlpha=1;
+  // 阵营大招动画
+  if(b.abilityAnim==='red'&&b.animT>0){ctx.save();ctx.globalAlpha=b.animT*2;
+    const gg=ctx.createLinearGradient(G.FRONT,0,G.FRONT+760,0);gg.addColorStop(0,'#ff5a3ecc');gg.addColorStop(1,'#ff5a3e00');
+    ctx.fillStyle=gg;ctx.beginPath();ctx.moveTo(G.FRONT,540);ctx.lineTo(G.FRONT+760,490);ctx.lineTo(G.FRONT+760,610);ctx.closePath();ctx.fill();ctx.restore();}
+  if(b.abilityAnim==='blue'&&b.animT>0){ctx.globalAlpha=b.animT*1.5;ctx.strokeStyle='#38B6FF';ctx.lineWidth=4;
+    for(const e of b.enemies)if(e.x>G.FRONT){ctx.beginPath();ctx.moveTo(e.x,0);ctx.lineTo(e.x,e.st==='board'?G.ROOF:e.y);ctx.stroke();}ctx.globalAlpha=1;}
+  if(b.abilityAnim==='steel'&&b.animT>0){for(const e of b.enemies)if(e.st==='board'){txt('✕甩落',e.x,e.y-18,12,'#FFB648',{align:'center'});}}
+  if(b.abilityAnim==='ice'&&b.animT>0){ctx.globalAlpha=.25+b.animT*.4;ctx.fillStyle='#7fe9ff';ctx.fillRect(0,300,W,340);ctx.globalAlpha=1;}
+  if(b.screenShake>0)ctx.restore();
+  // 飘字
+  for(const f of b.fx){const a=1-f.t/f.life;ctx.globalAlpha=a;txt(f.s,f.x,f.y-f.t*40,14,f.color,{align:'center',glow:f.color});}
+  ctx.globalAlpha=1;
+  // Boss信息条
+  if(b.boss&&!b.boss.dead){
+    const e=b.boss;bar(340,40,600,16,e.hp/e.maxHp,e.hp/e.maxHp>.5?'#ff5a5a':'#ffd166',{glow:'#ff5a5a'});
+    txt(e.d.name+'  ['+Math.ceil(e.hp)+'/'+e.maxHp+']',640,18,17,'#ff8a8a',{align:'center',glow:'#ff5a5a'});
+    if(e.d.id==='ghost')txt('状态:'+(e.phase==='solid'?'实化(免疫武器/吃撞击)':'虚化(免疫撞击/吃武器)'),640,64,12,e.phase==='solid'?'#ffd166':'#9fb6ff',{align:'center'});
+    if(e.d.id==='judge'&&b.judge)txt('道德审判将降临…',640,64,13,'#e8f1ff',{align:'center'});
+  }
+  // HUD
+  hudBattle(b);
+  // 汽笛按钮
+  const hx=W-150,hy=70;
+  const ready=b.hornCd<=0;
+  const over=btn(hx,hy,110,54,'',()=>{if(ready&&!b.done&&!b.failed)blowHorn(b);});
+  rr(hx,hy,110,54,27);ctx.fillStyle=ready?(over?'#3a3c20':'#242812'):'#141a26';ctx.fill();
+  ctx.strokeStyle=ready?'#ffd166':'#3a4a66';ctx.lineWidth=2;rr(hx,hy,110,54,27);ctx.stroke();
+  if(!ready){ctx.strokeStyle='#ffd166';ctx.beginPath();ctx.arc(hx+55,hy+27,38, -Math.PI/2, -Math.PI/2+Math.PI*2*(1-b.hornCd/15));ctx.stroke();}
+  txt('汽 笛',hx+55,hy+27,16,ready?'#ffd166':'#4a5a76',{align:'center',base:'middle'});
+  txt(ready?'空格/点击 可释放':'冷却中',hx+55,hy+44,9,'#3a4a66',{align:'center',base:'middle'});
+  // 结束/失败/抉择覆盖层
+  if(b.done)overlayBattleClear(b);
+  if(b.failed)overlayBattleFail(b);
+  if(b.judge&&b.judge.wait)overlayJudge(b);
+}
+function hudBattle(b){
+  const r=RUN;
+  txt('区域 '+r.zone+'/'+ZMAX+(b.kind==='boss'?' · BOSS':' · 行驶中'),20,18,15,'#fff',{glow:'#38B6FF'});
+  bar(20,42,180,13,r.hp/r.hpMax,r.hp/r.hpMax<.3?'#ff5a5a':'#6dff9e',{glow:'#6dff9e'});
+  txt(Math.ceil(r.hp)+'/'+r.hpMax,208,40,12,COL.dim);
+  txt('$'+r.money,208,70,18,'#ffd166',{glow:'#ffd166'});
+  // 甲板
+  txt('车顶',20,86,12,COL.dim);
+  for(let i=0;i<r.deck;i++){ctx.fillStyle=i<b.deckUsed?'#ff8a8a':'#23304f';rr(58+i*16,82,12,12,2);ctx.fill();}
+  if(deckFree(b)===0)txt('已满!',60+r.deck*16,84,10,'#ff8a8a');
+  // 羁绊
+  drawSynergySmall(r,b);
+  txt('已击杀 '+r.stats.kills,20,112,12,COL.dim);
+  if(b&&b.hpN){for(const n of b.hpN.slice()){n.t+=1/60;if(n.t>1.2)b.hpN.splice(b.hpN.indexOf(n),1);}
+    let hx=214,hy=16;b.hpN.forEach(n=>{const a=Math.max(0,1-n.t/1.2);ctx.globalAlpha=a;txt(n.s,hx,hy+8-n.t*16,13,n.color,{glow:n.color});hx+=42;ctx.globalAlpha=1;});}
+  if(b.kind!=='boss'){const pr=clamp(b.travel/b.len,0,1);bar(350,26,300,8,pr,'#38B6FF',{glow:'#38B6FF'});txt('路段 '+Math.round(pr*100)+'%',662,20,10,'#8fa3c8');}
+  txt('▣ 配件箱   ● 资金袋  驶过即拾取',20,132,11,'#3d5a96');
+  const mb=btn(W-46,12,34,34,'',()=>{muted=!muted;if(!muted)ensureAC();});
+  rr(W-46,12,34,34,17);ctx.fillStyle=muted?'#10141f':'#141d30';ctx.fill();ctx.strokeStyle=muted?'#4a5a7a':'#7fd4ff';ctx.lineWidth=1.5;rr(W-46,12,34,34,17);ctx.stroke();
+  txt(muted?'✕':'♪',W-29,21,15,muted?'#5a6a86':'#7fd4ff',{align:'center'});
+}
+function drawSynergySmall(r,b){
+  const list=synergyInfo(r); if(!list.length)return;
+  let x=330;
+  for(const s of list){
+    const c=s.c,w=100;
+    const over=mouse.x>=x&&mouse.x<=x+w&&mouse.y>=594&&mouse.y<=648;
+    rr(x,598,w,48,8);ctx.fillStyle=over?'#1c2a48':'#101a30';ctx.fill();
+    ctx.strokeStyle=c.color+'88';ctx.lineWidth=1;rr(x,598,w,48,8);ctx.stroke();
+    ctx.save();ctx.shadowColor=c.color;ctx.shadowBlur=over?10:5;
+    txt(c.name,x+w/2,604,13,c.color,{align:'center',bold:true});ctx.restore();
+    bar(x+w/2-22,626,44,5,s.n/5,c.color);
+    txt(s.n+'件'+(s.n>=5?'·大招':s.n>=3?'·激活':'·缺'+(3-s.n)),x+w/2,635,10,s.n>=3?'#e8f1ff':COL.dim,{align:'center'});
+    if(over)TIP=synLines(c,s.n);
+    x+=w+8;
+  }
+}
+function blowHorn(b){
+  if(b.hornCd>0)return;b.hornCd=15;b.hornT=1.2;sfx&&sfx('horn');
+  fxText(b,640,220,'呜————!!','#ffd166');
+  b.screenShake=Math.max(b.screenShake,4);
+  for(const e of b.enemies){if(e.st==='board')e.frz=Math.max(e.frz,1.2);if(e.st==='track'){e.pushT=Math.max(e.pushT,0.7);e.x+=60;}}
+}
+function overlayBattleClear(b){
+  ctx.fillStyle='#000b';ctx.fillRect(0,0,W,H);
+  panel(330,120,620,500,{r:16,glow:'#6dff9e'});
+  panelTitle(b.kind==='boss'?'区段 Boss 击破!':'路段清空!',640,158,b.kind==='boss'?'#ffd166':'#6dff9e');
+  txt('区域 '+RUN.zone+' 战果',640,202,13,COL.dim,{align:'center'});
+  const list=b.gained.slice(0,9);
+  glowText('本段新增配件 '+b.gained.length+' 件',640,238,'#9fb6ff',20);
+  let y=266;
+  list.forEach(p=>{
+    partBadges(p,380,y-4,12);
+    txt(p.def.name,500,y,15,'#e8f1ff');
+    txt('['+QNAMES[p.q]+']  '+slotLabel(p.slot),500,y+18,10,QCOL[p.q]);
+    y+=40;
+  });
+  if(!b.gained.length){txt('（没有新增配件：来自撞死/补刀掉落、路上的黄箱、商店购买）',640,300,12,COL.deep,{align:'center'});y=330;}
+  const btnY=b.gained.length?Math.min(y+6,560):330;
+  hudBtn(500,btnY,280,50,'继 续 前 进 →','#6dff9e',()=>advanceZone());
+}
+function overlayBattleFail(b){
+  ctx.fillStyle='#200a';ctx.fillRect(0,0,W,H);
+  panel(400,240,480,240,{r:16,glow:'#ff5a5a'});
+  panelTitle('列车报废',640,285,'#ff5a5a');
+  txt('本次运行抵达区域 '+RUN.zone,640,340,14,'#9fb6c9',{align:'center'});
+  hudBtn(480,430,320,40,'前往结算','#ff5a5a',()=>{RUN.dead=true;RUN.win=false;setScr('result');});
+}
+function overlayJudge(b){
+  ctx.fillStyle='#000c';ctx.fillRect(0,0,W,H);
+  panel(240,120,800,520,{r:16,glow:'#FF4FD8'});
+  panelTitle('⚖ 道德审判 ⚖',640,160,'#e8f1ff');
+  txt('裁决者降下天平：请拉动一根拉杆。',640,205,16,'#b9c6d9',{align:'center'});
+  const opts=[
+    {t:'牺牲它',h:'裁决者损失18%生命，但狂暴(6s内袭更痛)',c:'#ff5a3e'},
+    {t:'牺牲自己',h:'损失22%车体耐久，换取武器6秒无限火力',c:'#38B6FF'},
+    {t:'全民投票',h:'掷硬币：随机实现以上某一种',c:'#B6F34C'},
+  ];
+  opts.forEach((o,i)=>{
+    const y=250+i*96;
+    const over=btn(320,y,640,80,'',()=>applyJudge(b,i));
+    panel(320,y,640,80,{r:10,fill:over?'#1c2540':'#0f1526',glow:over?o.c:null});
+    txt(o.t,360,y+14,20,o.c,{glow:o.c});
+    txt(o.h,360,y+46,13,'#9fb6c9');
+  });
+}
+function applyJudge(b,i){
+  const e=b.boss,r=RUN;
+  const o0=()=>{e.hp=Math.max(1,e.hp-e.maxHp*0.2);e.pushT=Math.max(e.pushT||0,1.8);fxText(b,640,240,'裁决者受创! 眩晕1.8s','#ff5a3e');sfx&&sfx('boom');};
+  const o1=()=>{hurtTrain(b,Math.round(r.hpMax*0.16),'judge');b.frenzyT=7;fxText(b,640,240,'牺牲自己: 武器超载7秒!','#38B6FF');};
+  if(i===0)o0();else if(i===1)o1();else{if(chance(.7))o0();else o1();}
+  b.judge.wait=false;
+}
+/* ---------- 推进 ---------- */
+function advanceZone(){
+  const r=RUN;
+  r.stats.zonesDone++;
+  r.zone++;
+  if(r.zone>ZMAX){r.win=true;setScr('result');return;}
+  nextChoose(r);setScr('choose');
+}
+function clearCurse(r){
+  fxNote('诅咒解除');
+  r.curse=null;
+}
+function startZoneFight(r){
+  BAT=newBattle(r,'fight');setScr('battle');
+}
+function startBoss(r){
+  const map={8:'gate',15:'ghost',22:'chimera',30:'judge'};
+  const id=map[r.zone]||'gate';
+  BAT=newBattle(r,'boss',id);setScr('battle');
+}
+/* ---------- 商店 ---------- */
+let STOCK=null;
+function openShop(r){
+  if((r.rerolls||0)>1)r.rerolls=Math.max(1,Math.floor(r.rerolls/2));
+  if((r.collBuys||0)>1)r.collBuys=Math.max(1,Math.floor(r.collBuys/2));
+  STOCK={items:genStock(r),reroll:0,firstBuy:true};
+  setScr('shop');
+}
+function genStock(r){
+  const z=r.zone;
+  const qb=z>=4?0:0;
+  const arr=[];
+  const rollOne=()=>{const p=makePart(rollPartDef(),qroll(r,qb));
+    while(arr.some(x=>x&&x.def===p.def&&x.q===p.q)){p.def=rollPartDef();}
+    return p;};
+  for(let i=0;i<3;i++)arr.push(rollOne());
+  if(chance(0.75)){arr.push({collect:true});}
+  return arr;
+}
+function drawShop(){
+  const r=RUN;
+  sceneBg();topBar(r);
+  panelTitle('无人机商店 · 货郎蜂',640,150,'#38B6FF');
+  txt('一只巨大的机械黄蜂悬停在站台上，腹舱弹出四个货架：',640,200,14,COL.dim,{align:'center'});
+  txt('$'+r.money+'  ·  刷新 '+Math.round(10*Math.pow(1.4,r.rerolls))+' 资金/次'+(r.collect.freeReroll>0?'（免检通行证剩 '+r.collect.freeReroll+' 次免费）':''),640,222,13,'#ffd166',{align:'center'});
+  // 货架
+  STOCK.items.forEach((it,i)=>{
+    const cx=90+i*290,y=250;
+    if(it.collect){
+      const over=btn(cx,y,250,150,'',()=>buyCollect(r,i));
+      panel(cx,y,250,150,{r:10,fill:over?'#1c2440':'#0f1526',glow:'#FF4FD8'});
+      glowText('收藏品',cx+125,y+18,18,'#FF4FD8');
+      txt('随机收藏品一件(价格随购买数递增)',cx+125,y+52,11,COL.dim,{align:'center'});
+      const price=Math.round(22*Math.pow(1.4,r.collBuys));
+      glowText('$'+price,cx+125,y+96,'#ffd166',20);
+    }else{
+      const p=it;const price=shopPrice(p.def,p.q,r)*(STOCK.firstBuy&&(r.catCount.junk||0)>=3?0.9:1);
+      const over=btn(cx,y,250,240,'',()=>buyPart(r,i));
+      panel(cx,y,250,240,{r:10,fill:over?'#1c2440':'#0f1526',glow:over?CATMAP[p.cat].color:null});
+      ctx.strokeStyle=CATMAP[p.cat].color+'99';ctx.lineWidth=2;rr(cx,y,250,240,10);ctx.stroke();
+      partBadges(p,cx+10,y+8,15);
+      txt(p.def.name,cx+120,y+12,15,'#ffffff',{glow:QCOL[p.q]});
+      txt(slotLabel(p.slot),cx+120,y+31,10,QCOL[p.q]);
+      partLines(p).slice(0,4).forEach((l,j)=>txt(l,cx+12,y+56+j*17,11,COL.dim));
+      const pv=Math.round(price);
+      glowText('$'+pv,cx+125,y+214,'#ffd166',20);
+    }
+  });
+  // 底部
+  if(hudBtn(70,600,180,42,'卖出模式','#7a4fd8',()=>sellMode=!sellMode)){}
+  txt(sellMode?'点击你的配件即可半价出售':'',260,616,13,sellMode?'#b06cff':COL.deep);
+    const rrCost=Math.round(10*Math.pow(1.4,r.rerolls));
+  if(hudBtn(290,600,230,42,'刷新 ('+(r.collect.freeReroll>0?'免费':'$'+rrCost)+')','#22365c',()=>{
+    if(r.collect.freeReroll>0){r.collect.freeReroll--;STOCK={items:genStock(r),firstBuy:false};}
+    else if(r.money>=rrCost){r.money-=rrCost;r.rerolls++;STOCK={items:genStock(r),firstBuy:false};}
+  })){}
+  if(hudBtn(940,600,260,42,'继续出发 →','#38B6FF',()=>advanceZone())){}
+  drawSellList(r);
+}
+let sellMode=false;
+function drawSellList(r){
+  if(!sellMode)return;
+  if(typeof window==='undefined')return;
+  if(typeof window.sellScroll!=='number')window.sellScroll=0;
+  MODAL_IDX=btns.length;                 // 打开卖出层: 下层按钮全部失效
+  ctx.fillStyle='#000c';ctx.fillRect(0,0,W,H);
+  const items=[];
+  r.bench.forEach(p=>items.push({p,src:'货厢'}));
+  SLOTS.forEach(s=>{const p=r.equip[s.id];if(p)items.push({p,src:'已装备·'+slotLabel(s.id)});});
+  const ROWS=5;
+  window.sellScroll=clamp(window.sellScroll,0,Math.max(0,items.length-ROWS));
+  panel(150,64,980,612,{r:16,glow:'#b06cff'});
+  panelTitle('卖出配件（半价回收 · 货厢与已装备均可卖）',640,96,'#b06cff');
+  if(!items.length){
+    txt('没有可卖出的配件',640,240,15,COL.dim,{align:'center'});
+    hudBtn(520,330,240,44,'退出卖出模式','#7a4fd8',()=>sellMode=false); return;
+  }
+  if(items.length>ROWS){
+    txt('第 '+(window.sellScroll+1)+'-'+Math.min(items.length,window.sellScroll+ROWS)+' / '+items.length,640,140,12,'#9fb6ff',{align:'center'});
+    hudBtn(1096,150,40,34,'↓','#22365c',()=>window.sellScroll++);
+    hudBtn(1096,600,40,34,'↑','#22365c',()=>window.sellScroll--);
+  }
+  function sellOne(rd,pp){
+    const sv=sellPrice(pp.def,pp.q);
+    const bi=rd.bench.indexOf(pp);
+    if(bi>=0)rd.bench.splice(bi,1);
+    else{const s2=SLOTS.find(s=>rd.equip[s.id]===pp);if(s2)rd.equip[s.id]=null;}
+    addMoney(rd,sv);recalc(rd);fxNote('卖出 '+pp.def.name+' +$'+sv);sfx&&sfx('coin');
+  }
+  const vis=items.slice(window.sellScroll,window.sellScroll+ROWS);
+  vis.forEach((it,idx)=>{
+    const p=it.p,y=150+idx*92;
+    const over=btn(190,y,900,80,'',()=>sellOne(r,p));
+    panel(190,y,900,80,{r:10,fill:over?'#231b3a':'#0e1526',glow:over?'#b06cff':null});
+    ctx.strokeStyle=CATMAP[p.cat].color+'99';ctx.lineWidth=1.5;rr(190,y,900,80,10);ctx.stroke();
+    partBadges(p,206,y+8,13);
+    txt(p.def.name,206,y+34,16,'#ffffff',{glow:QCOL[p.q]});
+    txt('『'+QNAMES[p.q]+'』 · '+it.src,206,y+54,11,QCOL[p.q]);
+    txt('卖价 $'+sellPrice(p.def,p.q),1010,y+14,15,'#ffd166',{align:'right',glow:'#ffd166'});
+    txt((partLines(p).slice(0,2).join(' ｜ ')),1010,y+36,10,COL.dim,{align:'right'});
+    txt('点击整行 → 卖出',1010,y+58,10,'#b06cff',{align:'right'});
+  });
+  hudBtn(120,652,210,34,'退出卖出模式','#7a4fd8',()=>sellMode=false);
+}
+
+let notes=[];
+function fxNote(s){notes.push({s,t:0});}
+function buyPart(r,i){
+  const it=STOCK.items[i];if(!it||it.collect)return;
+  const price=shopPrice(it.def,it.q,r)*(STOCK.firstBuy&&(r.catCount.junk||0)>=3?0.9:1);
+  if(r.money<price)return;
+  if(!benchAdd(r,it)){fxNote('货厢已满(6)，先卖出一些');return;}
+  r.money-=price;STOCK.firstBuy=false;STOCK.items[i]=null;recalc(r);
+  fxNote('购入 '+it.def.name);
+  STOCK.items=STOCK.items.filter(Boolean);
+}
+function buyCollect(r,i){
+  const it=STOCK.items[i];if(!it||!it.collect)return;
+  const price=Math.round(22*Math.pow(1.4,RUN.collBuys));
+  if(r.money<price)return;
+  r.money-=price;RUN.collBuys++;const c=giveCollect(r);STOCK.firstBuy=false;STOCK.items[i]=null;
+  fxNote('获得收藏品「'+c.name+'」');
+  STOCK.items=STOCK.items.filter(Boolean);
+}
+/* ---------- 修复区 ---------- */
+function drawRepair(){
+  const r=RUN;
+  if(r.curse&&r.curse.clearOnRepair){clearCurse(r);fxNote('检修驱散了诅咒');}
+  sceneBg();topBar(r);
+  panelTitle('修复区 · 道班整备所',640,150,'#6dff9e');
+  txt('锈迹斑斑的检修棚里，扳手猫睡得正香。',640,200,14,COL.dim,{align:'center'});
+  // 耐久
+  const missing=Math.round(r.hpMax-r.hp);
+  const cost=missing>0?Math.max(2,Math.ceil(missing*0.22)):0;
+  panel(220,250,840,120,{r:12});
+  txt('车体耐久',270,280,16,'#fff');
+  bar(380,278,420,18,r.hp/r.hpMax,r.hp/r.hpMax<.3?'#ff5a5a':'#6dff9e',{glow:'#6dff9e'});
+  txt(Math.ceil(r.hp)+' / '+r.hpMax,830,276,14,COL.dim);
+  if(cost>0){if(hudBtn(360,330,300,34,'维修全部  ($'+cost+')','#2c7a4d',()=>{if(r.money>=cost){r.money-=cost;r.hp=r.hpMax;fxNote('维修完毕');}})){}}else txt('耐久完好',500,340,13,'#6dff9e',{align:'center'});
+  // 强化武器
+  const wp=r.equip.weapon;
+  if(wp&&wp.q<3){
+    const upCost=[24,52,92][wp.q];
+    if(hudBtn(360,400,300,34,'强化武器 →'+(wp.q+1<3?' '+QNAMES[wp.q+1]:'金')+' ($'+upCost+')','#7a4fd8',()=>{
+      if(r.money>=upCost){r.money-=upCost;wp.q++;recalc(r);fxNote('武器强化至'+QNAMES[wp.q]);}
+    })){}
+    txt('当前武器:['+QNAMES[wp.q]+']'+wp.def.name,690,414,12,COL.dim);
+  }else txt('（没有可强化的武器，或已至金色）',500,414,12,COL.deep,{align:'center'});
+  if(r.curse){if(hudBtn(360,460,300,34,'驱除诅咒：'+r.curse.name+' ($8)','#ff8a8a',()=>{if(r.money>=8){r.money-=8;clearCurse(r);fxNote('诅咒已驱散');}})){}}else if(!r.curse){txt('（无诅咒）',500,478,12,COL.deep,{align:'center'});}
+  txt('提示：诅咒会在进入修复区后自动解除',360,540,12,COL.deep);
+  if(hudBtn(860,420,160,34,'卖出模式','#7a4fd8',()=>sellMode=!sellMode)){}
+  if(sellMode)drawSellList(r);
+  if(hudBtn(940,600,260,42,'整备完毕，出发 →','#6dff9e',()=>advanceZone())){}
+}
+/* ---------- 事件区 ---------- */
+const EVENTS=[
+ {name:'经典两难',t:'铁轨分岔，左边绑着一只装着配件的保险箱，右边站着一个……挡路阿伯（他好像自愿的）。',
+  opts:[
+   {t:'拉左杆：碾向保险箱',h:'获得随机配件(普通品质)',go:r=>{givePart(r,makePart(rollPartDef(),0));return '箱子裂开，滚出一件配件。';}},
+   {t:'拉右杆：碾向阿伯',h:'他躲开(?)…你获得他的私房钱',go:r=>{addMoney(r,18);return '阿伯一个鲤鱼打挺闪开了，钱包掉在地上。';}},
+   {t:'鸣笛经过谁都不撞',h:'无事发生，获得微薄资金',go:r=>{addMoney(r,6);return '世界线收束：什么都没发生，只有汽笛声回荡。';}},
+  ]},
+ {name:'报废车厢里的哭声',t:'一节报废车厢里传来哭声。里面可能有人——也可能只是排气管在响。',
+  opts:[
+   {t:'停车救人',h:'失去1件随机白部件，获得收藏品「乘客的谢礼」+车体上限',go:r=>{
+      const slot=SLOTS.filter(s=>r.equip[s.id]).find(()=>true);
+      let lost=null;
+      for(const s of SLOTS){if(r.equip[s.id]&&r.equip[s.id].q===0){lost=r.equip[s.id];r.equip[s.id]=null;break;}}
+      if(!lost)for(const s of SLOTS){if(r.equip[s.id]){lost=r.equip[s.id];r.equip[s.id]=null;break;}}
+      if(!lost&&r.bench.length){lost=r.bench.shift();}
+      r.bonusHp+=10;recalc(r);giveCollect(r,COLLECT.findIndex(c=>c.name==='乘客的谢礼')>=0?-1:0);
+      return '车厢里其实是一只扳手猫幼崽。它把谢礼留给你：车体上限+10。'+(lost?'(失去了 '+lost.def.name+')':'');}},
+   {t:'加速冲过',h:'获得遗留资金',go:r=>{addMoney(r,24);return '你冲了过去。哭声渐渐远了……（资金+24）';}},
+  ]},
+ {name:'轨道上的猫',t:'铁轨中央蹲着一只猫，绿眼睛直勾勾看着车头灯。',
+  opts:[
+   {t:'急刹救猫',h:'车体-8，概率获得「扳手猫」',go:r=>{hurtTrainNoBattle(r,8);if(chance(.5)){giveCollect(r,COLLECT.findIndex(c=>c.name==='扳手猫'));return '猫被救起，跳上了你的车顶：获得收藏品「扳手猫」！';}return '猫在最后一秒自己跑了。你损失了刹车片(车体-8)。';}},
+   {t:'碾过去(它躲得开)',h:'获得资金，但可能招来报应',go:r=>{addMoney(r,10);if(chance(.3)){r.curse={name:'猫的怨念',kind:'coin',v:.12,clearOnRepair:true};return '猫闪现躲开了，但在你车尾记了一笔。资金+10，获得诅咒「猫的怨念」。';}return '猫优雅地跳开了。资金+10。';}},
+  ]},
+ {name:'废弃自动售货机',t:'站台上有一台还在通电的售货机，指示灯闪烁着“代币10”。',
+  opts:[
+   {t:'投入$12赌一把',h:'40%紫配件/30%空罐/30%爆炸',go:r=>{r.money-=12;const x=Math.random();if(x<.4){const p=makePart(rollPartDef(),2);givePart(r,p);return '咔哒——掉出一件紫配件：'+p.def.name+'！';}if(x<.7){givePart(r,makePart(rollPartDef(),0));return '掉出一罐“神秘机油”(实为白配件)。';}hurtTrainNoBattle(r,8);return '售货机爆炸了！车体-8。';}},
+   {t:'砸开它',h:'必定损失车体-5，获得其中货物',go:r=>{hurtTrainNoBattle(r,5);givePart(r,makePart(rollPartDef(),1));return '你一肘子砸开玻璃，拿了件蓝配件，手也划破了。';}},
+  ]},
+ {name:'挥旗的信号工人',t:'前方信号工疯狂挥舞红色信号旗，嘴里喊着什么。',
+  opts:[
+   {t:'停车听情报',h:'下一个Boss机制+车体回复15',go:r=>{r.hp=Math.min(r.hpMax,r.hp+15);fxNote('情报已记录(结算时提示Boss机制)');return '他说下一个Boss怕“虚化”类攻击。顺手帮你紧了紧螺栓(+15耐久)。';}},
+   {t:'直接冲过去',h:'被砸扳手-6，捡到他的钱',go:r=>{hurtTrainNoBattle(r,6);addMoney(r,20);return '他骂骂咧咧丢来一把扳手(车体-6)，钱包甩掉了(资金+20)。';}},
+  ]},
+ {name:'幽灵站台的候车者',t:'一座废弃站台上，一个半透明的人影提着旧皮箱，礼貌地招手。',
+  opts:[
+   {t:'搭载他',h:'获得神秘乘客(每场战斗后随机小礼/小窃)',go:r=>{r.passenger=true;return '他飘进最后一节车厢。从此每场战斗后他可能留下小费——也可能顺手牵羊。';}},
+   {t:'拒载并索取保护费',h:'资金+30，但下个商店涨价10%',go:r=>{addMoney(r,30);r.curse=r.curse||{name:'站台怨念',kind:'coin',v:.1,untilZone:r.zone+2};return '你收了他30“买路钱”。他的同伴记住了你的车牌。';}},
+  ]},
+ {name:'被劫持的无人机商人',t:'货郎蜂被两只钢筋棘刺蟹劫持，蜂鸣器发出求救信号。',
+  opts:[
+   {t:'解救它',h:'下次商店全部8折',go:r=>{r.collect.tax=(r.collect.tax||0)-0.2;fxNote('无人机商店下次全品8折');return '货郎蜂获救，为你下次采购打了个折。';}},
+   {t:'顺手抢走货物',h:'获得白配件，但它记仇',go:r=>{givePart(r,makePart(rollPartDef(),0));r._beeAngry=true;return '你抢走一件货物。货郎蜂的复眼闪过红光。';}},
+  ]},
+ {name:'轨道中央的哲学家',t:'一个穿长袍的人站在轨道中央举着喇叭：“请论证你冲过来的合理性！”',
+  opts:[
+   {t:'听他演讲15秒',h:'下一场战斗武器伤害+12%',go:r=>{r._lecture=true;return '演讲内容高深莫测，你感觉武器镀了一层光。(下战斗+12%伤害)';}},
+   {t:'撞过去',h:'他闪开并诅咒你(资金-20%直到修复区)',go:r=>{r.curse={name:'哲学诅咒',kind:'coin',v:.2,clearOnRepair:true};return '他闪现躲开，在你身后幽幽地说：“非功利主义审判——你被诅咒了。”';}},
+  ]},
+ {name:'浓雾预警',t:'前方广播：“浓雾区，能见度极低。轨道上似乎有东西。”',
+  opts:[
+   {t:'绕行雾区',h:'下站强制战斗但掉落+50%',go:r=>{r._fogFight=true;return '你绕道而行，却撞进了一片更浓的雾——前面有战斗。';}},
+   {t:'低速通过',h:'车体-10，雾中捡到蓝配件',go:r=>{hurtTrainNoBattle(r,10);givePart(r,makePart(rollPartDef(),1));return '你放慢车速摸黑前行，从雾里捞出一件蓝配件(车体-10)。';}},
+  ]},
+ {name:'无人看管的维修闸',t:'一截维修支线敞开大门，焊枪还亮着，工人们不知去向。',
+  opts:[
+   {t:'白嫖维修',h:'修复30耐久，40%触发警报',go:r=>{r.hp=Math.min(r.hpMax,r.hp+30);if(chance(.4)){r._alarm=true;return '修好了(耐久+30)……但警报响了！下站会有午夜乘客等你。';}return '焊了几把，免费修了30耐久。';}},
+   {t:'无视',h:'没有收益',go:r=>'你径直开过。道班工人们从厕所探出头，一脸茫然。'},
+  ]},
+];
+const EVN={'乘客的谢礼':0};
+let EV=null,EVmsg=null;
+function openEvent(r){
+  let pool=EVENTS.slice();//避免连出
+  EV=pick(pool);EVmsg=null;
+  if(r.collect.degree){ // 哲学学位多一选项
+  }
+  setScr('event');
+}
+function drawEvent(){
+  const r=RUN;sceneBg();topBar(r);
+  panel(180,90,920,460,{r:16,glow:'#FF4FD8'});
+  glowText('事件区 · 命运岔路',640,130,'#FF4FD8');
+  txt('——「'+EV.name+'」',640,175,20,'#e8f1ff',{align:'center'});
+  txt(EV.t,260,225,15,'#b9c6d9');
+  if(EVmsg){txt(EVmsg,260,480,16,'#ffd166');}
+  else{
+    EV.opts.forEach((o,i)=>{
+      const y=285+i*58;
+      const over=btn(260,y,760,48,'',()=>{EVmsg=o.go(r);});
+      panel(260,y,760,48,{r:8,fill:over?'#1e2a47':'#0f1626',glow:over?'#FF4FD8':null});
+      txt('● '+o.t,282,y+8,15,over?'#fff':'#cfd8e6');
+      txt(o.h,282,y+29,11,COL.dim);
+    });
+  }
+  if(EVmsg){if(hudBtn(940,600,260,42,'继续出发 →','#FF4FD8',()=>advanceZone())){}}
+}
+function hurtTrainNoBattle(r,amt){r.hp-=amt;if(r.hp<=0){r.hp=0;if(r.collect.blackbox){r.hp=Math.round(r.hpMax*.35);r.collect.blackbox=false;fxNote('黑匣子复活!');}else{r.dead=true;r.win=false;setScr('result');}}}
+/* ---------- 总调度 ---------- */
+function step(dt){
+  if(scr==='battle'&&BAT){stepBattle(dt);}
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  for(const n of notes.slice()){n.t+=0.016;}
+  notes=notes.filter(n=>n.t<2.5);
+  switch(scr){
+    case 'title':drawTitle();break;
+    case 'help':drawHelp();break;
+    case 'ready':drawReady();break;
+    case 'choose':drawChoose();break;
+    case 'battle':drawBattle();break;
+    case 'shop':drawShop();break;
+    case 'repair':drawRepair();break;
+    case 'event':drawEvent();break;
+    case 'result':drawResult();break;
+  }
+  // 顶部飘字提示
+  notes.forEach((n,i)=>{txt(n.s,W-40- i*10,40,13,'#ffe9b0',{align:'right',glow:'#ffd166'});});
+}
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();if(scr==='battle'&&BAT&&!BAT.done&&!BAT.failed)blowHorn(BAT);}});
+/* ---------- 启动 ---------- */
+function boot(){
+  const q=new URLSearchParams(location.search);
+  const money=parseInt(q.get('money')||'0',10);
+  const zone=parseInt(q.get('zone')||'0',10);
+  const isDebug=money>0||zone>0||!!q.get('scene')||!!q.get('hp');
+  if(!isDebug){scr='title';return;} // 正常启动→主菜单
+  startGame();
+  if(money>0&&RUN){RUN.money=money;}
+  if(zone>0&&RUN){
+    RUN.zone=Math.min(ZMAX,zone);RUN._segFight=true;
+    nextChoose(RUN);
+    // 测试直达战斗
+    const sc=q.get('scene');
+    if(sc==='battle'||sc==='boss'){BAT=newBattle(RUN,sc==='boss'?'boss':'fight',sc==='boss'?'gate':null);scr='battle';RUN.stats.kills=0;}
+  }
+  if(RUN&&q.get('hp'))RUN.hp=Math.min(RUN.hpMax,parseInt(q.get('hp'),10)||100);
+}
+
+/* ===== WebAudio 合成音效(无素材依赖) ===== */
+let AC=null, muted=false;
+function ensureAC(){ if(typeof window==='undefined')return null;
+  const ACtor=window.AudioContext||window.webkitAudioContext; if(!ACtor)return null;
+  if(!AC){try{AC=new ACtor();}catch(e){return null;}}
+  if(AC.state==='suspended'){try{AC.resume();}catch(e){}}
+  return AC;
+}
+function _tone(freq,dur,type,vol,delay,slide){
+  vol=Math.max(0,Math.min(1,vol*(window.sfxVol===undefined?1:window.sfxVol)));
+  if(muted)return; const ac=ensureAC(); if(!ac)return;
+  try{
+    const o=ac.createOscillator(),g=ac.createGain(),t0=ac.currentTime+(delay||0);
+    o.type=type||'square'; o.frequency.setValueAtTime(freq,t0);
+    if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(28,freq+slide),t0+dur);
+    g.gain.setValueAtTime(vol,t0); g.gain.exponentialRampToValueAtTime(0.0008,t0+dur);
+    o.connect(g); g.connect(ac.destination); o.start(t0); o.stop(t0+dur+0.03);
+  }catch(e){}
+}
+function sfxImpl(k){
+  switch(k){
+    case 'ram': _tone(85,0.16,'square',0.55,0,-40); _tone(48,0.34,'sawtooth',0.6,0.01,-26); break;
+    case 'ramKill': _tone(150,0.13,'square',0.42,0,-90); _tone(52,0.24,'triangle',0.5,0.03); break;
+    case 'knock': _tone(240,0.12,'triangle',0.4,0,-150); break;
+    case 'board': _tone(320,0.09,'square',0.3,0,120); _tone(90,0.35,'sawtooth',0.42,0.06,-50); break;
+    case 'cab': _tone(150,0.4,'sawtooth',0.55,0,-110); break;
+    case 'horn': _tone(130,0.65,'sawtooth',0.32,0,0); _tone(262,0.6,'square',0.16,0.06,0); break;
+    case 'shot': _tone(950,0.045,'square',0.05,0,-500); break;
+    case 'coin': _tone(1250,0.06,'sine',0.11,0,260); break;
+    case 'box': _tone(600,0.07,'sine',0.2,0,200); _tone(900,0.09,'sine',0.16,0.05,150); break;
+    case 'zap2': _tone(1650,0.06,'sine',0.11,0,-500); _tone(820,0.08,'square',0.08,0.03,320); break;
+    case 'boom': _tone(55,0.5,'sawtooth',0.65,0,-18); _tone(160,0.25,'square',0.3,0.03,-60); break;
+    case 'buy': _tone(700,0.07,'sine',0.15,0); _tone(1050,0.1,'sine',0.12,0.06); break;
+    case 'ui': _tone(520,0.06,'sine',0.12,0,180); break;
+  }
+}
+sfx=sfxImpl;
+
+/* ===== 拉杆抉择：更精细的扳道闸 UI（覆盖旧版） ===== */
+const CH_META={
+  battle:['怪物区','怪','#ff5a5a','撞击处刑 + 掉落资金/配件','收益 $15~30 · 有配件机会'],
+  shop:['无人机商店','商','#38B6FF','货郎蜂：买/卖配件与收藏品','花钱换构筑 · 可刷新'],
+  event:['事件区','？','#FF4FD8','真实的电车难题：拉杆做选择','随机事件 · 收藏品机会'],
+  repair:['修复区','修','#6dff9e','修耐久/强化武器/清除诅咒','花销小 · 续航保证'],
+};
+function drawChoose(){
+  const r=RUN;
+  sceneBg();drawRails(now/40);topBar(r);
+  drawRouteMap(r);
+  if(isBossZone(r.zone)){
+    panelTitle('⚠ 前方传来轰鸣 —— Boss 区 锁定 ⚠',640,130,'#ff5a5a');
+    txt(BOSSPREV[r.zone]+(r.zone===ZMAX?'（最终大Boss）':''),640,185,20,'#ffd166',{align:'center',glow:'#ffd166'});
+    txt('区域 '+r.zone+' / '+ZMAX+' · 没有岔路可走了：整条铁轨都通向它。',640,236,14,'#9fb6c9',{align:'center'});
+    txt('它先矗立在轨道上——等你全速撞上去。撞不死，它就会扒上你的车。',640,266,13,'#9fb6c9',{align:'center'});
+    const over=btn(430,360,420,84,'',()=>{sfx&&sfx('boom');goZone(r,'boss');});
+    panel(430,360,420,84,{r:14,fill:over?'#3a1616':'#241010',glow:'#ff5a5a'});
+    glowText('驶 入 Boss 区',640,392,'#ff5a5a',28);
+    if(over)txt('(撞击后它会扒车——武器才是主力)',640,432,12,'#ffb648',{align:'center'});
+  }else{
+    glowText('拉杆抉择 —— 裁决号 下一站往哪开？',640,126,'#ffd166',26);
+    const nextB=bossGap(r.zone);
+    txt('区域 '+r.zone+' / '+ZMAX+'　·　'+(nextB>0?'距 Boss 还有 '+nextB+' 站':'Boss 就在下站！')+'　·　每个普通房后可整备换装',640,172,13,'#9fb6c9',{align:'center'});
+    const total=3, gap=Math.floor((W-3*330)/4);
+    candidates.forEach((cand,i)=>{
+      const m=CH_META[cand.type];
+      const cx=gap+i*(330+gap), y=225;
+      const over=btn(cx,y,330,265,'',()=>{sfx&&sfx('ui');goZone(r,cand.type);});
+      panel(cx,y,330,265,{r:14,fill:over?'#182642':'#0d1526',glow:over?m[2]:null});
+      // 图标与标题
+      glowText(m[1],cx+165,y+52,44,m[2],over?22:10);
+      glowText(m[0],cx+165,y+108,26,m[2],12);
+      // 说明
+      txt(m[3],cx+165,y+152,13,'#b9c6d9',{align:'center'});
+      // 收益/风险行
+      txt(m[4],cx+165,y+186,11,'#8fa3c8',{align:'center'});
+      if(cand.type==='battle'){const stars=Math.min(5,1+Math.ceil(r.zone/3));
+        ctx.fillStyle=over?'#ff5a5a':'#5a3a3a';
+        for(let s=0;s<5;s++){txt(s<stars?'◆':'◇',cx+96+s*34,y+210,13,s<stars?'#ff5a5a':'#4a3a4a',{align:'center'});}
+        txt('威胁程度',cx+165,y+230,10,COL.deep,{align:'center'});
+      }
+      // 扳道闸拉杆
+      const lx=cx+44, lw=242, ly=y+236;
+      ctx.strokeStyle='#2c3a5c';ctx.lineWidth=4;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx+lw,ly);ctx.stroke();
+      ctx.lineCap='butt';
+      const knobX=lx+(over?lw-16:20), knobY=ly+(over?-12:8);
+      ctx.fillStyle='#20293c';ctx.beginPath();ctx.arc(lx+lw-16,ly,10,0,7);ctx.fill();
+      ctx.strokeStyle='#3a4d78';ctx.beginPath();ctx.arc(lx+16,ly,10,0,7);ctx.stroke();
+      ctx.save();ctx.shadowColor=m[2];ctx.shadowBlur=over?16:6;
+      ctx.fillStyle=m[2];
+      ctx.beginPath();ctx.arc(knobX,knobY,11,0,7);ctx.fill();ctx.restore();
+      txt('拉 杆',cx+165,y+262,11,over?'#ffffff':'#8fa3c8',{align:'center'});
+    });
+    if(hudBtn(20,650,150,34,'整备车间','#22365c',()=>equipOpen=!equipOpen)){}
+    if(equipOpen)equipScreen(RUN,'choose');
+  }
+}
+boot();
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第6块：抉择推进(Boss强制版) 与 收尾 ============ */
+function genCandidates(r){
+  const z=r.zone;
+  if(z===1)return [{type:'battle'}];                 // 首区教学战斗
+  if(isBossZone(z))return [];                        // Boss区由强制卡处理
+  const seg=(z-1)%4;
+  const forceFight=!r._segFight;                     // 每段内至少1场战斗
+  const opts=forceFight?['battle']:[];
+  const pool=['shop','event','repair','battle'];
+  shuffle(pool);
+  // 有诅咒时修复更高权重
+  if(r.curse&&!opts.includes('repair'))pool.push('repair');
+  for(const t of pool){if(!opts.includes(t))opts.push(t);if(opts.length>=3)break;}
+  shuffle(opts);
+  return opts.slice(0,3).map(t=>({type:t}));
+}
+function goZone(r,type){
+  if(type==='battle'){startZoneFight(r);}
+  else if(type==='shop'){openShop(r);}
+  else if(type==='event'){openEvent(r);}
+  else if(type==='repair'){setScr('repair');}
+  else if(type==='boss'){startBoss(r);}
+}
+const BOSSPREV={8:'小Boss · 卫戍巨像「站长老闸门」',15:'中Boss · 幽灵列车「班次404」',22:'中Boss · 货运奇美拉「千足编组」',30:'最终Boss · 电车难题「裁决者」'};
+function drawChoose(){
+  const r=RUN;
+  sceneBg();drawRails(now/40);topBar(r);
+  drawRouteMap(r);
+  if(isBossZone(r.zone)){
+    panelTitle('⚠ 前方传来轰鸣 —— Boss 区 锁定 ⚠',640,130,'#ff5a5a');
+    txt(BOSSPREV[r.zone]+(r.zone===ZMAX?'（最终大Boss）':''),640,185,20,'#ffd166',{align:'center',glow:'#ffd166'});
+    txt('区域 '+r.zone+' / '+ZMAX,640,235,14,'#9fb6c9',{align:'center'});
+    txt('没有岔路可走了：整条铁轨都通向它。',640,270,13,COL.dim,{align:'center'});
+    const over=btn(430,360,420,80,'',()=>goZone(r,'boss'));
+    panel(430,360,420,80,{r:14,fill:over?'#3a1616':'#241010',glow:'#ff5a5a'});
+    glowText('驶 入 Boss 区',640,390,'#ff5a5a',26);
+    txt('(撞不动就用武器补，注意它的机制)',640,425,12,'#9fb6c9',{align:'center'});
+  }else{
+    panelTitle('拉杆抉择 —— 裁决号 下一站往哪开？',640,130,'#ffd166');
+    txt('区域 '+r.zone+' / '+ZMAX+' · 按路段分布Boss(小/中/大)',640,178,14,'#9fb6c9',{align:'center'});
+    const metaMap={
+      battle:['怪物区','#ff5a5a','碾过去就有钱·掉配件','怪'],
+      shop:['无人机商店','#38B6FF','货郎蜂：买/卖配件与收藏品','商'],
+      event:['事件区','#FF4FD8','真实的“电车难题”抉择','?'],
+      repair:['修复区','#6dff9e','维修耐久·整备换装','修'],
+    };
+    candidates.forEach((cand,i)=>{
+      const m=metaMap[cand.type];
+      const cx=170+i*320,y=240;
+      const over=btn(cx,y,300,240,'',()=>goZone(r,cand.type));
+      panel(cx,y,300,240,{r:14,fill:over?'#152238':'#0d1526',glow:over?m[1]:null});
+      txt(m[3],cx+150,y+22,13,m[1],{align:'center',glow:m[1]});
+      glowText(m[0],cx+150,y+80,34,m[1],18);
+      txt(m[2],cx+150,y+140,13,'#9fb6c9',{align:'center'});
+      const lx=cx+150,ly=y+195;
+      ctx.fillStyle='#20293c';ctx.fillRect(lx-24,ly,48,10);
+      ctx.fillStyle=over?'#ffd166':'#6b7688';
+      ctx.fillRect(lx-4,ly-34,8,34);
+      txt('▼ 拉下此杆',cx+150,y+216,12,over?'#ffd166':COL.dim,{align:'center'});
+    });
+    if(r.zone>1&&hudBtn(20,650,150,34,'整备车间','#22365c',()=>equipOpen=!equipOpen)){}
+    if(equipOpen)equipScreen(RUN,'choose');
+  }
+}
+/* 事件文案小修：报废车厢的"谢礼"按实际逻辑显示 */
+(function(){
+  const e=EVENTS.find(x=>x.name==='报废车厢里的哭声');
+  if(e)e.opts[0].h='失去1件随机部件，获得随机收藏品+车体上限10';
+})();
+/* end */
+
+</script>
+
+<script>
+
+'use strict';
+/* ===== v0.4 增补：羁绊层数明细/悬停说明/收藏品随时查看 ===== */
+let TIP=null, synOpen=false, colOpen=false, MODAL_IDX=0;
+function synLines(c,n){
+  const out=[c.name+'  × '+n+' / 5'];
+  out.push('· 3件触发：'+c.s3);
+  out.push('· '+(n>=5?'已解锁大招：':'5件大招：')+c.s5);
+  out.push(n>=5?'当前层数已满（5层特效全开）':(n>=3?'已到 3 层，还差 '+(5-n)+' 件开大招':'还差 '+(3-n)+' 件到 3 层'));
+  return out;
+}
+function tipDraw(){
+  if(!TIP)return;
+  ctx.font='12px "Segoe UI","Microsoft YaHei",sans-serif';
+  let w=0;TIP.forEach(l=>{w=Math.max(w,ctx.measureText(l).width)});w+=26;
+  let tx=mouse.x+16,ty=mouse.y+14;
+  if(tx+w>W-8)tx=W-8-w;const h=18*TIP.length+14;
+  if(ty+h>H-8)ty=H-8-h;
+  panel(tx,ty,w,h,{r:8,fill:'#0c1322'});
+  TIP.forEach((l,i)=>txt(l,tx+10,ty+8+i*18,12,i===0?'#7fd4ff':(l.indexOf('已解锁')===0||l.indexOf('已到')===0?'#6dff9e':COL.dim)));
+}
+function collCounts(r){
+  const mm=new Map();(r.coll||[]).forEach(x=>mm.set(x.def.name,(mm.get(x.def.name)||0)+1));
+  return [...mm.entries()].map(([nm,ct])=>({name:nm,count:ct,def:COLLECT.find(d=>d.name===nm)}));
+}
+function collectPanel(){
+  const r=RUN;if(!r)return;
+  panel(300,66,680,572,{r:14,glow:'#FF4FD8'});
+  panelTitle('收藏品（共 '+r.coll.length+' 件 · 永久生效·可叠加）',640,98,'#FF4FD8');
+  const items=collCounts(r);
+  if(!items.length){txt('还没有收藏品——事件区 / 商店黄架 / Boss 会给你。',640,180,15,COL.dim,{align:'center'});}
+  items.slice(0,12).forEach((it,i)=>{
+    const y=140+i*34;
+    txt('『'+it.name+'』'+(it.count>1?' ×'+it.count:''),360,y,15,it.count>1?'#ffc94d':'#e8f1ff');
+    txt(it.def.desc,720,y+2,12,COL.dim,{align:'right'});
+  });
+  hudBtn(520,604,240,34,'关 闭','#7a4fd8',()=>colOpen=false);
+}
+function synPanel(){
+  const r=RUN;if(!r)return;
+  panel(300,70,680,560,{r:14,glow:'#38B6FF'});
+  panelTitle('阵营羁绊一览',640,102,'#7fd4ff');
+  txt('同阵营装备 ≥3 件触发基础加成；≥5 件解锁专属大招。层数只算“已装配”。',640,146,13,COL.dim,{align:'center'});
+  CATS.forEach((c,i)=>{
+    const n=(r.catCount&&r.catCount[c.id])||0;
+    const y=185+i*60;
+    panel(340,y,600,52,{r:8,fill:n?'#152a3f':'#0e1424'});
+    txt(c.name+'  ×'+n+' /5',360,y+8,15,n?'#ffffff':'#8fa3c8',{bold:true});
+    bar(620,y+14,180,6,n/5,c.color);
+    txt(n>=3?(n>=5?'✓ '+c.s5:'✓ '+c.s3):('还差 '+(3-n)+' 件 → '+c.s3),360,y+30,11,n>=3?'#cfd8e6':COL.dim);
+  });
+  hudBtn(520,596,240,34,'关 闭','#38B6FF',()=>synOpen=false);
+}
+function drawEquipOverlays(){
+  if(!RUN)return;
+  if(colOpen)collectPanel();
+  else if(synOpen)synPanel();
+}
+/* 包装主绘制：补悬停提示与面板 */
+const __baseDraw=draw;
+draw=function(){
+  btns.length=0;
+  MODAL_IDX=0;
+  TIP=null;
+  if(RUN){
+    if(typeof RUN.hpMax!=='number'||!isFinite(RUN.hpMax)||RUN.hpMax<=0)RUN.hpMax=110+(RUN.bonusHp||0);
+    if(typeof RUN.hp!=='number'||!isFinite(RUN.hp))RUN.hp=RUN.hpMax;
+    if(RUN.hp>RUN.hpMax)RUN.hp=RUN.hpMax; if(RUN.hp<0)RUN.hp=0;
+    if(typeof RUN.money!=='number'||!isFinite(RUN.money))RUN.money=0;
+  }
+  __baseDraw(); tipDraw();
+  if(RUN&&!sellMode){
+    if(scr==='choose'&&isBossZone(RUN.zone)&&!equipOpen&&!colOpen&&!synOpen){
+      hudBtn(240,638,190,44,'整备车间','#22365c',()=>equipOpen=true);
+      hudBtn(825,638,190,44,'查看收藏品','#7a4fd8',()=>colOpen=true);
+    }
+    if(scr==='shop'&&!equipOpen){hudBtn(612,598,170,42,'整备车间','#22365c',()=>equipOpen=true);}
+    if(equipOpen&&(scr==='shop'||scr==='repair'||(scr==='choose'&&isBossZone(RUN.zone)))){equipScreen(RUN,scr);}
+  }
+  drawEquipOverlays();
+  if(scr==='settings')drawSettingsUI('menu');
+  if(scr==='wiki')drawWikiUI();
+  if(pauseOpen&&scr!=='wiki'&&scr!=='settings')drawPauseUI();
+  if(mouse.clicked){
+    const start=MODAL_IDX>0?MODAL_IDX:0;      // 有模态面板时，下层按钮一律不响应
+    for(let i=btns.length-1;i>=start;i--){const b=btns[i];if(b.over){try{if(b.fn)b.fn();}catch(e){}break;}}
+    mouse.clicked=false;
+  }
+};
+
+
+</script>
+
+<script>
+
+'use strict';
+/* ===== v0.4.5 尾部覆盖：卖出拖动条 / 修复区羁绊强化 / 拾荒无人机 / 血条提示 ===== */
+/* ---- 血条旁增减提示 helper(供 hurtTrain/killEnemy 等调用) ---- */
+function hpNote(b,s,color){ if(!b)return; if(!b.hpN)b.hpN=[]; b.hpN.push({s,color,t:0}); if(b.hpN.length>8)b.hpN.shift(); }
+
+/* ---- 拾荒无人机(5件大招可视化) ---- */
+function junkHas(){ return RUN&&RUN.catCount&&(RUN.catCount.junk||0)>=5; }
+function drawJunkDrone(){
+  const b=BAT; if(!b||b.done||b.failed||!junkHas())return;
+  const t=b.t;
+  const dx=G.TURRET+96+Math.sin(t*2.2)*18;
+  const dy=G.ROOF-64+Math.cos(t*3.1)*10;
+  ctx.save();
+  ctx.fillStyle='#9e7a00'; ctx.beginPath(); ctx.ellipse(dx,dy,9,6,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#3a3a3a'; ctx.beginPath(); ctx.ellipse(dx,dy,5,4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#b6f34c'; ctx.beginPath(); ctx.arc(dx-2,dy-1,1.6,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#ffd166'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(dx,dy,10+Math.sin(t*8)*1.5,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+  if(b.junkT<=1.5){ // 攻击预告
+    const tg=pickTarget(b,900);
+    if(tg){
+      const x0=dx,y0=dy,x1=tg.x,y1=tg.st==='board'?G.ROOF-14:G.RAIL-40;
+      ctx.save();ctx.setLineDash([6,5]);ctx.strokeStyle='#B6F34C';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.setLineDash([]);
+      ctx.restore();
+      glowText('⚠ 啄击预告',x1,y1-24,'#B6F34C',13);
+    }
+  }
+}
+
+/* ---- 卖出面板 v2：拖动条 + 滚轮 ---- */
+function drawSellList(r){
+  if(!sellMode)return;
+  if(typeof window==='undefined')return;
+  if(typeof window.sellScroll!=='number')window.sellScroll=0;
+  MODAL_IDX=btns.length;                     // 下层按钮失效
+  ctx.fillStyle='#000d';ctx.fillRect(0,0,W,H);
+  const items=[];
+  r.bench.forEach(p=>items.push({p,src:'货厢'}));
+  SLOTS.forEach(s=>{const p=r.equip[s.id];if(p)items.push({p,src:'已装备·'+slotLabel(s.id)});});
+  const ROWS=4;
+  const maxSc=Math.max(0,items.length-ROWS);
+  window.sellScroll=clamp(window.sellScroll,0,maxSc);
+  panel(120,56,1000,620,{r:16,glow:'#b06cff'});
+  panelTitle('卖出配件（半价回收 · 货厢与已装备均可卖）',640,86,'#b06cff');
+  if(!items.length){txt('没有可卖出的配件',640,240,15,COL.dim,{align:'center'});hudBtn(500,340,240,44,'退出卖出','#7a4fd8',()=>sellMode=false);return;}
+  if(items.length>ROWS){
+    txt((window.sellScroll+1)+'-'+Math.min(items.length,window.sellScroll+ROWS)+' / '+items.length,640,136,12,'#9fb6ff',{align:'center'});
+    // 拖动条轨道
+    const tx=1082,ty=150,th=420;
+    window.sellGeo={tx,ty,th,maxSc,items:items.length};
+    ctx.fillStyle='#101a30';rr(tx,ty,10,th,5);ctx.fill();
+    const thumbH=Math.max(34,th*ROWS/items.length);
+    const thumbY=ty+(th-thumbH)*(maxSc?window.sellScroll/maxSc:0);
+    ctx.fillStyle='#7a4fd8';rr(tx,thumbY,10,thumbH,5);ctx.fill();
+    ctx.fillStyle='#b06cff';txt('⇅',tx+5,ty+th/2-8,10,'#b06cff',{align:'center'});
+  }else if(window.sellGeo){delete window.sellGeo;}
+  function sellOne(rd,pp){
+    const sv=sellPrice(pp.def,pp.q);
+    const bi=rd.bench.indexOf(pp);
+    if(bi>=0)rd.bench.splice(bi,1);
+    else{const s2=SLOTS.find(s=>rd.equip[s.id]===pp);if(s2)rd.equip[s.id]=null;}
+    addMoney(rd,sv);recalc(rd);fxNote('卖出 '+pp.def.name+' +$'+sv);sfx&&sfx('coin');
+  }
+  const vis=items.slice(window.sellScroll,window.sellScroll+ROWS);
+  vis.forEach((it,idx)=>{
+    const p=it.p,y=150+idx*104;
+    const over=btn(190,y,880,92,'',()=>sellOne(r,p));
+    panel(190,y,880,92,{r:10,fill:over?'#231b3a':'#0e1526',glow:over?'#b06cff':null});
+    ctx.strokeStyle=CATMAP[p.cat].color+'99';ctx.lineWidth=1.5;rr(190,y,880,92,10);ctx.stroke();
+    partBadges(p,206,y+8,13);
+    txt(p.def.name,206,y+34,16,'#ffffff',{glow:QCOL[p.q]});
+    txt('『'+QNAMES[p.q]+'』 · '+it.src,206,y+54,11,QCOL[p.q]);
+    txt('卖价 $'+sellPrice(p.def,p.q),1010,y+14,15,'#ffd166',{align:'right',glow:'#ffd166'});
+    txt((partLines(p).slice(0,2).join(' ｜ ')),1010,y+36,10,COL.dim,{align:'right'});
+    txt('点击整行 → 卖出',1010,y+62,10,'#b06cff',{align:'right'});
+  });
+  hudBtn(150,648,220,36,'退出卖出模式','#7a4fd8',()=>sellMode=false);
+}
+/* 滚轮 + 拖动 */
+(function(){
+  if(typeof cv==='undefined')return;
+  cv.addEventListener('wheel',function(ev){
+    if(!sellMode||!RUN)return;
+    const r=cv.getBoundingClientRect();
+    const mx=(ev.clientX-r.left)*(W/r.width),my=(ev.clientY-r.top)*(H/r.height);
+    const g=window.sellGeo;
+    if(!g)return;
+    if(mx>=g.tx-40&&mx<=W&&my>120&&my<600){
+      ev.preventDefault();
+      const d=ev.deltaY>0?1:-1;
+      if(typeof window.sellScroll!=='number')window.sellScroll=0;
+      window.sellScroll=clamp(window.sellScroll+d,0,g.maxSc);
+    }
+  },{passive:false});
+  cv.addEventListener('mousedown',function(ev){
+    const r=cv.getBoundingClientRect();
+    const mx=(ev.clientX-r.left)*(W/r.width),my=(ev.clientY-r.top)*(H/r.height);
+    const g=window.sellGeo;
+    if(sellMode&&g&&mx>=g.tx-20&&mx<=g.tx+30&&my>=g.ty&&my<=g.ty+g.th){
+      window.sellDrag={sy:my,base:window.sellScroll||0,max:g.maxSc,th:g.th,ty:g.ty,rows:g.items,ROWS:4};
+    }
+  });
+  cv.addEventListener('mousemove',function(ev){
+    const g=window.sellGeo,dr=window.sellDrag;
+    if(sellMode&&dr&&g){
+      const r=cv.getBoundingClientRect();
+      const my=(ev.clientY-r.top)*(H/r.height);
+      const trackH=dr.th,thumbH=Math.max(34,trackH*dr.ROWS/dr.rows);
+      const usable=trackH-thumbH;
+      const frac=(my-dr.sy)/usable;
+      window.sellScroll=clamp(Math.round(dr.base+frac*dr.max),0,dr.max);
+    }
+  });
+  cv.addEventListener('mouseup',function(){window.sellDrag=null;});
+})();
+
+/* ---- 修复区 v2：去掉升级武器 → 羁绊强化(无上限) + 更高的修车费 + 整备入口 ---- */
+const SYNCATLV_LIMIT=60;
+function catLvCost(r,id){const lv=r.catLv[id]||0;return Math.round(28*Math.pow(1.55,lv));}
+function catGainDesc(id){return {red:'撞击+4/级 · 撞击回耐久+0.5%/级',blue:'武器攻速+4%/级 · 溅射+1%/级',steel:'车体上限+18/级 · 驾驶室减伤+2%/级',junk:'资金获取+6%/级',ice:'轨道怪减速+3%/级',para:'速度+4%/级 · 暴击+2%/级'}[id]||'';}
+function catLvTip(id,lv){const nm=CATMAP[id].name;const out=[nm+' 羁绊强化 Lv.'+lv,(lv>0?'当前生效: ':'')+catGainDesc(id),'下一级再买一次即可再+1级。'];if(lv===0)out.splice(1,1,catGainDesc(id));return out;}
+function drawRepair(){
+  const r=RUN;
+  if(r.curse&&r.curse.clearOnRepair){clearCurse(r);fxNote('检修驱散了诅咒');}
+  sceneBg();topBar(r);
+  panelTitle('修复区 · 道班整备所',640,140,'#6dff9e');
+  txt('检修棚灯火通明。羁绊强化把整列车的“性格”越磨越亮。',640,190,13,COL.dim,{align:'center'});
+  // —— 修车(费用随区号上升) ——
+  const missing=Math.round(r.hpMax-r.hp);
+  const cost=missing>0?Math.max(4,Math.ceil(missing*(0.35+0.03*(r.zone-1)))):0;
+  panel(120,230,500,140,{r:12});
+  glowText('修 车',170,252,'#6dff9e',20);
+  bar(170,288,300,16,r.hp/r.hpMax,r.hp/r.hpMax<.3?'#ff5a5a':'#6dff9e',{glow:'#6dff9e'});
+  txt(Math.ceil(r.hp)+' / '+r.hpMax,360,314,12,COL.dim);
+  if(cost>0){
+    if(hudBtn(150,340,240,36,'维修全部 ($'+cost+')','#2c7a4d',()=>{if(r.money>=cost){r.money-=cost;r.hp=r.hpMax;fxNote('维修完毕 车体全满');sfx&&sfx('coin');}})){}
+  } else { txt('车体完好',420,350,12,'#6dff9e',{align:'center'}); }
+  if(r.curse){if(hudBtn(150,392,240,34,'驱散诅咒: '+r.curse.name+' ($8)','#ff8a8a',()=>{if(r.money>=8){r.money-=8;clearCurse(r);fxNote('诅咒已驱散');}})){}}else txt('（无诅咒）',430,406,11,COL.deep,{align:'center'});
+  // —— 羁绊强化(无上限) ——
+  panel(660,230,500,420,{r:12,glow:'#7fd4ff'});
+  glowText('羁绊强化（每级强化对应阵营效果，无上限）',910,252,'#7fd4ff',17);
+  if(!r.catLv)r.catLv={};
+  CATS.forEach((c,i)=>{
+    const lv=r.catLv[c.id]||0;
+    const y=282+i*58;
+    const cost2=catLvCost(r,c.id);
+    ctx.fillStyle='#0e1424';rr(680,y,460,50,8);ctx.fill();
+    ctx.strokeStyle=(r.catCount[c.id]>=3?c.color+'99':'#22304c');ctx.lineWidth=1.5;rr(680,y,460,50,8);ctx.stroke();
+        txt(c.name,700,y+6,15,'#ffffff',{glow:c.color});
+    txt('Lv.'+lv+' · 装配'+(r.catCount[c.id]||0)+'件',700,y+28,10,COL.dim);
+    txt(catGainDesc(c.id),700,y+40,9,'#b6f34c');
+    if(mouse.x>=680&&mouse.x<=1140&&mouse.y>=y&&mouse.y<=y+50){TIP=catLvTip(c.id,lv);}
+    const enable=r.money>=cost2;
+    if(hudBtn(1010,y+6,112,34,'强化 $'+cost2,enable?'#5b8f5b':'#2a3a4a',()=>{
+      if(r.money>=cost2){r.money-=cost2;r.catLv[c.id]=(r.catLv[c.id]||0)+1;recalc(r);fxNote(c.name+' 羁绊强化 Lv.'+r.catLv[c.id]+' → '+catGainDesc(c.id));sfx&&sfx('buy');}
+    })){}
+  });
+  // —— 右下工具 ——
+  if(hudBtn(120,620,170,40,'卖出模式','#7a4fd8',()=>sellMode=!sellMode)){}
+  if(hudBtn(320,620,180,40,'整备车间','#22365c',()=>equipOpen=!equipOpen)){}
+  if(hudBtn(900,650,240,42,'整备完毕，出发 →','#6dff9e',()=>advanceZone())){}
+  if(sellMode)drawSellList(r);
+  else if(equipOpen)equipScreen(r,'repair');
+}
+
+
+</script>
+
+<script>
+
+'use strict';
+/* ============ 第6块：抉择推进(Boss强制版) 与 收尾 ============ */
+function genCandidates(r){
+  const z=r.zone;
+  if(z===1)return [{type:'battle'}];                 // 首区教学战斗
+  if(isBossZone(z))return [];                        // Boss区由强制卡处理
+  const seg=(z-1)%4;
+  const forceFight=!r._segFight;                     // 每段内至少1场战斗
+  const opts=forceFight?['battle']:[];
+  const pool=['shop','event','repair','battle'];
+  shuffle(pool);
+  // 有诅咒时修复更高权重
+  if(r.curse&&!opts.includes('repair'))pool.push('repair');
+  for(const t of pool){if(!opts.includes(t))opts.push(t);if(opts.length>=3)break;}
+  shuffle(opts);
+  return opts.slice(0,3).map(t=>({type:t}));
+}
+function goZone(r,type){
+  if(type==='battle'){startZoneFight(r);}
+  else if(type==='shop'){openShop(r);}
+  else if(type==='event'){openEvent(r);}
+  else if(type==='repair'){setScr('repair');}
+  else if(type==='boss'){startBoss(r);}
+}
+function drawChoose(){
+  const r=RUN;
+  sceneBg();drawRails(now/40);topBar(r);
+  drawRouteMap(r);
+  if(isBossZone(r.zone)){
+    panelTitle('⚠ 前方传来轰鸣 —— Boss 区 锁定 ⚠',640,130,'#ff5a5a');
+    txt(BOSSPREV[r.zone]+(r.zone===ZMAX?'（最终大Boss）':''),640,185,20,'#ffd166',{align:'center',glow:'#ffd166'});
+    txt('区域 '+r.zone+' / '+ZMAX,640,235,14,'#9fb6c9',{align:'center'});
+    txt('没有岔路可走了：整条铁轨都通向它。',640,270,13,COL.dim,{align:'center'});
+    const over=btn(430,360,420,80,'',()=>goZone(r,'boss'));
+    panel(430,360,420,80,{r:14,fill:over?'#3a1616':'#241010',glow:'#ff5a5a'});
+    glowText('驶 入 Boss 区',640,390,'#ff5a5a',26);
+    txt('(撞不动就用武器补，注意它的机制)',640,425,12,'#9fb6c9',{align:'center'});
+  }else{
+    panelTitle('拉杆抉择 —— 裁决号 下一站往哪开？',640,130,'#ffd166');
+    txt('区域 '+r.zone+' / '+ZMAX+' · 按路段分布Boss(小/中/大)',640,178,14,'#9fb6c9',{align:'center'});
+    const metaMap={
+      battle:['怪物区','#ff5a5a','碾过去就有钱·掉配件','怪'],
+      shop:['无人机商店','#38B6FF','货郎蜂：买/卖配件与收藏品','商'],
+      event:['事件区','#FF4FD8','真实的“电车难题”抉择','?'],
+      repair:['修复区','#6dff9e','维修耐久·整备换装','修'],
+    };
+    candidates.forEach((cand,i)=>{
+      const m=metaMap[cand.type];
+      const cx=170+i*320,y=240;
+      const over=btn(cx,y,300,240,'',()=>goZone(r,cand.type));
+      panel(cx,y,300,240,{r:14,fill:over?'#152238':'#0d1526',glow:over?m[1]:null});
+      txt(m[3],cx+150,y+22,13,m[1],{align:'center',glow:m[1]});
+      glowText(m[0],cx+150,y+80,34,m[1],18);
+      txt(m[2],cx+150,y+140,13,'#9fb6c9',{align:'center'});
+      const lx=cx+150,ly=y+195;
+      ctx.fillStyle='#20293c';ctx.fillRect(lx-24,ly,48,10);
+      ctx.fillStyle=over?'#ffd166':'#6b7688';
+      ctx.fillRect(lx-4,ly-34,8,34);
+      txt('▼ 拉下此杆',cx+150,y+216,12,over?'#ffd166':COL.dim,{align:'center'});
+    });
+    if(r.zone>1&&hudBtn(20,650,150,34,'整备车间','#22365c',()=>equipOpen=!equipOpen)){}
+    if(equipOpen)equipScreen(RUN,'choose');
+  }
+}
+/* 事件文案小修：报废车厢的"谢礼"按实际逻辑显示 */
+(function(){
+  const e=EVENTS.find(x=>x.name==='报废车厢里的哭声');
+  if(e)e.opts[0].h='失去1件随机部件，获得随机收藏品+车体上限10';
+})();
+/* end */
+
+</script>
+<script>
+'use strict';
+/* ===== v0.5 主菜单 / 设置(暂停) / 介绍Wiki / 音乐循环 ===== */
+let pauseOpen=false, wikiBack='title', pauseFrom='choose';
+const MUSIC_LIST=['music/电车难题1.mp3','music/电车难题2.mp3','music/电车难题3.mp3','music/电车难题4.mp3'];
+let MUS=null,musIdx=0,musTimer=null,musStarted=false;
+function musicVolVal(){const v=(typeof window!=='undefined')?window.musicVol:undefined;return (typeof v==='number'&&isFinite(v))?Math.max(0,Math.min(1,v)):1;}
+function musicTry(){ if(!MUS||typeof Audio==='undefined')return; const a=MUS[musIdx]; if(a&&a.paused){const p=a.play(); if(p&&p.catch)p.catch(()=>{});} }
+function musicStart(){
+  if(musStarted)return; musStarted=true;
+  if(typeof Audio==='undefined')return;
+  try{
+    MUS=MUSIC_LIST.map(f=>{const a=new Audio(f);a.preload='auto';a.loop=false;a.volume=musicVolVal();return a;});
+    playMus(0);
+  }catch(e){MUS=null;}
+}
+function playMus(i){
+  if(!MUS)return; musIdx=((i%MUS.length)+MUS.length)%MUS.length;
+  const a=MUS[musIdx]; a.volume=musicVolVal(); a.currentTime=0;
+  const p=a.play(); if(p&&p.catch)p.catch(()=>{});
+  a.onended=function(){ if(musTimer)clearTimeout(musTimer); musTimer=setTimeout(function(){playMus(musIdx+1);},3000); };
+}
+function musicApply(){ if(MUS)MUS.forEach(a=>{a.volume=musicVolVal();}); }
+function musicStop(){ if(MUS)MUS.forEach(a=>{try{a.pause();}catch(e){}}); }
+if(typeof window!=='undefined'&&cv){
+  cv.addEventListener('mousedown',function(){ musicStart(); musicTry(); });
+  window.addEventListener('keydown',function(){ musicStart(); musicTry(); });
+  window.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape'){
+      const inGame=RUN&&['ready','choose','battle','shop','repair','event'].indexOf(scr)>=0;
+      if(inGame)pauseOpen=!pauseOpen;
+    }
+  });
+}
+/* step 暂停闸门 */
+const __baseStep=step;
+step=function(dt){ if(pauseOpen&&scr!=='title')return; __baseStep(dt); };
+/* ================= 主菜单 ================= */
+function drawTitle(){
+  sceneBg();
+  drawRails(now/40);
+  glowText('电 车 难 题',640,150,60,'#8fd0ff',30);
+  glowText('TROLLEY DILEMMA',640,232,18,'#38B6FF',10);
+  txt('柴油朋克 × 深夜霓虹 · 肉鸽 × 自走棋 Demo（v0.5）',640,290,13,COL.dim,{align:'center'});
+  hudBtn(470,330,340,54,'▶ 开始游戏','#FFB648',()=>startGame());
+  hudBtn(470,400,340,48,'⚙ 设置','#22365c',()=>setScr('settings'));
+  hudBtn(470,462,340,48,'📖 介绍（小型 Wiki）','#27405f',()=>setScr('wiki'));
+  txt('战斗中按 ESC 打开设置（暂停）· 空格 = 汽笛 · 点♪/✕ 可静音',640,620,12,COL.deep,{align:'center'});
+  if(musicVolVal()>0&&!musStarted)txt('（首次点击后开始播放 music/ 目录 4 首循环，曲间 3 秒）',640,644,10,COL.deep,{align:'center'});
+}
+/* ================= 音量滑杆 ================= */
+function sliderUI(tag,x,y,getFn,setFn){
+  const val=getFn(); const w=360;
+  if(btn(x-22,y-4,16,24,'',()=>setFn(Math.max(0,val-0.1)))){}
+  ctx.fillStyle='#1a2a44';rr(x,y,w,16,8);ctx.fill();
+  ctx.fillStyle='#3a4d78';ctx.fillRect(x,y,w*Math.min(1,val),16);
+  ctx.strokeStyle='#5a6f9a';rr(x,y,w,16,8);ctx.stroke();
+  txt('-',x-14,y+8,13,'#9fb6ff',{align:'center',base:'middle'});
+  if(btn(x+w+4,y-4,16,24,'',()=>setFn(Math.min(1,val+0.1)))){}
+  ctx.fillStyle='#16223c';rr(x+w+4,y-4,16,24,4);ctx.fill();
+  txt('+',x+w+12,y+8,13,'#9fb6ff',{align:'center',base:'middle'});
+  if(btn(x,y,w,16,'',()=>{const v=clamp((mouse.x-x)/w,0,1);setFn(v);})){}
+  ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(x+w*Math.min(1,val),y+8,6,0,7);ctx.fill();
+  txt(tag+'  '+Math.round(val*100)+'%',x+w+34,y+8,13,'#e8f1ff',{base:'middle'});
+}
+/* ================= 设置页(菜单版 / 暂停版共用内容) ================= */
+function drawSettingsUI(from){
+  sceneBg();topBar&&RUN&&topBar(RUN);
+  panel(300,80,680,560,{r:16,glow:'#38B6FF'});
+  panelTitle(from==='pause'?'设置（游戏已暂停）':'设置',640,110,from==='pause'?'#ffd166':'#7fd4ff');
+  if(from==='pause')txt('按 ESC 或点击“继续游戏”返回',640,146,12,COL.dim,{align:'center'});
+  glowText('音乐音量',400,210,'#9fb6ff',16);
+  if(typeof window.musicVol!=='number'||!isFinite(window.musicVol))window.musicVol=1;
+  sliderUI('音乐',400,240,()=>window.musicVol,(v)=>{window.musicVol=Math.round(v*100)/100;musicApply();});
+  glowText('音效音量',400,300,'#9fb6ff',16);
+  if(typeof window.sfxVol!=='number'||!isFinite(window.sfxVol))window.sfxVol=1;
+  sliderUI('音效',400,330,()=>window.sfxVol,(v)=>{window.sfxVol=Math.round(v*100)/100;});
+  glowText('分辨率（Godot 正式版启用）',400,410,'#9fb6ff',16);
+  panel(400,440,360,40,{r:8});txt('窗口 '+(innerWidth)+'×'+(innerHeight)+'（当前演示自适应；正式版可调 720p/1080p 等）',400,452,12,COL.dim,{base:'middle'});
+  if(from==='pause'){
+    hudBtn(340,540,160,44,'继续游戏','#6dff9e',()=>pauseOpen=false);
+    hudBtn(760,540,180,44,'📖 介绍','#27405f',()=>{wikiBack='pause';if(['choose','battle','shop','repair','event'].indexOf(scr)>=0)pauseFrom=scr;setScr('wiki');});
+  }else{
+    hudBtn(340,540,160,44,'返回','#38B6FF',()=>setScr('title'));
+    hudBtn(760,540,180,44,'📖 介绍','#27405f',()=>setScr('wiki'));
+  }
+  if(RUN&&from==='pause'){} else {}
+}
+function drawPauseUI(){
+  pauseOpen&&scr==='battle';
+  ctx.fillStyle='#000c';ctx.fillRect(0,0,W,H);
+  drawSettingsUI('pause');
+}
+/* ================= 介绍/Wiki ================= */
+let wikiSection=0, wikiScroll=0;
+const WIKI_SECS=['玩法与机制','配件一览','收藏品一览','羁绊一览','怪物与Boss','事件一览'];
+function wikiLines(){
+  const lines=[];
+  if(wikiSection===0){
+    const M=[
+      "—— 核心玩法 ——",
+      "列车冲撞 -> 击飞 -> 折返 -> 二次撞击扒车；车顶怪用武器补刀。",
+      "车体耐久归零=本局结束；到达 #30 击败最终Boss=胜利。",
+      "—— 区域与路径 ——",
+      "共30区，Boss固定 #8 / #15 / #22 / #30；普通区后拉杆选站。",
+      "Boss房/商店/修复区内都可就地“整备车间”换装。",
+      "—— 商店机制 ——",
+      "刷新价 10x1.4^n、收藏品 22x1.4^n（n为该店购买次数，每次进店 n>1 减半）。",
+      "可卖货厢+已装备配件(半价)；商品品质随区域上浮。",
+      "—— 掉落机制 ——",
+      "撞死/补刀掉落配件；路上的黄“配件箱”驶过即拾取并立刻消失。",
+      "黄色光点=资金袋；精英/列车/Boss 必掉更高品质配件。",
+      "—— 车顶机制 ——",
+      "基础4格(大怪2格)；怪摸到驾驶室=破袭扣耐久并被顶开。",
+      "黑钢“铆接甲板”配件把车顶-1，是防守向正面收益。",
+      "—— 羁绊 ——",
+      "同阵营已装配≥3件激活基础加成，≥5件解锁大招。",
+      "修复区可无上限强化羁绊(逐级放大对应数值)。",
+      "—— 汽笛 ——",
+      "空格或按钮：眩晕车顶怪1.2秒并推开轨道怪。",
+      "—— 黑匣子 ——",
+      "车体首次归零以35%耐久复活一次。",
+    ];
+    M.forEach(x=>lines.push(x));
+  } else if(wikiSection===1){
+    CATS.forEach(ct=>{
+      lines.push("■ "+ct.name+"   3件: "+ct.s3);
+      lines.push("  5件大招: "+ct.s5);
+      ct.parts.forEach(pp=>lines.push("  ·["+pp.name+"] 槽:"+((SLOTS.find(s=>s.id===pp.slot))||{label:pp.slot}).label+"  "+pp.desc));
+    });
+  } else if(wikiSection===2){
+    COLLECT.forEach(cc=>lines.push("·"+cc.name+"："+cc.desc));
+  } else if(wikiSection===3){
+    CATS.forEach(ct=>lines.push("■ "+ct.name+"   ×3 = "+ct.s3,"　×5 = "+ct.s5,"　(修复区强化逐级放大数值，详见整备)"));
+  } else if(wikiSection===4){
+    MDEFS.forEach(d=>{const tg=(d.tags&&d.tags.length)?("  ["+d.tags.join("/")+"]"):"";lines.push("·"+d.name+tg+(d.coin?("  掉$"+d.coin):"")+"  "+(d.board>0?"可扒车":"不可扒车"));});
+    lines.push("—— Boss ——");
+    lines.push("#8 卫戍巨像·站长老闸门：召唤爬车怪 + 撞车头");
+    lines.push("#15 幽灵列车·班次404：虚化(炮火失效&加速) 实化(输出窗口) 切换");
+    lines.push("#22 千足奇美拉：本体只吃撞击；武器杀蠕虫震落装甲-100/条");
+    lines.push("#30 电车难题·裁决者：三阶段 + 道德审判拉杆");
+  } else {
+    EVENTS.forEach(ev=>{lines.push("◆ "+ev.name+"："+(ev.t||"").slice(0,44));});
+  }
+  return lines;
+}
+function drawWikiUI(){
+  sceneBg();topBar&&RUN&&topBar(RUN);
+  panel(150,60,980,610,{r:16,glow:'#7fd4ff'});
+  panelTitle('介绍 · 小型 Wiki',640,92,'#7fd4ff');
+  const secs=WIKI_SECS;
+  const bw=Math.floor(960/secs.length);
+  secs.forEach((s,i)=>{
+    const over=btn(170+i*bw,126,bw-8,30,'',()=>{wikiSection=i;wikiScroll=0;});
+    ctx.fillStyle=wikiSection===i?(over?'#2c4470':'#1e3150'):'#121a30';
+    rr(170+i*bw,126,bw-8,30,6);ctx.fill();
+    txt(s,170+i*bw+(bw-8)/2,134,12,wikiSection===i?'#ffffff':'#9fb6c9',{align:'center',base:'middle'});
+  });
+  const lines=wikiLines();
+  const maxSc=Math.max(0,lines.length-24);
+  window.wikiScroll=typeof window.wikiScroll==='number'?window.wikiScroll:0;
+  window.wikiScroll=clamp(window.wikiScroll,0,maxSc);
+  const vis=lines.slice(window.wikiScroll,window.wikiScroll+24);
+  const colX=210;
+  vis.forEach((l,i)=>{
+    const color=(l.indexOf('——')===0||l.indexOf('■')===0)?'#ffd166':(l.indexOf('◆')===0?'#FF4FD8':'#cfd8e6');
+    txt(l,colX,180+i*20,12,l.length>78?COL.dim:color);
+  });
+  if(lines.length>24){
+    hudBtn(1120,300,40,40,'↑','#22365c',()=>window.wikiScroll--);
+    hudBtn(1120,360,40,40,'↓','#22365c',()=>window.wikiScroll++);
+    txt((window.wikiScroll+1)+'-'+Math.min(lines.length,window.wikiScroll+24)+'/'+lines.length,1140,260,10,COL.dim,{align:'center'});
+  }
+  hudBtn(150,650,150,34,'返回', '#38B6FF',()=>{ if(wikiBack==='pause')setScr(pauseFrom||'choose'); else setScr('title'); });
+}
+(function(){
+  if(typeof cv==='undefined')return;
+  cv.addEventListener('wheel',function(ev){
+    if(scr!=='wiki')return;
+    ev.preventDefault();
+    window.wikiScroll=clamp((window.wikiScroll||0)+(ev.deltaY>0?1:-1),0,9999);
+  },{passive:false});
+})();
+
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a4240b79598ddc',t:'MTc4OTI3MDkzNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<!-- source: deepdemos.top | author: 0neKbyte | title: 电车难题！！！ -->
+</body>
+</html>

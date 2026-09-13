@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><base href="/preview/ascii-fpv-ee29becc/vfe16ae919cc7/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASCII FPV — 文字穿越机</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+  #c{display:block;width:100vw;height:100vh;background:#000}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+/* =======================================================================
+   ASCII FPV —— 文字穿越机
+   画面 100% 由彩色 ASCII 字符在等宽网格上排布而成：没有像素填充、
+   没有纹理贴图，每个字符格做一次软件光栅化 + 光照 + 距离雾 + 轮廓描边。
+
+   操作：
+     W / S      俯仰 -45° ~ +45°（W 低头，S 抬头）
+     A / D      滚转 -45° ~ +45°（角速率模式）
+     Z / X      加速 / 减速，速度 10 ~ 50 m/s
+     R          重新开始
+
+   飞行模型：滚转角 45° 时偏航角速度为 90°/s，偏航角速度与滚转角成
+   正比（2 × 滚转角），即线性协调转弯。
+   ======================================================================= */
+
+/* ---------------- 基础工具 ---------------- */
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+const D2R = Math.PI/180, R2D = 180/Math.PI;
+
+function hashInt(i,j){
+  let h = Math.imul(i|0, 374761393) ^ Math.imul(j|0, 668265263);
+  h = Math.imul(h ^ (h>>>13), 1274126177);
+  return (h ^ (h>>>16)) >>> 0;
+}
+function rnd01(i,j){ return hashInt(i,j) / 4294967296; }
+function mulberry32(a){
+  a = a>>>0;
+  return function(){
+    a = (a + 0x6D2B79F5)|0;
+    let t = Math.imul(a ^ (a>>>15), 1|a);
+    t = (t + Math.imul(t ^ (t>>>7), 61|t)) ^ t;
+    return ((t ^ (t>>>14))>>>0) / 4294967296;
+  };
+}
+function pad(n,len){ let s = Math.round(n).toString(); while(s.length<len) s='0'+s; return s; }
+function sgn(n){ const v=Math.round(n); return (v>=0?'+':'-')+pad(Math.abs(v),2); }
+
+/* ---------------- 世界常量 ---------------- */
+const P          = 80;      // 街区周期（米）：道路位于 (i+0.5)*P
+const ROAD_HALF  = 8;       // 道路半宽
+const NEAR       = 0.6;     // 近裁剪
+const RENDER_D   = 430;     // 绘制半径
+const RENDER_D2  = RENDER_D*RENDER_D;
+const FOG_NEAR   = 70, FOG_FAR = 400;
+const SUN = (function(){ const v=[0.44,0.80,-0.42]; const l=Math.hypot(v[0],v[1],v[2]); return [v[0]/l,v[1]/l,v[2]/l]; })();
+
+const M_GROUND=0, M_WALL=1, M_ROOF=2, M_TREE=3;
+
+const PALETTE = [
+  [122,146,178],[150,152,158],[176,150,116],[104,152,152],
+  [140,124,168],[168,132,132],[118,140,120],[96,116,148],[160,160,140]
+];
+
+/* 每种材质一套字符：地面用点线、墙体用竖线、屋顶用横线、树木用星点，
+   这样即使亮度接近，三种物体也能一眼区分 */
+const RAMPS = [
+  " .,:;-=+*#",   // M_GROUND 地面 / 道路
+  " .:!|IH#%@",   // M_WALL   楼体幕墙
+  " .:-=+*#%@",   // M_ROOF   屋顶
+  " .,:^oO&%@"    // M_TREE   树木
+];
+
+/* ---------------- 画布 / 字符网格 ---------------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', {alpha:false});
+
+let W=0,H=0,cellW=8,cellH=14,cols=0,rows=0,gx0=0,gy0=0,cxs=0,cys=0;
+let zbuf=null, chBuf=null, colBuf=null, matBuf=null;
+
+function setupGrid(){
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  const cssW = Math.max(320, window.innerWidth);
+  const cssH = Math.max(240, window.innerHeight);
+  W = Math.floor(cssW*dpr); H = Math.floor(cssH*dpr);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = cssW+'px'; canvas.style.height = cssH+'px';
+
+  let fs = Math.round(H/54);
+  fs = clamp(fs, 10, 36);
+  ctx.font = fs+'px ui-monospace,"Cascadia Mono",Consolas,"DejaVu Sans Mono",Menlo,monospace';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  cellW = ctx.measureText('M').width;
+  cellH = Math.round(fs*1.16);
+
+  cols = Math.max(24, Math.floor(W/cellW));
+  rows = Math.max(14, Math.floor(H/cellH));
+  gx0 = Math.floor((W - cols*cellW)/2);
+  gy0 = Math.floor((H - rows*cellH)/2);
+  cxs = W/2; cys = H/2;
+
+  const n = cols*rows;
+  zbuf   = new Float32Array(n);
+  chBuf  = new Uint8Array(n);
+  colBuf = new Uint32Array(n);
+  matBuf = new Uint8Array(n);
+}
+
+/* ---------------- 相机 / 飞行状态 ---------------- */
+const cam = {x:0,y:45,z:0};
+let yaw=0, pitch=0, roll=0, speed=22;
+let focal = 800, focalTarget = 800;
+
+const fw = {x:0,y:0,z:-1};   // 机头方向（世界）
+const rx = {x:1,y:0,z:0};    // 机体右
+const up = {x:0,y:1,z:0};    // 机体上
+
+function updateBasis(){
+  const cp=Math.cos(pitch), sp=Math.sin(pitch), cy=Math.cos(yaw), sy=Math.sin(yaw);
+  fw.x = sy*cp; fw.y = sp; fw.z = -cy*cp;
+  // right0 = normalize(cross(fw, worldUp))
+  let r0x = -fw.z, r0y = 0, r0z = fw.x;
+  const rl = Math.hypot(r0x,r0z) || 1;
+  r0x/=rl; r0z/=rl;
+  // up0 = cross(right0, fw)
+  const u0x = r0y*fw.z - r0z*fw.y;
+  const u0y = r0z*fw.x - r0x*fw.z;
+  const u0z = r0x*fw.y - r0y*fw.x;
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  rx.x = r0x*cr - u0x*sr; rx.y = r0y*cr - u0y*sr; rx.z = r0z*cr - u0z*sr;
+  up.x = u0x*cr + r0x*sr; up.y = u0y*cr + r0y*sr; up.z = u0z*cr + r0z*sr;
+}
+
+/* ---------------- 场景生成 ---------------- */
+const blockCache = new Map();
+
+function addBox(list, x0,x1, z0,z1, y0,y1, col, seed){
+  const cy=(y0+y1)*0.5, cx2=(x0+x1)*0.5, cz2=(z0+z1)*0.5;
+  const lit = (nx,ny,nz)=> 0.34 + 1.00*Math.max(0, nx*SUN[0]+ny*SUN[1]+nz*SUN[2]);
+  // +x / -x
+  list.push({p:[[x1,y0,z0],[x1,y0,z1],[x1,y1,z1],[x1,y1,z0]], n:[1,0,0],  c:[x1,cy,cz2], mat:M_WALL, col, seed, light:lit(1,0,0)});
+  list.push({p:[[x0,y0,z1],[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]], n:[-1,0,0], c:[x0,cy,cz2], mat:M_WALL, col, seed, light:lit(-1,0,0)});
+  // +z / -z
+  list.push({p:[[x1,y0,z1],[x0,y0,z1],[x0,y1,z1],[x1,y1,z1]], n:[0,0,1],  c:[cx2,cy,z1], mat:M_WALL, col, seed, light:lit(0,0,1)});
+  list.push({p:[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]], n:[0,0,-1], c:[cx2,cy,z0], mat:M_WALL, col, seed, light:lit(0,0,-1)});
+  // 顶面
+  list.push({p:[[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], n:[0,1,0],  c:[cx2,y1,cz2], mat:M_ROOF, col, seed, light:lit(0,1,0)});
+}
+
+function makeTree(x,z,rng){
+  const h = 6.5 + rng()*6.5;
+  const w = 2.1 + rng()*1.5;
+  const face = {
+    p: [[x-w,0,z],[x+w,0,z],[x+w,h,z],[x-w,h,z]],
+    n: [0,0,1], c: [x, h*0.5, z],
+    mat: M_TREE, col:[0,0,0], seed: 0,
+    tree: {x, z, y0:0, y1:h, halfW:w, rx:1, rz:0},
+    light: 1
+  };
+  return {x, z, rad:w+3, face};
+}
+
+function makeBlock(i,j){
+  const key = i*1000003 + j;
+  let blk = blockCache.get(key);
+  if (blk) return blk;
+
+  const rng = mulberry32(hashInt(i,j));
+  const buildings = [], trees = [];
+  const cx = i*P, cz = j*P;
+  const inner = P/2 - ROAD_HALF - 3;   // 29
+
+  const kind = rng();
+  if (kind < 0.13){
+    /* 公园：树 + 小亭 */
+    const n = 7 + (rng()*7|0);
+    for (let k=0;k<n;k++){
+      trees.push(makeTree(cx + (rng()*2-1)*inner*0.9, cz + (rng()*2-1)*inner*0.9, rng));
+    }
+    if (rng() < 0.55){
+      const w = 5 + rng()*6, h = 4 + rng()*5;
+      const x0 = cx - w, x1 = cx + w, z0 = cz - w, z1 = cz + w;
+      addBox(buildings, x0,x1,z0,z1, 0,h, [150,152,158], hashInt(i,j));
+      buildings.push({cx, cz, rad: Math.hypot(w,w)+4, faces: buildings.splice(buildings.length-5,5)});
+    }
+  } else if (kind < 0.62){
+    /* 单栋塔楼 */
+    const w = 12 + rng()*16, d = 12 + rng()*16;
+    let h = 16 + Math.pow(rng(),1.7)*118;
+    const ox = (rng()*2-1)*Math.max(0,inner-w), oz = (rng()*2-1)*Math.max(0,inner-d);
+    const x0=cx+ox-w, x1=cx+ox+w, z0=cz+oz-d, z1=cz+oz+d;
+    const col = PALETTE[(rng()*PALETTE.length)|0];
+    const seed = hashInt(i*3+1, j*3+7);
+    const faces=[];
+    if (h > 55 && rng() < 0.55){
+      /* 带收分的楼：下宽上窄 */
+      const cut = 0.55 + rng()*0.25;
+      const h1 = h*cut;
+      addBox(faces, x0,x1,z0,z1, 0,h1, col, seed);
+      const k = 0.55 + rng()*0.2;
+      const mw=(x1-x0)*0.5*k, md=(z1-z0)*0.5*k;
+      addBox(faces, cx+ox-mw, cx+ox+mw, cz+oz-md, cz+oz+md, h1, h, col, seed+17);
+    } else {
+      addBox(faces, x0,x1,z0,z1, 0,h, col, seed);
+    }
+    buildings.push({cx: cx+ox, cz: cz+oz, rad: Math.hypot(x1-x0,z1-z0)*0.5+4, faces});
+  } else {
+    /* 2x2 小楼群 */
+    const q = inner/2;
+    for (let a=0;a<2;a++) for (let b=0;b<2;b++){
+      if (rng() < 0.18) continue;
+      const bx = cx + (a?q:-q), bz = cz + (b?q:-q);
+      const w = 7 + rng()*8, d = 7 + rng()*8;
+      const h = 10 + Math.pow(rng(),1.8)*80;
+      const col = PALETTE[(rng()*PALETTE.length)|0];
+      const faces=[];
+      addBox(faces, bx-w, bx+w, bz-d, bz+d, 0, h, col, hashInt(i*7+a, j*7+b));
+      buildings.push({cx:bx, cz:bz, rad: Math.hypot(w,d)+4, faces});
+    }
+  }
+
+  /* 行道树 */
+  const sides = [[1,0],[-1,0],[0,1],[0,-1]];
+  const nSides = 2 + (rng()*3|0);
+  const off = P/2 - (ROAD_HALF+2.4);
+  for (let s=0;s<nSides;s++){
+    const side = sides[(rng()*4)|0];
+    for (let k=0;k<3;k++){
+      const t = ((k+0.5)/3)*2-1;
+      let tx, tz;
+      if (side[0] !== 0){ tx = cx + side[0]*off; tz = cz + t*off*0.92; }
+      else { tz = cz + side[1]*off; tx = cx + t*off*0.92; }
+      trees.push(makeTree(tx, tz, rng));
+    }
+  }
+
+  blk = {buildings, trees};
+  if (blockCache.size > 4000) blockCache.clear();
+  blockCache.set(key, blk);
+  return blk;
+}
+
+/* 地面（一块巨大的板，靠程序化纹理区分道路/人行道/草地） */
+const groundFace = {
+  p: [[-1,0,-1],[-1,0,-1],[-1,0,-1],[-1,0,-1]],
+  n: [0,1,0], c: [0,0,0], mat: M_GROUND, col:[0,0,0], seed:0, light:0.9
+};
+
+/* ---------------- 顶点池 ---------------- */
+const VP = []; let vpi = 0;
+function V(){
+  let o = VP[vpi];
+  if (!o){ o = {x:0,y:0,z:0,wx:0,wy:0,wz:0,sx:0,sy:0,iz:0,wxz:0,wyz:0,wzz:0}; VP.push(o); }
+  vpi++;
+  return o;
+}
+const camScratch  = new Array(8);
+const clipScratch = new Array(8);
+
+/* ---------------- 着色 ---------------- */
+let _ch = 0;
+
+function packRGB(r,g,b,mat){
+  if (r<0) r=0; else if (r>255) r=255;
+  if (g<0) g=0; else if (g>255) g=255;
+  if (b<0) b=0; else if (b>255) b=255;
+  r|=0; g|=0; b|=0;
+  const lum = (0.299*r + 0.587*g + 0.114*b) * (1/255);
+  if (lum < 0.020){ _ch = 0; return (r<<16)|(g<<8)|b; }
+  const ramp = RAMPS[mat] || RAMPS[0];
+  let idx = Math.round(Math.pow(lum,0.75)*9.5);
+  if (idx < 1) idx = 1;
+  if (idx > ramp.length-1) idx = ramp.length-1;
+  _ch = ramp.charCodeAt(idx);
+  return (r<<16)|(g<<8)|b;
+}
+
+let fogNear = FOG_NEAR, fogSpan = FOG_FAR - FOG_NEAR;
+let renderD = RENDER_D, renderD2 = RENDER_D2, treeD = 190, treeD2 = 190*190;
+function updateViewDist(){
+  const extra = Math.max(0, cam.y - 45) * 3.5;
+  renderD = RENDER_D + extra;
+  renderD2 = renderD*renderD;
+  fogNear = FOG_NEAR;
+  fogSpan = (FOG_FAR + extra) - fogNear;
+  treeD = 190 + extra*0.6;
+  treeD2 = treeD*treeD;
+}
+
+function shadeCell(wx,wy,wz,f,depth){
+  const mat = f.mat;
+  let r=0,g=0,b=0;
+
+  if (mat === M_GROUND){
+    /* --- 程序化地面：沥青 / 车道线 / 斑马线 / 路缘 / 人行道 / 草地 --- */
+    const roadX = (Math.floor(wx/P) + 0.5)*P;
+    const roadZ = (Math.floor(wz/P) + 0.5)*P;
+    const dx = wx - roadX, dz = wz - roadZ;
+    const ax = Math.abs(dx), az = Math.abs(dz);
+    const onX = ax < ROAD_HALF;          // 沿 z 方向的道路
+    const onZ = az < ROAD_HALF;          // 沿 x 方向的道路
+    if (onX || onZ){
+      const n = rnd01(wx*0.25, wz*0.25);
+      r = 66+n*14; g = 68+n*14; b = 78+n*16;          // 沥青
+      if (onX && onZ){
+        /* 十字路口：斑马线 */
+        const sz = ((dx+ROAD_HALF)/1.7)|0;
+        const sx = ((dz+ROAD_HALF)/1.7)|0;
+        if ((az > ROAD_HALF-5.4 && az < ROAD_HALF-1.4 && (sz & 1) === 0) ||
+            (ax > ROAD_HALF-5.4 && ax < ROAD_HALF-1.4 && (sx & 1) === 0)){
+          r = 196; g = 196; b = 190;
+        }
+      } else {
+        /* 黄色中心虚线 */
+        if (onX && ax < 0.9 && ((((wz%13)+13)%13) < 6.5)){ r=205; g=172; b=70; }
+        if (onZ && az < 0.9 && ((((wx%13)+13)%13) < 6.5)){ r=205; g=172; b=70; }
+        /* 白色车道虚线 */
+        if (onX && Math.abs(ax-4.2) < 0.35 && ((((wz%9)+9)%9) < 4.5)){ r=168; g=168; b=164; }
+        if (onZ && Math.abs(az-4.2) < 0.35 && ((((wx%9)+9)%9) < 4.5)){ r=168; g=168; b=164; }
+        /* 路缘白线 */
+        if ((onX && Math.abs(ax-(ROAD_HALF-0.7)) < 0.45) || (onZ && Math.abs(az-(ROAD_HALF-0.7)) < 0.45)){
+          r=176; g=176; b=178;
+        }
+      }
+    } else {
+      const sidewalk = ax < ROAD_HALF+3.4 || az < ROAD_HALF+3.4;
+      const n = rnd01(wx*0.35, wz*0.35);
+      if (sidewalk){
+        const k = 0.92 + n*0.2;
+        r = 118*k; g = 120*k; b = 126*k;              // 人行道
+      } else {
+        const n2 = rnd01(wx*0.25+11, wz*0.25+7);
+        const k = 0.8 + n2*0.5;
+        r = 40*k; g = 86*k; b = 48*k;                 // 草地
+      }
+    }
+  }
+  else if (mat === M_WALL){
+    /* --- 幕墙 + 窗户 --- */
+    const n = f.n;
+    const vertical = Math.abs(n[0]) > 0.5;
+    const u = vertical ? wz : wx;
+    const v = wy;
+    const CW = 4.6, CH = 5.0;
+    const cu = Math.floor(u/CW), cv = Math.floor(v/CH);
+    const fu = u/CW - cu, fv = v/CH - cv;
+    const base = f.col;
+    if (fu > 0.28 && fu < 0.72 && fv > 0.30 && fv < 0.74){
+      const lit = (hashInt(cu*17 + f.seed, cv*31 + 5) % 100) < 30;
+      if (lit){ r = 255; g = 232; b = 160; }
+      else { r = 74; g = 96; b = 126; }
+    } else {
+      const k = 0.94 + rnd01(u*0.25, v*0.25)*0.16;
+      r = base[0]*k; g = base[1]*k; b = base[2]*k;
+    }
+  }
+  else if (mat === M_ROOF){
+    const base = f.col;
+    const k = 0.60 + rnd01(wx*0.5, wz*0.5)*0.14;
+    r = base[0]*k; g = base[1]*k; b = base[2]*k;
+    if (rnd01(wx*0.22+3, wz*0.22+9) < 0.09){ r*=1.7; g*=1.7; b*=1.7; }
+  }
+  else if (mat === M_TREE){
+    /* --- 树木：圆柱面广告牌 + 形状裁切 --- */
+    const t = f.tree;
+    const du = wx - t.x, dv = wz - t.z;
+    const u = (du*t.rx + dv*t.rz) / t.halfW;        // -1..1
+    const v = (wy - t.y0) / (t.y1 - t.y0);          // 0..1
+    if (v < 0.30){
+      if (Math.abs(u) > 0.15) return -1;
+      const k = 0.8 + rnd01(wx*3, wz*3)*0.35;
+      r = 92*k; g = 66*k; b = 42*k;
+    } else {
+      const dv2 = (v - 0.62) / 0.40;
+      if (dv2*dv2 > 1) return -1;
+      const rad = 0.98*Math.sqrt(1 - dv2*dv2);
+      if (Math.abs(u) > rad) return -1;
+      const n = rnd01(wx*0.55 + wy*0.45, wz*0.55);
+      const n2 = rnd01(wx*0.2+5, wz*0.2+2);
+      r = 32 + n*48 + n2*12;
+      g = 96 + n*88 + n2*18;
+      b = 38 + n*42;
+    }
+  }
+  else return -1;
+
+  /* 光照 */
+  const L = f.light === undefined ? 1 : f.light;
+  r*=L; g*=L; b*=L;
+
+  /* 饱和度提亮，让彩色字符更醒目 */
+  const lum0 = 0.299*r + 0.587*g + 0.114*b;
+  r = lum0 + (r-lum0)*1.45;
+  g = lum0 + (g-lum0)*1.45;
+  b = lum0 + (b-lum0)*1.45;
+
+  /* 雾（把远处压向黑色，与黑天空无缝衔接） */
+  if (depth > fogNear){
+    let t = (depth - fogNear)/fogSpan;
+    if (t > 1) t = 1;
+    const fog = 1 - t*t*(3-2*t);
+    const inv = 1-fog;
+    r = r*fog + 9*inv; g = g*fog + 11*inv; b = b*fog + 20*inv;
+  }
+  return packRGB(r,g,b,mat);
+}
+
+/* ---------------- 光栅化 ---------------- */
+function rasterTri(a,b,c,f){
+  const x0=a.sx,y0=a.sy, x1=b.sx,y1=b.sy, x2=c.sx,y2=c.sy;
+  const area = (x1-x0)*(y2-y0) - (x2-x0)*(y1-y0);
+  if (area > -1e-7 && area < 1e-7) return;
+  const invA = 1/area;
+
+  let minX = x0<x1 ? (x0<x2?x0:x2) : (x1<x2?x1:x2);
+  let maxX = x0>x1 ? (x0>x2?x0:x2) : (x1>x2?x1:x2);
+  let minY = y0<y1 ? (y0<y2?y0:y2) : (y1<y2?y1:y2);
+  let maxY = y0>y1 ? (y0>y2?y0:y2) : (y1>y2?y1:y2);
+
+  let c0 = Math.floor((minX-gx0)/cellW), c1 = Math.ceil((maxX-gx0)/cellW);
+  let r0 = Math.floor((minY-gy0)/cellH), r1 = Math.ceil((maxY-gy0)/cellH);
+  if (c0<0) c0=0; if (r0<0) r0=0;
+  if (c1>cols) c1=cols; if (r1>rows) r1=rows;
+  if (c0>=c1 || r0>=r1) return;
+
+  const A0=-(y2-y1), B0=(x2-x1);
+  const A1=-(y0-y2), B1=(x0-x2);
+  const A2=-(y1-y0), B2=(x1-x0);
+
+  for (let r=r0; r<r1; r++){
+    const py = gy0 + (r+0.5)*cellH;
+    const rowBase = r*cols;
+    for (let cc=c0; cc<c1; cc++){
+      const px = gx0 + (cc+0.5)*cellW;
+      const w0 = (A0*(px-x1) + B0*(py-y1)) * invA;
+      if (w0 < -1e-5 || w0 > 1.00001) continue;
+      const w1 = (A1*(px-x2) + B1*(py-y2)) * invA;
+      if (w1 < -1e-5) continue;
+      const w2 = 1 - w0 - w1;
+      if (w2 < -1e-5) continue;
+
+      const iz = w0*a.iz + w1*b.iz + w2*c.iz;
+      const idx = rowBase + cc;
+      if (iz <= zbuf[idx]) continue;
+
+      const invZ = 1/iz;
+      const wx = (w0*a.wxz + w1*b.wxz + w2*c.wxz) * invZ;
+      const wy = (w0*a.wyz + w1*b.wyz + w2*c.wyz) * invZ;
+      const wz = (w0*a.wzz + w1*b.wzz + w2*c.wzz) * invZ;
+
+      const col = shadeCell(wx,wy,wz, f, invZ);
+      if (col < 0) continue;           // 透明（树叶/树干外）
+      zbuf[idx] = iz;                  // 写深度，保证遮挡正确
+      colBuf[idx] = col;
+      chBuf[idx] = _ch;
+      matBuf[idx] = f.mat;
+    }
+  }
+}
+
+function clipNear(pts, cnt, out){
+  let m = 0;
+  for (let i=0;i<cnt;i++){
+    const a = pts[i], b = pts[(i+1)%cnt];
+    const ain = a.z >= NEAR, bin = b.z >= NEAR;
+    if (ain) out[m++] = a;
+    if (ain !== bin){
+      const t = (NEAR - a.z)/(b.z - a.z);
+      const o = V();
+      o.x = a.x + (b.x-a.x)*t;
+      o.y = a.y + (b.y-a.y)*t;
+      o.z = NEAR;
+      o.wx = a.wx + (b.wx-a.wx)*t;
+      o.wy = a.wy + (b.wy-a.wy)*t;
+      o.wz = a.wz + (b.wz-a.wz)*t;
+      out[m++] = o;
+    }
+  }
+  return m;
+}
+
+function drawFace(f){
+  vpi = 0;
+  /* 背面剔除：相机必须在法线正侧 */
+  const nx=f.n[0], ny=f.n[1], nz=f.n[2];
+  const ddx=cam.x-f.c[0], ddy=cam.y-f.c[1], ddz=cam.z-f.c[2];
+  if (nx*ddx + ny*ddy + nz*ddz <= 0) return;
+
+  const pv = f.p, nv = pv.length;
+  let anyFront = false, needClip = false;
+  for (let i=0;i<nv;i++){
+    const p = pv[i];
+    const dx=p[0]-cam.x, dy=p[1]-cam.y, dz=p[2]-cam.z;
+    const o = V();
+    o.x = dx*rx.x + dy*rx.y + dz*rx.z;
+    o.y = dx*up.x + dy*up.y + dz*up.z;
+    o.z = dx*fw.x + dy*fw.y + dz*fw.z;
+    o.wx=p[0]; o.wy=p[1]; o.wz=p[2];
+    camScratch[i] = o;
+    if (o.z >= NEAR) anyFront = true; else needClip = true;
+  }
+  if (!anyFront) return;
+
+  let cnt = nv, arr = camScratch;
+  if (needClip){
+    cnt = clipNear(camScratch, nv, clipScratch);
+    if (cnt < 3) return;
+    arr = clipScratch;
+  }
+  for (let i=0;i<cnt;i++){
+    const o = arr[i];
+    const iz = 1/o.z;
+    o.iz = iz;
+    o.sx = cxs + focal*o.x*iz;
+    o.sy = cys - focal*o.y*iz;
+    o.wxz = o.wx*iz; o.wyz = o.wy*iz; o.wzz = o.wz*iz;
+  }
+  for (let i=1;i<cnt-1;i++) rasterTri(arr[0], arr[i], arr[i+1], f);
+}
+
+/* ---------------- 世界绘制 ---------------- */
+function renderWorld(){
+  /* 地面 */
+  const gs = 2200 + cam.y*9;
+  const gcx = Math.round(cam.x/(P*2))*(P*2);
+  const gcz = Math.round(cam.z/(P*2))*(P*2);
+  const gp = groundFace.p;
+  gp[0][0]=gcx-gs; gp[0][2]=gcz-gs;
+  gp[1][0]=gcx+gs; gp[1][2]=gcz-gs;
+  gp[2][0]=gcx+gs; gp[2][2]=gcz+gs;
+  gp[3][0]=gcx-gs; gp[3][2]=gcz+gs;
+  groundFace.c[0]=gcx; groundFace.c[1]=0; groundFace.c[2]=gcz;
+  groundFace.light = 0.5 + 0.42*SUN[1];
+  drawFace(groundFace);
+
+  const bi = Math.round(cam.x/P), bj = Math.round(cam.z/P);
+  const R = Math.ceil(renderD/P) + 1;
+  const blockCut = (renderD + 46);
+  const blockCut2 = blockCut*blockCut;
+
+  for (let dj=-R; dj<=R; dj++){
+    for (let di=-R; di<=R; di++){
+      const bx = (bi+di)*P, bz = (bj+dj)*P;
+      const bdx = bx-cam.x, bdz = bz-cam.z;
+      if (bdx*bdx + bdz*bdz > blockCut2) continue;
+      const blk = makeBlock(bi+di, bj+dj);
+
+      for (let k=0;k<blk.buildings.length;k++){
+        const b = blk.buildings[k];
+        const ox = b.cx-cam.x, oz = b.cz-cam.z;
+        if (ox*ox + oz*oz > renderD2) continue;
+        if (ox*fw.x + oz*fw.z < -b.rad) continue;      // 整栋在身后
+        const fs = b.faces;
+        for (let q=0;q<fs.length;q++) drawFace(fs[q]);
+      }
+
+      for (let k=0;k<blk.trees.length;k++){
+        const t = blk.trees[k];
+        const ox = t.x-cam.x, oz = t.z-cam.z;
+        const d2 = ox*ox + oz*oz;
+        if (d2 > treeD2) continue;
+        if (ox*fw.x + oz*fw.z < -t.rad) continue;
+        /* 圆柱面广告牌：永远面向相机 */
+        const dl = Math.sqrt(d2) || 1;
+        const ux = ox/dl, uz = oz/dl;
+        let rvx = uz, rvz = -ux;      // cross(up, dir)
+        const f = t.face, tt = f.tree;
+        tt.rx = rvx; tt.rz = rvz;
+        const w = tt.halfW;
+        const p = f.p;
+        p[0][0]=t.x-rvx*w; p[0][2]=t.z-rvz*w;
+        p[1][0]=t.x+rvx*w; p[1][2]=t.z+rvz*w;
+        p[2][0]=t.x+rvx*w; p[2][2]=t.z+rvz*w;
+        p[3][0]=t.x-rvx*w; p[3][2]=t.z-rvz*w;
+        f.n[0]=ux; f.n[1]=0; f.n[2]=uz;
+        f.c[0]=t.x; f.c[1]=tt.y1*0.5; f.c[2]=t.z;
+        f.light = 0.52 + 0.48*Math.max(0, ux*SUN[0] + uz*SUN[2]);
+        drawFace(f);
+      }
+    }
+  }
+}
+
+/* ---------------- HUD ---------------- */
+const C_BRIGHT = 0xFFD070, C_AMBER = 0xFFB030, C_DIM = 0x7A5A18, C_DIM2 = 0x4A3612, C_RED = 0xFF4030;
+
+function putChar(c,r,ch,col){
+  if (c<0||c>=cols||r<0||r>=rows) return;
+  const i = r*cols+c;
+  chBuf[i] = ch.charCodeAt(0);
+  colBuf[i] = col;
+}
+function putText(c,r,str,col){
+  for (let i=0;i<str.length;i++) putChar(c+i, r, str[i], col);
+}
+function putTextW(c,r,str,col,bg){
+  for (let i=0;i<str.length;i++){
+    const cc=c+i;
+    if (cc<0||cc>=cols) continue;
+    const idx = r*cols+cc;
+    const code = str.charCodeAt(i);
+    if (bg === 0 || code === 32){ chBuf[idx]=0; colBuf[idx]=0; }
+    else { chBuf[idx]=code; colBuf[idx]=col; }
+  }
+}
+function hudLine(x0,y0,x1,y1,ch,col){
+  const dx=x1-x0, dy=y1-y0;
+  const n = Math.max(Math.abs(dx), Math.abs(dy));
+  if (n < 1){ putChar(Math.round(x0),Math.round(y0),ch,col); return; }
+  const steps = Math.min(Math.ceil(n), 240);
+  for (let i=0;i<=steps;i++){
+    const t = i/steps;
+    putChar(Math.round(x0+dx*t), Math.round(y0+dy*t), ch, col);
+  }
+}
+function projectDir(dx,dy,dz){
+  const z = dx*fw.x + dy*fw.y + dz*fw.z;
+  if (z < 0.06) return null;
+  const x = dx*rx.x + dy*rx.y + dz*rx.z;
+  const y = dx*up.x + dy*up.y + dz*up.z;
+  return { px: cxs + focal*x/z, py: cys - focal*y/z };
+}
+function toCell(p){ return { c: Math.floor((p.px-gx0)/cellW), r: Math.floor((p.py-gy0)/cellH) }; }
+
+function drawLadder(){
+  const hx = fw.x, hz = fw.z;
+  const hl = Math.hypot(hx,hz) || 1e-6;
+  const fhx = hx/hl, fhz = hz/hl;          // 水平前向
+  const rhx = fhz, rhz = -fhx;             // 水平右向 = cross(fh, up)
+  const cc = Math.floor(cols/2);
+  const rungs = [-40,-30,-20,-10,0,10,20,30,40];
+  for (let i=0;i<rungs.length;i++){
+    const a = rungs[i]*D2R;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const az = (a === 0 ? 13 : 6.5)*D2R;
+    const caz = Math.cos(az), saz = Math.sin(az);
+    const d1 = [fhx*ca*caz - rhx*ca*saz, sa, fhz*ca*caz - rhz*ca*saz];
+    const d2 = [fhx*ca*caz + rhx*ca*saz, sa, fhz*ca*caz + rhz*ca*saz];
+    const p1 = projectDir(d1[0],d1[1],d1[2]);
+    const p2 = projectDir(d2[0],d2[1],d2[2]);
+    if (!p1 || !p2) continue;
+    const k1 = toCell(p1), k2 = toCell(p2);
+    if (Math.abs(k1.c) > cols*3 || Math.abs(k2.c) > cols*3) continue;
+    const ch = (a===0) ? '=' : '-';
+    const col = (a===0) ? C_DIM : C_DIM2;
+    /* 中段留出准星缺口 */
+    const n = Math.max(Math.abs(k2.c-k1.c), Math.abs(k2.r-k1.r));
+    if (n < 1) continue;
+    for (let s=0;s<=n;s++){
+      const t = s/n;
+      const cx2 = Math.round(k1.c + (k2.c-k1.c)*t);
+      const cy2 = Math.round(k1.r + (k2.r-k1.r)*t);
+      if (Math.abs(cx2-cc) < 3 && Math.abs(cy2-Math.floor(rows/2)) < 2) continue;
+      putChar(cx2, cy2, ch, col);
+    }
+    if (a !== 0){
+      const lab = (a>0? '+' : '-') + pad(Math.abs(rungs[i]),2);
+      const lc = (k1.c < k2.c) ? k1.c-4 : k2.c-4;
+      putText(lc, k1.r, lab, C_DIM);
+    }
+  }
+}
+
+function drawTape(){
+  const cc = Math.floor(cols/2);
+  const yawDeg = ((yaw*R2D)%360 + 360)%360;
+  const dpr_ = 1.15;                        // 每列多少度
+  const half = Math.min(30, Math.floor(cols*0.26));
+  for (let k=-half;k<=half;k++){
+    const h = yawDeg + k*dpr_;
+    const m5 = ((h%5)+5)%5;
+    if (m5 < dpr_*0.55 || m5 > 5-dpr_*0.55) putChar(cc+k, 1, '|', C_DIM2);
+    const m30 = ((h%30)+30)%30;
+    if (m30 < dpr_*0.55 || m30 > 30-dpr_*0.55){
+      const lab = pad(((Math.round(h/30)*30)%360+360)%360, 3);
+      putText(cc+k-1, 0, lab, C_DIM);
+    }
+  }
+  putChar(cc, 2, '^', C_AMBER);
+  const lab = pad(Math.round(yawDeg),3);
+  putText(cc-2, 3, lab, C_BRIGHT);
+}
+
+function drawStatus(){
+  const r2 = rows-2, r1 = rows-1, r0 = rows-3;
+  for (let c=0;c<cols;c++){ putChar(c, r0, '-', C_DIM2); }
+  const thr = Math.round((speed-10)/40*20);
+  let bar = '';
+  for (let i=0;i<20;i++) bar += (i<thr ? '=' : '-');
+  const yawDeg = ((yaw*R2D)%360+360)%360;
+  const G = 1/Math.max(0.12, Math.cos(roll));
+  const line = 'SPD ' + pad(speed,2) + ' m/s   ALT ' + pad(cam.y,4) + ' m   HDG ' + pad(yawDeg,3) +
+               '   PIT ' + sgn(pitch*R2D) + '   ROL ' + sgn(roll*R2D) + '   G ' + G.toFixed(2) +
+               '   THR [' + bar + ']';
+  putTextW(2, r2, line, C_AMBER, 1);
+  putTextW(2, r1, 'W/S PITCH   A/D ROLL (RATE)   Z/X SPEED   R RESPAWN', C_DIM, 1);
+}
+
+function drawHUD(){
+  drawTape();
+  drawLadder();
+  /* 中心准星 */
+  const cc = Math.floor(cols/2), cr = Math.floor(rows/2);
+  putChar(cc, cr, '+', C_BRIGHT);
+  putChar(cc-1, cr, '-', C_AMBER); putChar(cc+1, cr, '-', C_AMBER);
+  putChar(cc, cr-1, '|', C_AMBER); putChar(cc, cr+1, '|', C_AMBER);
+  drawStatus();
+}
+
+/* ---------------- 绘制到画布 ---------------- */
+const colorCache = new Map();
+function cssColor(p){
+  let s = colorCache.get(p);
+  if (s === undefined){
+    if (colorCache.size > 6000) colorCache.clear();
+    s = 'rgb(' + ((p>>16)&255) + ',' + ((p>>8)&255) + ',' + (p&255) + ')';
+    colorCache.set(p, s);
+  }
+  return s;
+}
+function paint(){
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,W,H);
+  for (let r=0;r<rows;r++){
+    const base = r*cols;
+    let c = 0;
+    while (c < cols){
+      const i = base+c;
+      const col = colBuf[i];
+      if (col === 0 || chBuf[i] === 0){ c++; continue; }
+      let e = c+1;
+      while (e < cols){
+        const j = base+e;
+        if (colBuf[j] !== col || chBuf[j] === 0) break;
+        e++;
+      }
+      ctx.fillStyle = cssColor(col);
+      ctx.fillText(String.fromCharCode.apply(null, chBuf.subarray(i, base+e)), gx0 + c*cellW, gy0 + r*cellH);
+      c = e;
+    }
+  }
+}
+
+/* ---------------- 飞行模型 ---------------- */
+const PITCH_RATE = 60*D2R;    // 俯仰角速率 60°/s
+const ROLL_RATE  = 130*D2R;   // 滚转角速率 130°/s
+const MAX_ANGLE  = 45*D2R;    // 俯仰 / 滚转都限幅 45°
+const SPD_MIN = 10, SPD_MAX = 50, ACC = 13;
+const YAW_PER_ROLL = 2.0;     // 滚转45° → 偏航 90°/s（线性协调转弯）
+
+const keys = Object.create(null);
+let state = 'fly';
+let crashT = 0, introT = 7.0;
+
+function update(dt){
+  let pr = 0, rr = 0;
+  if (keys['w']) pr -= 1;
+  if (keys['s']) pr += 1;
+  if (keys['a']) rr -= 1;
+  if (keys['d']) rr += 1;
+
+  pitch = clamp(pitch + pr*PITCH_RATE*dt, -MAX_ANGLE, MAX_ANGLE);
+  roll  = clamp(roll  + rr*ROLL_RATE*dt,  -MAX_ANGLE, MAX_ANGLE);
+  yaw  += YAW_PER_ROLL * roll * dt;                 // 协调转弯
+
+  if (keys['z']) speed += ACC*dt;
+  if (keys['x']) speed -= ACC*dt;
+  speed = clamp(speed, SPD_MIN, SPD_MAX);
+
+  updateBasis();
+  cam.x += fw.x*speed*dt;
+  cam.y += fw.y*speed*dt;
+  cam.z += fw.z*speed*dt;
+
+  if (introT > 0) introT -= dt;
+}
+
+function collide(){
+  if (cam.y < 1.4) return true;
+  const bi = Math.round(cam.x/P), bj = Math.round(cam.z/P);
+  for (let dj=-1; dj<=1; dj++){
+    for (let di=-1; di<=1; di++){
+      const blk = makeBlock(bi+di, bj+dj);
+      const bs = blk.buildings;
+      for (let k=0;k<bs.length;k++){
+        const b = bs[k];
+        const ox = cam.x-b.cx, oz = cam.z-b.cz;
+        if (ox*ox+oz*oz > b.rad*b.rad) continue;
+        const fs = b.faces;
+        /* 用顶面顶点推出 AABB */
+        let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9,y1=-1e9;
+        for (let q=0;q<fs.length;q++){
+          const p = fs[q].p;
+          for (let t=0;t<p.length;t++){
+            const v = p[t];
+            if (v[0]<x0)x0=v[0]; if (v[0]>x1)x1=v[0];
+            if (v[2]<z0)z0=v[2]; if (v[2]>z1)z1=v[2];
+            if (v[1]>y1)y1=v[1];
+          }
+        }
+        if (cam.x > x0-0.8 && cam.x < x1+0.8 && cam.z > z0-0.8 && cam.z < z1+0.8 && cam.y < y1+0.6) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function respawn(){
+  const i = (Math.random()*2000|0) - 1000;
+  const j = (Math.random()*2000|0) - 1000;
+  cam.x = (i+0.5)*P;
+  cam.z = (j+0.5)*P;
+  cam.y = 16 + Math.random()*22;
+  yaw = (Math.random() < 0.5) ? 0 : Math.PI/2;
+  pitch = 0; roll = 0; speed = 22;
+  updateBasis();
+  state = 'fly';
+}
+
+function crash(){
+  state = 'crash';
+  crashT = 1.25;
+  speed = 0;
+}
+
+/* ---------------- 叠加提示 ---------------- */
+function drawIntro(){
+  const cc = Math.floor(cols/2), cr = Math.floor(rows/2);
+  const lines = [
+    'A S C I I   F P V',
+    '',
+    'W / S   PITCH      A / D   ROLL (RATE)',
+    'Z / X   SPEED 10-50 m/s      R   RESPAWN'
+  ];
+  const alpha = clamp(introT/1.6, 0, 1);
+  const col = alpha > 0.6 ? C_BRIGHT : C_DIM;
+  for (let i=0;i<lines.length;i++){
+    const s = lines[i];
+    if (!s) continue;
+    putTextW(cc - (s.length>>1) - 1, cr - 6 + i, ' ' + s + ' ', col, 1);
+  }
+}
+function drawCrash(){
+  const cc = Math.floor(cols/2), cr = Math.floor(rows/2);
+  const blink = (Math.floor(crashT*10) % 2) === 0;
+  const col = blink ? C_RED : 0x7A1010;
+  const box = ['+-------------------+',
+               '|                   |',
+               '|      C R A S H    |',
+               '|                   |',
+               '+-------------------+'];
+  for (let i=0;i<box.length;i++) putTextW(cc-9, cr-3+i, box[i], i===2 ? C_RED : col, 1);
+  putTextW(cc-7, cr+3, 'RESPAWNING ...', C_AMBER, 1);
+}
+
+/* ---------------- 主循环 ---------------- */
+function clearBuffers(){
+  zbuf.fill(0);
+  chBuf.fill(0);
+  colBuf.fill(0);
+  matBuf.fill(0);
+}
+
+/* 轮廓描边：深度突变或贴着天空的格子，用高亮字符勾出楼体/树冠的剪影。
+   这是纯 ASCII 画面能不能"看懂"的关键一步。 */
+const EDGE_CH = [35, 35, 35, 42];      // # # # *（地面/墙/屋顶/树）
+function edgePass(){
+  for (let r=0;r<rows;r++){
+    const base = r*cols;
+    for (let c=0;c<cols;c++){
+      const i = base+c;
+      const z = zbuf[i];
+      if (z === 0) continue;
+      let edge = false;
+      const near = z > 1/260;          // 只给 260m 内的物体描边
+      if (c > 0){ const j=i-1; if (zbuf[j]===0 || (near && zbuf[j] < z*0.72)) edge = true; }
+      if (!edge && c < cols-1){ const j=i+1; if (zbuf[j]===0 || (near && zbuf[j] < z*0.72)) edge = true; }
+      if (!edge && r > 0){ const j=i-cols; if (zbuf[j]===0 || (near && zbuf[j] < z*0.72)) edge = true; }
+      if (!edge && r < rows-1){ const j=i+cols; if (zbuf[j]===0 || (near && zbuf[j] < z*0.72)) edge = true; }
+      if (!edge) continue;
+      const col = colBuf[i];
+      let rr = ((col>>16)&255)*1.7, gg = ((col>>8)&255)*1.7, bb = (col&255)*1.7;
+      if (rr>255) rr=255; if (gg>255) gg=255; if (bb>255) bb=255;
+      if (rr+gg+bb < 150){ rr = 130; gg = 150; bb = 170; }   // 太暗的轮廓补一点亮度
+      colBuf[i] = (rr|0)<<16 | (gg|0)<<8 | (bb|0);
+      chBuf[i] = EDGE_CH[matBuf[i]] || 35;
+    }
+  }
+}
+
+function render(){
+  /* 速度越快 FOV 越大，增强速度感 */
+  const fov = (96 + (speed-10)/40*14)*D2R;
+  focalTarget = (W*0.5)/Math.tan(fov*0.5);
+  updateViewDist();
+  clearBuffers();
+  renderWorld();
+  edgePass();
+  drawHUD();
+  if (state === 'crash') drawCrash();
+  else if (introT > 0) drawIntro();
+  paint();
+}
+
+let lastT = 0;
+function loop(now){
+  if (!lastT) lastT = now;
+  let dt = (now - lastT)/1000;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05;
+  if (dt < 0) dt = 0;
+
+  /* 焦距平滑 */
+  focal += (focalTarget - focal) * Math.min(1, dt*4);
+
+  if (state === 'fly'){
+    update(dt);
+    if (collide()) crash();
+  } else if (state === 'crash'){
+    crashT -= dt;
+    if (introT > 0) introT -= dt;
+    if (crashT <= 0) respawn();
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- 输入 ---------------- */
+window.addEventListener('keydown', function(e){
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') e.preventDefault();
+  if ('wasdzxr'.indexOf(k) >= 0) e.preventDefault();
+  keys[k] = true;
+  if (k === 'r') respawn();
+});
+window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+window.addEventListener('blur', function(){ for (const k in keys) keys[k] = false; });
+
+let resizeTimer = 0;
+window.addEventListener('resize', function(){
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function(){ setupGrid(); }, 120);
+});
+
+/* ---------------- 启动 ---------------- */
+setupGrid();
+respawn();
+focal = (W*0.5)/Math.tan(75*D2R*0.5);
+focalTarget = focal;
+requestAnimationFrame(loop);
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a41c11392c6619',t:'MTc4OTI3MDYwNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+<!-- source: deepdemos.top | author: Philia | title: ascii-fpv -->
+</body>
+</html>

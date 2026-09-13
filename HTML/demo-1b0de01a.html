@@ -1,0 +1,3656 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head><base href="/preview/demo-1b0de01a/v0d1ff5ce4f0f/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>点云人像 · Pointcloud Portrait Studio</title>
+<meta name="description" content="把照片采样成彩色圆点云，二维 SVG / 三维 Canvas 浮雕式人像，可交互、可导出。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script>
+/* 尽早应用主题与强调色，避免首屏闪烁（与 ui/theme.js 使用同一组 localStorage 键） */
+(function () {
+  try {
+    var t = localStorage.getItem('pc.theme');
+    t = t ? JSON.parse(t) : null;
+    if (t !== 'dark' && t !== 'light') {
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', t);
+    var p = localStorage.getItem('pc.palette');
+    if (p) {
+      p = JSON.parse(p);
+      if (p && /^#[0-9a-f]{6}$/i.test(p.accent || '')) {
+        document.documentElement.style.setProperty('--accent', p.accent);
+      }
+    }
+  } catch (e) { /* 忽略 */ }
+})();
+</script>
+<style>/* =========================================================================
+   点云人像 · Pointcloud Portrait Studio
+   视觉方向：暗房 / 光学仪器（Darkroom instrument）
+   深墨底 + 暖琥珀强调 + 等宽读数字 + 编辑体标题
+   ========================================================================= */
+
+:root {
+  --font-display: 'Fraunces', 'Songti SC', 'Georgia', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: 'IBM Plex Sans', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+
+  --accent: #ffb454;
+  --accent-2: #5fd6cb;
+  --accent-3: #ff6b81;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+
+  --ease: cubic-bezier(.22, .61, .36, 1);
+}
+
+/* ------------------------------ 主题：暗房 ------------------------------ */
+html[data-theme='dark'] {
+  --bg: #0b0a0e;
+  --bg-soft: #12111a;
+  --panel: rgba(255, 255, 255, .034);
+  --panel-strong: rgba(255, 255, 255, .062);
+  --line: rgba(255, 255, 255, .10);
+  --line-strong: rgba(255, 255, 255, .20);
+  --text: #efeaf2;
+  --text-dim: #9b93a6;
+  --stage-bg: #070609;
+  --checker-a: rgba(255, 255, 255, .028);
+  --checker-b: rgba(255, 255, 255, .012);
+  --shadow: 0 24px 60px -30px rgba(0, 0, 0, .9);
+  color-scheme: dark;
+}
+
+/* ------------------------------ 主题：相纸 ------------------------------ */
+html[data-theme='light'] {
+  --bg: #efe9df;
+  --bg-soft: #f8f4ed;
+  --panel: rgba(28, 20, 8, .035);
+  --panel-strong: rgba(28, 20, 8, .06);
+  --line: rgba(30, 22, 10, .14);
+  --line-strong: rgba(30, 22, 10, .3);
+  --text: #1c1712;
+  --text-dim: #6d6252;
+  --stage-bg: #e4dccf;
+  --checker-a: rgba(28, 20, 8, .05);
+  --checker-b: rgba(28, 20, 8, .02);
+  --shadow: 0 20px 44px -28px rgba(60, 45, 20, .5);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+/* hidden 属性必须真正隐藏（否则会被 display:flex/grid 覆盖） */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* 背景氛围：极淡的双色辉光 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(58vw 44vh at 12% -8%, color-mix(in oklab, var(--accent) 13%, transparent), transparent 70%),
+    radial-gradient(52vw 40vh at 92% 108%, color-mix(in oklab, var(--accent-2) 12%, transparent), transparent 72%);
+  opacity: .85;
+  z-index: 0;
+}
+
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+}
+
+/* ================================ 顶栏 ================================ */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+
+.brand { display: flex; align-items: center; gap: 11px; }
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+}
+.brand-mark svg circle { animation: pulse 3.4s var(--ease) infinite; }
+.brand-mark svg circle:nth-child(2n) { animation-delay: .5s; }
+.brand-mark svg circle:nth-child(3n) { animation-delay: 1.1s; }
+@keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+
+.brand-text h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.brand-text p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.topbar-meta { display: flex; gap: 8px; margin-left: 6px; }
+.topbar-actions { margin-left: auto; display: flex; gap: 8px; }
+
+.readout {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.readout--dim { color: var(--text-dim); }
+
+/* ================================ 按钮 ================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .18s, background .18s, transform .12s, color .18s;
+}
+.btn:hover { border-color: var(--line-strong); background: var(--panel-strong); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn--primary {
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 46%, transparent);
+}
+.btn--primary:hover { background: color-mix(in oklab, var(--accent) 30%, transparent); }
+
+.btn--soft { background: var(--panel-strong); }
+.btn--ghost { background: transparent; }
+
+.btn--icon { padding: 8px; width: 36px; height: 36px; justify-content: center; }
+
+.ico-sun, .ico-moon { fill: none; stroke: currentColor; }
+.ico-sun g { fill: none; }
+.ico-sun { fill: currentColor; }
+.ico-moon { fill: none; }
+html[data-theme='dark'] .ico-sun { display: none; }
+html[data-theme='light'] .ico-moon { display: none; }
+
+/* ============================= 移动端 tabs ============================= */
+.mobile-tabs { display: none; }
+
+/* ============================== 工作区 ============================== */
+.workspace {
+  display: grid;
+  grid-template-columns: 322px minmax(0, 1fr) 342px;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.panel {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--panel);
+  overflow: hidden;
+}
+.panel-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.panel-scroll::-webkit-scrollbar { width: 8px; }
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.group { padding: 0 0 16px; margin-bottom: 16px; border-bottom: 1px dashed var(--line); }
+.group:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 4px; }
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.group-title .idx {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+/* ============================== 控件 ============================== */
+.ctl { display: block; margin: 0 0 13px; }
+.ctl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+.ctl-head output {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.ctl-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+  display: block;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-soft);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent);
+  transition: transform .14s var(--ease);
+}
+input[type='range']:hover::-webkit-slider-thumb { transform: scale(1.16); }
+input[type='range']::-moz-range-track { height: 3px; border-radius: 999px; background: var(--line-strong); }
+input[type='range']::-moz-range-thumb {
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg-soft);
+}
+input[type='range']:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* switch */
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+  user-select: none;
+}
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch-track {
+  width: 34px; height: 19px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  position: relative;
+  transition: background .2s, border-color .2s;
+  flex: 0 0 auto;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform .2s var(--ease), background .2s;
+}
+.switch input:checked + .switch-track {
+  background: color-mix(in oklab, var(--accent) 34%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+}
+.switch input:checked + .switch-track .switch-knob { transform: translateX(15px); background: var(--accent); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* color fields */
+.row { display: flex; gap: 10px; align-items: center; }
+.row--split { justify-content: space-between; margin-top: 10px; }
+
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color .18s;
+}
+.color-field:hover { border-color: var(--line-strong); }
+.color-field--wide { margin-top: 2px; }
+.color-field input[type='color'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px; height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.color-field input[type='color']::-webkit-color-swatch-wrapper { padding: 2px; }
+.color-field input[type='color']::-webkit-color-swatch { border: none; border-radius: 5px; }
+.color-field input[type='color']::-moz-color-swatch { border: none; border-radius: 5px; }
+.color-field:has(input:disabled) { opacity: .4; pointer-events: none; }
+
+/* dropzone */
+.dropzone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 132px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .2s, background .2s;
+}
+.dropzone:hover, .dropzone.is-over {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+}
+.dropzone:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dropzone img { max-width: 100%; max-height: 190px; display: block; }
+.dropzone-hint {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.dropzone-hint .plus { font-size: 22px; color: var(--accent); line-height: 1; }
+.dropzone-hint small { font-family: var(--font-mono); font-size: 9.5px; opacity: .8; }
+
+.file-name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: right;
+}
+
+/* ============================== 预览台 ============================== */
+.stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage-bar, .stage-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+}
+.stage-foot { font-size: 10.5px; }
+.grow { flex: 1; }
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented label {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color .18s, background .18s;
+  white-space: nowrap;
+}
+.segmented input:checked + label {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+.segmented input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.stage-hint { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+
+.stage-canvas {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--stage-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  isolation: isolate;
+}
+.stage-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.checker {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(45deg, var(--checker-a) 25%, transparent 25%, transparent 75%, var(--checker-a) 75%),
+    linear-gradient(45deg, var(--checker-a) 25%, transparent 25%, transparent 75%, var(--checker-a) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 9px 9px;
+  background-color: var(--checker-b);
+}
+
+.stage-host { position: absolute; inset: 0; }
+.stage-host svg, .stage-host canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.stage-host svg { cursor: grab; }
+.stage-host svg:active { cursor: grabbing; }
+.stage-host canvas { cursor: grab; }
+.stage-host canvas:active { cursor: grabbing; }
+
+.stage-busy, .stage-empty {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--bg-soft) 88%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.spinner {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================== 说明块 ============================== */
+.note {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-left: 2px solid color-mix(in oklab, var(--accent-2) 60%, transparent);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  background: var(--panel);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.note--warn { border-left-color: color-mix(in oklab, var(--accent-3) 60%, transparent); }
+.note code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* ============================== 导出区 ============================== */
+.export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.export-grid .btn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 11px 12px;
+  text-align: left;
+}
+.export-grid .btn strong { font-size: 12.5px; font-weight: 600; }
+.export-grid .btn small { font-size: 10px; color: var(--text-dim); font-weight: 400; line-height: 1.35; }
+.export-grid .btn--primary {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* ============================== Toast ============================== */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translate(-50%, 20px);
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in oklab, var(--bg-soft) 94%, transparent);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .26s, transform .26s var(--ease);
+  z-index: 50;
+  max-width: min(88vw, 460px);
+  text-align: center;
+}
+.toast.is-show { opacity: 1; transform: translate(-50%, 0); }
+.toast.is-error { border-color: color-mix(in oklab, var(--accent-3) 60%, transparent); color: var(--accent-3); }
+
+/* ============================== 响应式 ============================== */
+@media (max-width: 1180px) {
+  .workspace { grid-template-columns: 292px minmax(0, 1fr) 306px; gap: 10px; padding: 10px; }
+  .export-grid { grid-template-columns: 1fr; }
+  .export-grid .btn--primary { grid-column: auto; }
+}
+
+@media (max-width: 960px) {
+  body { overflow: auto; }
+  .app { grid-template-rows: auto auto auto; }
+
+  .topbar { position: sticky; top: 0; z-index: 20; background: color-mix(in oklab, var(--bg) 92%, transparent); }
+  .brand-text p { display: none; }
+  .topbar-meta { display: none; }
+
+  .mobile-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 8px 12px 0;
+    position: sticky;
+    top: 59px;
+    z-index: 19;
+    background: color-mix(in oklab, var(--bg) 92%, transparent);
+  }
+  .tab {
+    padding: 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: var(--panel);
+    color: var(--text-dim);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .tab.is-active {
+    color: var(--text);
+    border-color: color-mix(in oklab, var(--accent) 46%, transparent);
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px 12px 24px;
+  }
+  .panel { order: 3; max-height: none; }
+  .panel-scroll { height: auto; overflow: visible; }
+  .stage { order: 1; grid-row: 1; }
+
+  .workspace[data-mobile-tab='image'] .panel--right,
+  .workspace[data-mobile-tab='effect'] .panel--left { display: none; }
+
+  .stage-canvas { height: min(62vh, 520px); }
+  .stage-hint { display: none; }
+  .stage-foot .readout:last-child { display: none; }
+
+  .export-grid { grid-template-columns: 1fr 1fr; }
+  .export-grid .btn--primary { grid-column: 1 / -1; flex-direction: row; }
+}
+
+@media (max-width: 430px) {
+  .export-grid { grid-template-columns: 1fr; }
+  .brand-text h1 { font-size: 17px; }
+}
+
+/* 尊重减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26">
+          <circle cx="8" cy="9" r="2.4" fill="var(--accent)"/>
+          <circle cx="16" cy="6" r="1.5" fill="var(--accent-2)"/>
+          <circle cx="24" cy="11" r="2" fill="var(--accent-3)"/>
+          <circle cx="6" cy="18" r="1.6" fill="var(--accent-2)"/>
+          <circle cx="14" cy="15" r="3" fill="var(--accent)"/>
+          <circle cx="23" cy="19" r="1.8" fill="var(--accent-3)"/>
+          <circle cx="9" cy="26" r="2.1" fill="var(--accent-3)"/>
+          <circle cx="18" cy="24" r="2.6" fill="var(--accent)"/>
+          <circle cx="26" cy="27" r="1.5" fill="var(--accent-2)"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <h1>点云人像</h1>
+        <p>pointcloud&nbsp;portrait&nbsp;studio</p>
+      </span>
+    </div>
+
+    <div class="topbar-meta">
+      <span class="readout" id="stat-points" title="当前点数">— pts</span>
+      <span class="readout readout--dim" id="stat-mode" title="渲染模式">SVG</span>
+      <span class="readout readout--dim" id="stat-fps" title="交互帧率">idle</span>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn btn--ghost" id="btn-reset" type="button" title="复位视角 (R)">复位视角</button>
+      <button class="btn btn--icon" id="btn-theme" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+        <svg class="ico-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><g stroke-width="1.8" stroke-linecap="round"><path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"/></g></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav class="mobile-tabs" role="tablist" aria-label="面板切换">
+    <button class="tab is-active" data-tab="image" role="tab" type="button">图像</button>
+    <button class="tab" data-tab="effect" role="tab" type="button">效果 / 导出</button>
+  </nav>
+
+  <main class="workspace" data-mobile-tab="image">
+
+    <!-- ================= 左：图像参数 ================= -->
+    <aside class="panel panel--left" aria-label="图像参数">
+      <div class="panel-scroll">
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">01</span>源图像</h2>
+          <div class="dropzone" id="dropzone" tabindex="0" role="button"
+               aria-label="点击或拖放图片到此处">
+            <img id="source-thumb" alt="源图预览" hidden>
+            <div class="dropzone-hint" id="dropzone-hint">
+              <span class="plus">＋</span>
+              <span>拖入 / 点击选择照片</span>
+              <small>PNG · JPG · WEBP · 支持透明通道</small>
+            </div>
+          </div>
+          <input type="file" id="file-input" accept="image/*" hidden>
+          <div class="row row--split">
+            <button class="btn btn--soft" id="btn-demo" type="button">载入演示人像</button>
+            <span class="file-name" id="source-name">demo-portrait</span>
+          </div>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">02</span>采样</h2>
+
+          <label class="ctl" for="ctl-spacing">
+            <span class="ctl-head"><span>点距</span><output id="out-spacing">6.0</output></span>
+            <input type="range" id="ctl-spacing" min="1.5" max="26" step="0.5" value="6">
+            <span class="ctl-foot"><small>疏</small><small>密</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-size">
+            <span class="ctl-head"><span>圆点大小</span><output id="out-size">0.92</output></span>
+            <input type="range" id="ctl-size" min="0.25" max="2.6" step="0.01" value="0.92">
+            <span class="ctl-foot"><small>细</small><small>粗</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-contrast">
+            <span class="ctl-head"><span>对比度</span><output id="out-contrast">1.12</output></span>
+            <input type="range" id="ctl-contrast" min="0.4" max="2.8" step="0.02" value="1.12">
+            <span class="ctl-foot"><small>柔</small><small>硬</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-lift">
+            <span class="ctl-head"><span>暗部保留</span><output id="out-lift">0.22</output></span>
+            <input type="range" id="ctl-lift" min="0" max="1" step="0.01" value="0.22">
+            <span class="ctl-foot"><small>压暗</small><small>提亮暗部</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-darkcut">
+            <span class="ctl-head"><span>暗点过滤</span><output id="out-darkcut">0.05</output></span>
+            <input type="range" id="ctl-darkcut" min="0" max="0.85" step="0.01" value="0.05">
+            <span class="ctl-foot"><small>保留暗点</small><small>剔除暗点</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-edge">
+            <span class="ctl-head"><span>轮廓强化</span><output id="out-edge">0.35</output></span>
+            <input type="range" id="ctl-edge" min="0" max="1" step="0.01" value="0.35">
+            <span class="ctl-foot"><small>均匀</small><small>抓轮廓</small></span>
+          </label>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">03</span>色彩</h2>
+
+          <label class="switch" for="ctl-mono">
+            <input type="checkbox" id="ctl-mono">
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">单色模式</span>
+          </label>
+
+          <div class="row" id="row-mono-color">
+            <label class="color-field" for="ctl-mono-color">
+              <input type="color" id="ctl-mono-color" value="#ffb454">
+              <span>单色基调</span>
+            </label>
+            <label class="color-field" for="ctl-accent">
+              <input type="color" id="ctl-accent" value="#ffb454">
+              <span>界面强调色</span>
+            </label>
+          </div>
+
+          <label class="switch" for="ctl-transparent">
+            <input type="checkbox" id="ctl-transparent" checked>
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">透明背景</span>
+          </label>
+
+          <label class="color-field color-field--wide" for="ctl-bg-color" id="row-bg-color">
+            <input type="color" id="ctl-bg-color" value="#0b0a0e">
+            <span>背景色</span>
+          </label>
+        </section>
+
+      </div>
+    </aside>
+
+    <!-- ================= 中：预览 ================= -->
+    <section class="stage" aria-label="预览">
+      <div class="stage-bar">
+        <div class="segmented" role="radiogroup" aria-label="渲染模式">
+          <input type="radio" name="mode" id="mode-2d" value="2d" checked>
+          <label for="mode-2d">二维 · SVG</label>
+          <input type="radio" name="mode" id="mode-3d" value="3d">
+          <label for="mode-3d">三维 · Canvas</label>
+        </div>
+        <div class="stage-hint" id="stage-hint">拖拽旋转 · 滚轮缩放 · 移动鼠标视差</div>
+      </div>
+
+      <div class="stage-canvas" id="stage-canvas">
+        <div class="checker" aria-hidden="true"></div>
+        <div class="stage-host" id="stage-host"></div>
+        <div class="stage-busy" id="stage-busy" hidden><span class="spinner"></span>采样中…</div>
+        <div class="stage-empty" id="stage-empty" hidden>还没有图像</div>
+      </div>
+
+      <div class="stage-foot">
+        <span class="readout readout--dim" id="stat-view">yaw 0° · pitch 0° · zoom 1.00×</span>
+        <span class="grow"></span>
+        <span class="readout readout--dim">浮雕深度 = 亮度 + 中心隆起 + 厚度微差</span>
+      </div>
+    </section>
+
+    <!-- ================= 右：效果与导出 ================= -->
+    <aside class="panel panel--right" aria-label="效果与导出">
+      <div class="panel-scroll">
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">04</span>浮雕深度</h2>
+
+          <label class="ctl" for="ctl-depth">
+            <span class="ctl-head"><span>纵深</span><output id="out-depth">0.55</output></span>
+            <input type="range" id="ctl-depth" min="0" max="1.6" step="0.01" value="0.55">
+            <span class="ctl-foot"><small>平</small><small>深</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-bulge">
+            <span class="ctl-head"><span>中心隆起</span><output id="out-bulge">0.45</output></span>
+            <input type="range" id="ctl-bulge" min="0" max="1" step="0.01" value="0.45">
+            <span class="ctl-foot"><small>无</small><small>球面</small></span>
+          </label>
+
+          <label class="ctl" for="ctl-thickness">
+            <span class="ctl-head"><span>厚度微差</span><output id="out-thickness">0.28</output></span>
+            <input type="range" id="ctl-thickness" min="0" max="1" step="0.01" value="0.28">
+            <span class="ctl-foot"><small>无</small><small>起伏</small></span>
+          </label>
+
+          <div class="note">
+            预测深度图可在此接管：把 <code>pointcloud.js</code> 的
+            <code>depthFromRelief()</code> 换成模型输出即可。
+          </div>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">05</span>交互</h2>
+
+          <label class="ctl" for="ctl-parallax">
+            <span class="ctl-head"><span>鼠标视差</span><output id="out-parallax">0.42</output></span>
+            <input type="range" id="ctl-parallax" min="0" max="1" step="0.01" value="0.42">
+          </label>
+
+          <label class="switch" for="ctl-avoid">
+            <input type="checkbox" id="ctl-avoid" checked>
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">鼠标避让</span>
+          </label>
+
+          <label class="ctl" for="ctl-avoid-strength">
+            <span class="ctl-head"><span>避让强度</span><output id="out-avoid-strength">0.60</output></span>
+            <input type="range" id="ctl-avoid-strength" min="0.1" max="1.6" step="0.01" value="0.6">
+          </label>
+
+          <label class="switch" for="ctl-rebound">
+            <input type="checkbox" id="ctl-rebound" checked>
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">回弹（弹性复位）</span>
+          </label>
+
+          <label class="switch" for="ctl-shade">
+            <input type="checkbox" id="ctl-shade" checked>
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">深度明暗（远点变暗）</span>
+          </label>
+        </section>
+
+        <section class="group">
+          <h2 class="group-title"><span class="idx">06</span>导出</h2>
+
+          <label class="ctl ctl--select" for="ctl-scale">
+            <span class="ctl-head"><span>PNG 倍率</span></span>
+            <select id="ctl-scale">
+              <option value="1">1× 屏幕尺寸</option>
+              <option value="2" selected>2× 高清</option>
+              <option value="3">3× 印刷</option>
+              <option value="4">4× 超清</option>
+            </select>
+          </label>
+
+          <div class="export-grid">
+            <button class="btn btn--primary" id="btn-export-html" type="button">
+              <strong>交互 HTML</strong><small>点云 + 交互，零外部依赖</small>
+            </button>
+            <button class="btn btn--soft" id="btn-export-svg" type="button">
+              <strong>交互 SVG</strong><small>矢量点云，脚本已内嵌</small>
+            </button>
+            <button class="btn btn--soft" id="btn-export-png" type="button">
+              <strong>高清 PNG</strong><small>当前模式 / 纵深 / 视角</small>
+            </button>
+            <button class="btn btn--ghost" id="btn-export-json" type="button">
+              <strong>点云 JSON</strong><small>数据交换 / 二次开发</small>
+            </button>
+          </div>
+
+          <div class="note note--warn">
+            导出物不含原照片与外部脚本；HTML 在普通与 :focus-visible 状态下均无边框、轮廓线与阴影。
+          </div>
+        </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script>(function(){
+"use strict";
+/* ==== src/core/utils.js ==== */
+/**
+ * core/utils.js — 无依赖的通用工具
+ * 数值 / 颜色 / 确定性噪声 / 浏览器小助手
+ */
+
+function clamp(v, min = 0, max = 1) {
+  return v < min ? min : v > max ? max : v;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function smoothstep(t) {
+  t = clamp(t, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+/** sRGB 空间加权的亮度（与滑块直觉一致，0=黑 1=白） */
+function luminance255(r, g, b) {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+function hexToRgb(hex) {
+  let h = String(hex || '').trim().replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (h.length !== 6 || /[^0-9a-f]/i.test(h)) return [255, 180, 84];
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHex(rgb) {
+  const part = (v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0');
+  return `#${part(rgb[0])}${part(rgb[1])}${part(rgb[2])}`;
+}
+
+function rgbCss(r, g, b) {
+  return `rgb(${Math.round(clamp(r, 0, 255))},${Math.round(clamp(g, 0, 255))},${Math.round(clamp(b, 0, 255))})`;
+}
+
+function hexToRgbaArray(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  return [r, g, b, 1];
+}
+
+/** 确定性 PRNG，保证同一输入永远得到同一输出（可复现的导出物） */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hash2i(x, y, seed) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295;
+}
+
+/** 平滑 value noise，坐标单位任意（整数格点插值） */
+function valueNoise2D(x, y, seed = 0) {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const u = smoothstep(x - xi);
+  const v = smoothstep(y - yi);
+  const a = hash2i(xi, yi, seed);
+  const b = hash2i(xi + 1, yi, seed);
+  const c = hash2i(xi, yi + 1, seed);
+  const d = hash2i(xi + 1, yi + 1, seed);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v);
+}
+
+/** 分形叠加噪声，返回 0..1 */
+function fbm2D(x, y, octaves = 3, seed = 0) {
+  let amp = 0.5;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += amp * valueNoise2D(x * freq, y * freq, seed + i * 17);
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return sum / (norm || 1);
+}
+
+function formatInt(n) {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function debounce(fn, wait) {
+  let timer = null;
+  const wrapped = (...args) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      fn(...args);
+    }, wait);
+  };
+  wrapped.cancel = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+  return wrapped;
+}
+
+/** 触发浏览器下载；string 按 text 处理，Blob 直接下载 */
+function downloadFile(filename, data, mime = 'text/plain;charset=utf-8') {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/** 把任意图片绘制到不超过 maxDim 的画布并取回像素，控制内存与耗时 */
+function imageToWorkingData(img, maxDim = 1600) {
+  const sw = img.naturalWidth || img.width;
+  const sh = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxDim / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  return { width: w, height: h, data: ctx.getImageData(0, 0, w, h).data, scale };
+}
+
+/* ==== src/core/demo-portrait.js ==== */
+/**
+ * core/demo-portrait.js — 内置彩色演示人像
+ *
+ * 这里不依赖任何外部图片：人像由一组带径向渐变的椭圆在纯 JS 中光栅化而来。
+ * 好处是（1）无需外部素材、无二进制依赖；（2）浏览器与 Node 端得到逐像素一致的结果，
+ * 因此导出的测试文件可以被确定性地重建与校验。
+ *
+ * 背景刻意保留为完全透明（alpha=0），用来演示生成器对透明像素的处理。
+ */
+
+
+/** 颜色速记：数组形式 [r,g,b,a] */
+function C(r, g, b, a = 1) {
+  return [r, g, b, a];
+}
+
+/** 径向渐变填充（坐标与半径单位均为像素） */
+function G(gx, gy, gr, stops) {
+  return { gx, gy, gr, stops };
+}
+
+/**
+ * 搭建人像形状表。所有坐标以 0..1 归一化书写，再乘以尺寸，便于任意分辨率复用。
+ * @returns {Array<object>} 形状列表（绘制顺序 = 由后到前）
+ */
+function buildPortraitShapes(size) {
+  const s = size;
+  const f = (v) => v * s;
+  const shapes = [];
+
+  const ellipse = (cx, cy, rx, ry, fill, opts = {}) => {
+    const shape = {
+      cx: f(cx),
+      cy: f(cy),
+      rx: f(rx),
+      ry: f(ry),
+      rot: opts.rot || 0,
+      feather: (opts.feather == null ? 1.2 : opts.feather) * (s / 512),
+      fill,
+    };
+    shapes.push(shape);
+    return shape;
+  };
+
+  // ---- 彩色光晕（衬托轮廓，纯装饰） ----
+  ellipse(0.5, 0.58, 0.40, 0.44, G(f(0.5), f(0.58), f(0.38), [
+    [0, C(110, 220, 215, 0.32)],
+    [0.5, C(160, 90, 210, 0.14)],
+    [1, C(160, 90, 210, 0)],
+  ]), { feather: 2 });
+
+  // ---- 脖子 ----
+  ellipse(0.5, 0.795, 0.088, 0.115, G(f(0.47), f(0.70), f(0.28), [
+    [0, C(236, 178, 140, 1)],
+    [0.7, C(212, 148, 110, 1)],
+    [1, C(172, 110, 80, 1)],
+  ]));
+
+  // ---- 肩胸（配色最饱和的区域） ----
+  ellipse(0.5, 1.03, 0.40, 0.30, G(f(0.5), f(0.86), f(0.60), [
+    [0, C(255, 190, 110, 1)],
+    [0.35, C(255, 105, 140, 1)],
+    [0.72, C(130, 70, 170, 1)],
+    [1, C(52, 28, 72, 1)],
+  ]));
+
+  // ---- 头发（后层） ----
+  ellipse(0.5, 0.46, 0.255, 0.295, G(f(0.42), f(0.32), f(0.42), [
+    [0, C(122, 62, 110, 1)],
+    [0.45, C(74, 36, 80, 1)],
+    [1, C(40, 20, 46, 1)],
+  ]));
+
+  // ---- 脸 ----
+  ellipse(0.5, 0.525, 0.208, 0.258, G(f(0.435), f(0.40), f(0.40), [
+    [0, C(255, 226, 200, 1)],
+    [0.4, C(246, 196, 158, 1)],
+    [0.75, C(224, 158, 118, 1)],
+    [1, C(186, 118, 88, 1)],
+  ]));
+
+  // ---- 耳朵 ----
+  const ear = C(226, 160, 120, 1);
+  ellipse(0.292, 0.552, 0.032, 0.050, ear);
+  ellipse(0.708, 0.552, 0.032, 0.050, ear);
+
+  // ---- 头发（顶层刘海与两侧发绺） ----
+  ellipse(0.5, 0.315, 0.235, 0.175, G(f(0.44), f(0.20), f(0.33), [
+    [0, C(140, 74, 126, 1)],
+    [0.5, C(80, 40, 88, 1)],
+    [1, C(46, 24, 52, 1)],
+  ]));
+  ellipse(0.400, 0.330, 0.115, 0.095, G(f(0.34), f(0.27), f(0.22), [
+    [0, C(118, 60, 112, 1)],
+    [1, C(76, 38, 84, 1)],
+  ]), { rot: -0.26 });
+  const lock = G(f(0.30), f(0.44), f(0.26), [
+    [0, C(112, 56, 102, 1)],
+    [1, C(48, 24, 54, 1)],
+  ]);
+  ellipse(0.305, 0.552, 0.062, 0.170, lock, { rot: 0.10 });
+  ellipse(0.695, 0.552, 0.062, 0.170, lock, { rot: -0.10 });
+
+  // ---- 颈下阴影 ----
+  ellipse(0.5, 0.748, 0.086, 0.045, C(150, 84, 66, 0.30), { feather: 8 });
+  ellipse(0.5, 0.700, 0.105, 0.060, C(178, 104, 84, 0.13), { feather: 10 });
+  ellipse(0.5, 0.655, 0.160, 0.075, C(190, 120, 96, 0.10), { feather: 14 });
+
+  // ---- 腮红 / 高光 ----
+  const blush = C(255, 110, 140, 0.26);
+  ellipse(0.362, 0.625, 0.052, 0.030, blush, { feather: 12 });
+  ellipse(0.638, 0.625, 0.052, 0.030, blush, { feather: 12 });
+  ellipse(0.455, 0.405, 0.080, 0.048, C(255, 240, 222, 0.20), { feather: 10 });
+  ellipse(0.382, 0.598, 0.055, 0.045, C(255, 235, 220, 0.14), { feather: 10 });
+  ellipse(0.618, 0.598, 0.055, 0.045, C(255, 235, 220, 0.14), { feather: 10 });
+
+  // ---- 眉毛 ----
+  const brow = C(64, 40, 30, 0.92);
+  ellipse(0.425, 0.483, 0.055, 0.013, brow, { rot: -0.10, feather: 2 });
+  ellipse(0.575, 0.483, 0.055, 0.013, brow, { rot: 0.10, feather: 2 });
+
+  // ---- 眼睛 ----
+  const white = C(250, 246, 244, 1);
+  const iris = G(f(0.427), f(0.544), f(0.028), [
+    [0, C(150, 246, 238, 1)],
+    [0.55, C(46, 168, 180, 1)],
+    [1, C(18, 74, 96, 1)],
+  ]);
+  const pupil = C(10, 12, 18, 1);
+  const glint = C(255, 255, 255, 0.95);
+  const lid = C(70, 44, 52, 0.55);
+  const lash = C(40, 24, 30, 0.9);
+
+  for (const side of [-1, 1]) {
+    const ox = side * 0.072;
+    ellipse(0.5 + ox, 0.548, 0.050, 0.027, white, { feather: 1.6 });
+    ellipse(0.5 + ox + side * 0.002, 0.549, 0.021, 0.021, iris, { feather: 1.4 });
+    ellipse(0.5 + ox + side * 0.002, 0.549, 0.0085, 0.0085, pupil, { feather: 1.2 });
+    ellipse(0.5 + ox - side * 0.006, 0.542, 0.006, 0.006, glint, { feather: 1 });
+    ellipse(0.5 + ox, 0.531, 0.052, 0.020, lid, { feather: 3 });
+    ellipse(0.5 + ox, 0.5255, 0.053, 0.011, lash, { feather: 2 });
+  }
+
+  // ---- 鼻子 ----
+  ellipse(0.505, 0.625, 0.026, 0.046, C(190, 120, 96, 0.30), { feather: 8 });
+  ellipse(0.492, 0.601, 0.011, 0.028, C(255, 240, 225, 0.30), { feather: 6 });
+  ellipse(0.5, 0.665, 0.021, 0.014, C(200, 130, 105, 0.35), { feather: 5 });
+
+  // ---- 嘴唇 ----
+  ellipse(0.5, 0.709, 0.050, 0.020, G(f(0.5), f(0.705), f(0.060), [
+    [0, C(255, 124, 142, 1)],
+    [1, C(196, 52, 84, 1)],
+  ]), { feather: 1.6 });
+  ellipse(0.5, 0.724, 0.045, 0.022, G(f(0.5), f(0.716), f(0.058), [
+    [0, C(255, 138, 152, 1)],
+    [1, C(186, 44, 76, 1)],
+  ]), { feather: 1.6 });
+  ellipse(0.5, 0.7085, 0.050, 0.006, C(140, 40, 62, 0.5), { feather: 1.4 });
+
+  // ---- 发丝彩色反光（呼应“彩色”主题） ----
+  ellipse(0.40, 0.262, 0.110, 0.022, G(f(0.30), f(0.225), f(0.30), [
+    [0, C(140, 246, 238, 0.60)],
+    [0.5, C(255, 180, 220, 0.34)],
+    [1, C(255, 180, 220, 0)],
+  ]), { rot: -0.36, feather: 3 });
+  ellipse(0.585, 0.245, 0.100, 0.020, G(f(0.68), f(0.205), f(0.28), [
+    [0, C(255, 170, 200, 0.52)],
+    [1, C(255, 170, 200, 0)],
+  ]), { rot: 0.34, feather: 3 });
+  ellipse(0.50, 0.218, 0.130, 0.016, G(f(0.50), f(0.20), f(0.34), [
+    [0, C(255, 236, 200, 0.40)],
+    [1, C(255, 236, 200, 0)],
+  ]), { rot: 0.02, feather: 3 });
+
+  return shapes;
+}
+
+/**
+ * 逐像素光栅化形状表（source-over 混合，边缘解析抗锯齿）。
+ * @returns {{width:number,height:number,data:Uint8ClampedArray}}
+ */
+function rasterizeShapes(size, shapes) {
+  const w = size;
+  const h = size;
+  const data = new Uint8ClampedArray(w * h * 4);
+
+  for (const shape of shapes) {
+    const { cx, cy, rx, ry, rot, feather, fill } = shape;
+    if (rx <= 0 || ry <= 0) continue;
+
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const reach = Math.hypot(rx, ry) + 2;
+    const x0 = Math.max(0, Math.floor(cx - reach));
+    const x1 = Math.min(w - 1, Math.ceil(cx + reach));
+    const y0 = Math.max(0, Math.floor(cy - reach));
+    const y1 = Math.min(h - 1, Math.ceil(cy + reach));
+    if (x1 < x0 || y1 < y0) continue;
+
+    const edge = Math.max(1e-4, feather / Math.min(rx, ry));
+    const isGradient = !Array.isArray(fill);
+    const stops = isGradient ? fill.stops : null;
+    const segCount = isGradient ? stops.length - 1 : 0;
+
+    for (let y = y0; y <= y1; y++) {
+      const py = y + 0.5;
+      const dy = py - cy;
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5;
+        const dx = px - cx;
+        const lx = dx * cos + dy * sin;
+        const ly = -dx * sin + dy * cos;
+        const d = Math.hypot(lx / rx, ly / ry);
+        if (d > 1 + edge) continue;
+
+        const cov = clamp((1 - d) / edge + 0.5, 0, 1);
+        if (cov <= 0.0015) continue;
+
+        let sr;
+        let sg;
+        let sb;
+        let sa;
+        if (!isGradient) {
+          sr = fill[0]; sg = fill[1]; sb = fill[2]; sa = fill[3];
+        } else {
+          let t = fill.gr > 0 ? Math.hypot(px - fill.gx, py - fill.gy) / fill.gr : 1;
+          t = clamp(t, 0, 1);
+          let i = 0;
+          while (i < segCount - 1 && t > stops[i + 1][0]) i++;
+          const a = stops[i];
+          const b = stops[i + 1];
+          const span = b[0] - a[0] || 1;
+          const k = clamp((t - a[0]) / span, 0, 1);
+          sr = a[1][0] + (b[1][0] - a[1][0]) * k;
+          sg = a[1][1] + (b[1][1] - a[1][1]) * k;
+          sb = a[1][2] + (b[1][2] - a[1][2]) * k;
+          sa = a[1][3] + (b[1][3] - a[1][3]) * k;
+        }
+
+        const alpha = sa * cov;
+        if (alpha <= 0.0015) continue;
+
+        const idx = (y * w + x) * 4;
+        const da = data[idx + 3] / 255;
+        const outA = alpha + da * (1 - alpha);
+        if (outA <= 0) continue;
+        const inv = da * (1 - alpha);
+        data[idx] = (sr * alpha + data[idx] * inv) / outA;
+        data[idx + 1] = (sg * alpha + data[idx + 1] * inv) / outA;
+        data[idx + 2] = (sb * alpha + data[idx + 2] * inv) / outA;
+        data[idx + 3] = outA * 255;
+      }
+    }
+  }
+
+  return { width: w, height: h, data };
+}
+
+/** 生成内置演示人像（结果缓存，重复调用零成本） */
+let demoCache = null;
+function createDemoPortrait(size = 512) {
+  if (demoCache && demoCache.width === size) return demoCache;
+  demoCache = rasterizeShapes(size, buildPortraitShapes(size));
+  return demoCache;
+}
+
+/* ==== src/core/sampler.js ==== */
+/**
+ * core/sampler.js — 像素 → 真实圆点
+ *
+ * 采样策略：把源图切成边长为 step 的方格，每个格子按 alpha 预乘做盒式平均，
+ * 得到一个“圆点”的位置、颜色、透明度与尺寸。这样：
+ *   · 透明像素自然消失（平均 alpha≈0 → 不生成点）；
+ *   · 半透明边缘生成半透明点，轮廓保持柔和、不失真；
+ *   · 明暗通过“点的大小 + 颜色”双重还原，而不是靠缩放整张位图。
+ * step 会按点数上限自适应放大，保证二维 SVG 模式也能流畅交互。
+ */
+
+
+const DEFAULT_SAMPLE_OPTIONS = {
+  spacing: 6,          // 参考宽度 900px 下的点距（px）
+  dotSize: 0.92,       // 圆点直径 = dotSize × step
+  contrast: 1.12,      // 围绕中灰的线性对比度
+  shadowLift: 0.22,    // 暗部保留：抬高暗部，避免细节被压死
+  darkCut: 0.05,       // 暗点过滤：低于该亮度的点直接剔除（负空间）
+  edgeBoost: 0.35,     // 轮廓强化：梯度大的地方点更大
+  monochrome: false,
+  monoColor: '#ffb454',
+  alphaThreshold: 10,  // 平均 alpha（0-255）低于该值不生成点
+  maxPoints: 12000,    // 点数上限（自适应放大 step 以逼近）
+  referenceWidth: 900,
+  seed: 20260911,
+};
+
+/** 把源像素按 step 累加进方格（预乘 alpha 的盒式平均） */
+function accumulateGrid(src, srcW, srcH, step) {
+  const gridW = Math.max(1, Math.ceil(srcW / step));
+  const gridH = Math.max(1, Math.ceil(srcH / step));
+  const n = gridW * gridH;
+  const cnt = new Uint32Array(n);
+  const aSum = new Float32Array(n);
+  const rSum = new Float32Array(n);
+  const gSum = new Float32Array(n);
+  const bSum = new Float32Array(n);
+
+  for (let y = 0; y < srcH; y++) {
+    const row = ((y / step) | 0) * gridW;
+    let si = y * srcW * 4;
+    for (let x = 0; x < srcW; x++, si += 4) {
+      const a = src[si + 3] / 255;
+      const i = row + ((x / step) | 0);
+      cnt[i]++;
+      aSum[i] += a;
+      rSum[i] += src[si] * a;
+      gSum[i] += src[si + 1] * a;
+      bSum[i] += src[si + 2] * a;
+    }
+  }
+  return { gridW, gridH, cnt, aSum, rSum, gSum, bSum };
+}
+
+/** 单次采样：给定 step，返回点数组 */
+function sampleAtStep(image, step, opts, seed) {
+  const srcW = image.width;
+  const srcH = image.height;
+  const src = image.data;
+  const grid = accumulateGrid(src, srcW, srcH, step);
+  const { gridW, gridH, cnt, aSum, rSum, gSum, bSum } = grid;
+  const n = gridW * gridH;
+
+  // 平均色 / 平均 alpha / 亮度图
+  const avgA = new Float32Array(n);
+  const avgR = new Float32Array(n);
+  const avgG = new Float32Array(n);
+  const avgB = new Float32Array(n);
+  const lum = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!cnt[i] || aSum[i] <= 0) continue;
+    const inv = 1 / aSum[i];
+    const a = aSum[i] / cnt[i];
+    avgA[i] = a;
+    avgR[i] = rSum[i] * inv;
+    avgG[i] = gSum[i] * inv;
+    avgB[i] = bSum[i] * inv;
+    lum[i] = luminance255(avgR[i], avgG[i], avgB[i]) * a;
+  }
+
+  const [mr, mg, mb] = hexToRgb(opts.monoColor);
+  const alphaCut = opts.alphaThreshold / 255;
+  const points = [];
+  const rand = mulberry32(seed);
+
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const i = gy * gridW + gx;
+      if (!cnt[i] || avgA[i] < alphaCut) continue;
+
+      // --- 轮廓强化：亮度梯度模长 ---
+      let edge = 0;
+      if (opts.edgeBoost > 0) {
+        const lc = lum[i];
+        const l = gx > 0 && cnt[i - 1] ? lum[i - 1] : lc;
+        const r = gx < gridW - 1 && cnt[i + 1] ? lum[i + 1] : lc;
+        const u = gy > 0 && cnt[i - gridW] ? lum[i - gridW] : lc;
+        const d = gy < gridH - 1 && cnt[i + gridW] ? lum[i + gridW] : lc;
+        edge = clamp(Math.hypot(r - l, d - u) * 1.35, 0, 1);
+      }
+
+      // --- 对比度（围绕中灰） ---
+      let cr = clamp((avgR[i] / 255 - 0.5) * opts.contrast + 0.5, 0, 1) * 255;
+      let cg = clamp((avgG[i] / 255 - 0.5) * opts.contrast + 0.5, 0, 1) * 255;
+      let cb = clamp((avgB[i] / 255 - 0.5) * opts.contrast + 0.5, 0, 1) * 255;
+
+      // --- 暗部保留：按比例抬升，保持色相不漂移 ---
+      let shade = luminance255(cr, cg, cb);
+      const lifted = clamp(shade + opts.shadowLift * Math.pow(1 - shade, 3), 0, 1);
+      const k = clamp(lifted / Math.max(shade, 0.03), 1, 2.6);
+      cr = clamp(cr * k, 0, 255);
+      cg = clamp(cg * k, 0, 255);
+      cb = clamp(cb * k, 0, 255);
+      shade = luminance255(cr, cg, cb);
+
+      // --- 暗点过滤 ---
+      if (lifted < opts.darkCut) continue;
+
+      // --- 单色模式：以亮度调制基调色，保证形体可读 ---
+      if (opts.monochrome) {
+        const f = 0.18 + 0.82 * lifted;
+        cr = mr * f;
+        cg = mg * f;
+        cb = mb * f;
+      }
+
+      const jitterX = (rand() - 0.5) * step * 0.34;
+      const jitterY = (rand() - 0.5) * step * 0.34;
+
+      points.push({
+        x: (gx + 0.5) * step + jitterX,
+        y: (gy + 0.5) * step + jitterY,
+        r: cr,
+        g: cg,
+        b: cb,
+        a: avgA[i],
+        s: opts.dotSize * step * 0.5 * (0.72 + 0.28 * lifted) * (1 + opts.edgeBoost * edge * 0.8),
+        shade: lifted,
+        edge,
+      });
+    }
+  }
+
+  return { points, gridW, gridH, step };
+}
+
+/**
+ * 采样主入口：自动放大 step 直到点数落入上限内。
+ * @param {{width:number,height:number,data:Uint8ClampedArray}} image
+ * @param {object} [options]
+ */
+function samplePoints(image, options = {}) {
+  const opts = { ...DEFAULT_SAMPLE_OPTIONS, ...options };
+  const referenceWidth = Math.max(120, opts.referenceWidth);
+  let step = Math.max(0.6, opts.spacing * Math.max(1, image.width / referenceWidth));
+
+  let result = null;
+  let attempts = 0;
+  for (let i = 0; i < 5; i++) {
+    attempts++;
+    result = sampleAtStep(image, step, opts, opts.seed);
+    if (result.points.length <= opts.maxPoints) break;
+    step *= Math.max(1.02, Math.sqrt(result.points.length / opts.maxPoints) * 1.03);
+  }
+
+  return {
+    points: result.points,
+    width: image.width,
+    height: image.height,
+    step: result.step,
+    grid: { w: result.gridW, h: result.gridH },
+    attempts,
+    options: opts,
+  };
+}
+
+/* ==== src/core/pointcloud.js ==== */
+/**
+ * core/pointcloud.js — 浮雕深度与点云装配
+ *
+ * 深度（浮雕）由三部分叠加：
+ *   1. 亮度   —— 亮的区域朝观众凸起，暗的区域后退（这是“浮雕感”的主要来源）；
+ *   2. 中心隆起 —— 以点云质心为球心的抛物面，让主体像一枚浮雕胸像；
+ *   3. 厚度微差 —— 低频噪声造成的极小起伏，避免表面“塑料感”。
+ *
+ * 局限（务必了解）：
+ *   亮度浮雕 ≠ 真实深度。它假设“亮 = 近”，因此在逆光、侧光或高反光材质上会失真；
+ *   眼镜、鼻梁等强烈高光会被夸大，头发缝隙等暗部会被压平。真正的解决方案是接入
+ *   预测深度图（见 depthFromMap 的预留位置），此时亮度项应降权为 0。
+ */
+
+
+
+/** 点数据在扁平数组中的字段偏移 */
+const POINT_STRIDE = 8;
+const P_X = 0;
+const P_Y = 1;
+const P_Z = 2;
+const P_R = 3;
+const P_G = 4;
+const P_B = 5;
+const P_A = 6;
+const P_S = 7;
+
+const DEFAULT_DEPTH_OPTIONS = {
+  bulge: 0.45,        // 中心隆起强度
+  thickness: 0.28,    // 厚度微差强度
+  brightnessWeight: 0.58, // 亮度对深度的贡献
+  noiseScale: 0.085,  // 噪声波长（相对图像宽度）
+  seed: 20260911,
+};
+
+/**
+ * 预留：接入预测深度图的位置。
+ *
+ * @param {(x:number,y:number)=>number} depthAt 归一化坐标 → 深度 0..1（0=远，1=近）
+ * @param {Array<number>} points 扁平点数组
+ * @returns {Float32Array} 与点数等长的深度偏移量（-1..1），替换亮度项
+ *
+ * 用法示例：
+ *   const map = await loadDepthMap();           // 由模型（如 Depth-Anything）离线生成
+ *   const dz = depthFromMap((x, y) => map.sample(x / cloud.width, y / cloud.height), cloud.points);
+ *   cloud.points.forEach((_, i) => { cloud.points[i * POINT_STRIDE + P_Z] = dz[i] * 1.2; });
+ */
+function depthFromMap(depthAt, points) {
+  const count = points.length / POINT_STRIDE;
+  const out = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const x = points[i * POINT_STRIDE + P_X];
+    const y = points[i * POINT_STRIDE + P_Y];
+    out[i] = clamp(depthAt(x, y) * 2 - 1, -1, 1);
+  }
+  return out;
+}
+
+/** 计算点云的空间范围与质心 */
+function computeBounds(points) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let sx = 0;
+  let sy = 0;
+  let wsum = 0;
+  const count = points.length / POINT_STRIDE;
+  for (let i = 0; i < count; i++) {
+    const o = i * POINT_STRIDE;
+    const x = points[o + P_X];
+    const y = points[o + P_Y];
+    const w = 0.25 + 0.75 * points[o + P_A];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    sx += x * w;
+    sy += y * w;
+    wsum += w;
+  }
+  if (!count) {
+    return { bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1, w: 1, h: 1 }, center: { x: 0.5, y: 0.5 } };
+  }
+  return {
+    bounds: { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY },
+    center: { x: sx / wsum, y: sy / wsum },
+  };
+}
+
+/** 依据“亮度 + 中心隆起 + 厚度微差”写入 z 通道 */
+function depthFromRelief(points, bounds, center, opts) {
+  const R = Math.max(1e-3, 0.6 * Math.max(bounds.w, bounds.h) * 0.5);
+  const lambda = Math.max(1e-3, opts.noiseScale);
+  const count = points.length / POINT_STRIDE;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+
+  for (let i = 0; i < count; i++) {
+    const o = i * POINT_STRIDE;
+    const x = points[o + P_X];
+    const y = points[o + P_Y];
+    // 亮度项：颜色已经过对比度与暗部保留处理，直接取感知亮度即可
+    const lum = (0.2126 * points[o + P_R] + 0.7152 * points[o + P_G] + 0.0722 * points[o + P_B]) / 255;
+
+    const dx = (x - center.x) / R;
+    const dy = (y - center.y) / R;
+    const bulge = clamp(1 - (dx * dx + dy * dy), 0, 1);
+
+    const n = fbm2D((x / Math.max(bounds.w, 1)) / lambda + 13.7, (y / Math.max(bounds.w, 1)) / lambda + 4.1, 3, opts.seed);
+
+    let z =
+      opts.brightnessWeight * (lum - 0.5) * 2 +
+      opts.bulge * bulge +
+      opts.thickness * (n - 0.5) * 1.2;
+
+    z = clamp(z, -1, 1);
+    points[o + P_Z] = z;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+
+  return { minZ: minZ === Infinity ? 0 : minZ, maxZ: maxZ === -Infinity ? 0 : maxZ };
+}
+
+/**
+ * 装配点云：采样 → 深度 → 边界。
+ * @param {{width:number,height:number,data:Uint8ClampedArray}} image
+ * @param {object} [sampleOptions] 见 sampler.js DEFAULT_SAMPLE_OPTIONS
+ * @param {object} [depthOptions] 见本文件 DEFAULT_DEPTH_OPTIONS
+ */
+function buildPointCloud(image, sampleOptions = {}, depthOptions = {}) {
+  const sOpts = { ...DEFAULT_SAMPLE_OPTIONS, ...sampleOptions };
+  const dOpts = { ...DEFAULT_DEPTH_OPTIONS, ...depthOptions, seed: sOpts.seed };
+
+  const sampled = samplePoints(image, sOpts);
+  const points = new Array(sampled.points.length * POINT_STRIDE);
+  for (let i = 0; i < sampled.points.length; i++) {
+    const p = sampled.points[i];
+    const o = i * POINT_STRIDE;
+    points[o + P_X] = p.x;
+    points[o + P_Y] = p.y;
+    points[o + P_Z] = 0;
+    points[o + P_R] = p.r;
+    points[o + P_G] = p.g;
+    points[o + P_B] = p.b;
+    points[o + P_A] = p.a;
+    points[o + P_S] = p.s;
+  }
+
+  const { bounds, center } = computeBounds(points);
+  const zRange = depthFromRelief(points, bounds, center, dOpts);
+
+  return {
+    width: sampled.width,
+    height: sampled.height,
+    step: sampled.step,
+    grid: sampled.grid,
+    attempts: sampled.attempts,
+    bounds,
+    center,
+    zRange,
+    depthOptions: dOpts,
+    points,
+  };
+}
+
+/** 精简序列化：按可读精度取整，减小导出物体积（0.1px 的量化误差肉眼不可见） */
+function serializeCloud(cloud) {
+  const pts = new Array(cloud.points.length);
+  for (let i = 0; i < cloud.points.length; i += POINT_STRIDE) {
+    pts[i + P_X] = Math.round(cloud.points[i + P_X] * 10) / 10;
+    pts[i + P_Y] = Math.round(cloud.points[i + P_Y] * 10) / 10;
+    pts[i + P_Z] = Math.round(cloud.points[i + P_Z] * 100) / 100;
+    pts[i + P_R] = Math.round(cloud.points[i + P_R]);
+    pts[i + P_G] = Math.round(cloud.points[i + P_G]);
+    pts[i + P_B] = Math.round(cloud.points[i + P_B]);
+    pts[i + P_A] = Math.round(cloud.points[i + P_A] * 100) / 100;
+    pts[i + P_S] = Math.round(cloud.points[i + P_S] * 10) / 10;
+  }
+  return {
+    v: 1,
+    width: cloud.width,
+    height: cloud.height,
+    step: Math.round(cloud.step * 100) / 100,
+    bounds: {
+      minX: Math.round(cloud.bounds.minX * 10) / 10,
+      minY: Math.round(cloud.bounds.minY * 10) / 10,
+      maxX: Math.round(cloud.bounds.maxX * 10) / 10,
+      maxY: Math.round(cloud.bounds.maxY * 10) / 10,
+    },
+    center: {
+      x: Math.round(cloud.center.x * 10) / 10,
+      y: Math.round(cloud.center.y * 10) / 10,
+    },
+    points: pts,
+    stride: POINT_STRIDE,
+  };
+}
+
+/* ==== src/runtime/interaction.js ==== */
+/**
+ * runtime/interaction.js — 预览与导出共用的点云交互运行时
+ *
+ * 关键设计：整个运行时被包在一个**自包含的函数表达式**里。
+ *   · 生成器预览：直接执行 POINT_SCENE_RUNTIME() 拿到 API；
+ *   · 导出的 HTML / SVG：把该函数 String() 化后内嵌，浏览器加载时再执行一次。
+ * 于是“预览里的交互”与“导出文件里的交互”是同一份代码，不存在两套实现漂移。
+ *
+ * 坐标约定
+ *   点云坐标 = 源图像像素（cloud 单位）。SVG 用 viewBox 承载它，Canvas 用 scale
+ *   映射到设备像素；指针位置统一换算回 cloud 单位，因此避让/回弹/视差在两种模式下
+ *   的表现完全一致。
+ */
+const POINT_SCENE_RUNTIME = function () {
+  'use strict';
+
+  const VERSION = '1.0.0';
+  const TAU = Math.PI * 2;
+  const P_X = 0;
+  const P_Y = 1;
+  const P_Z = 2;
+  const P_R = 3;
+  const P_G = 4;
+  const P_B = 5;
+  const P_A = 6;
+  const P_S = 7;
+  const STRIDE = 8;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function clamp(v, min, max) {
+    return v < min ? min : v > max ? max : v;
+  }
+
+  function round(v, digits) {
+    const k = Math.pow(10, digits);
+    return Math.round(v * k) / k;
+  }
+
+  const DEFAULT_OPTIONS = {
+    mode: 'svg',            // 'svg' = 二维 SVG；'canvas' = 三维 Canvas
+    background: null,       // null = 透明；否则 '#rrggbb'
+    padding: 0.05,          // 边距（占图像短边比例）
+    depth: 0.55,            // 纵深幅度
+    depthScale: 0.34,       // 纵深 → 世界单位换算
+    parallax: 0.42,         // 鼠标视差强度
+    avoid: true,            // 鼠标避让
+    avoidStrength: 0.6,     // 避让强度
+    avoidRadius: 0.18,      // 避让半径（占图像短边比例）
+    rebound: true,          // 回弹
+    shadeByDepth: true,     // 远点变暗
+    interactive: true,
+    wheelZoom: true,
+    dragRotate: true,
+    layerCount: 0,          // 0 = 自动；导出时会写入确定值
+    maxPixelRatio: 2,
+    enhance: false,         // true = 接管已存在的静态 SVG
+    minZoom: 0.4,
+    maxZoom: 6,
+  };
+
+  function normalizeOptions(options) {
+    const out = {};
+    for (const key in DEFAULT_OPTIONS) out[key] = DEFAULT_OPTIONS[key];
+    if (options) for (const key in options) if (options[key] !== undefined) out[key] = options[key];
+    out.background = out.background || null;
+    out.layerCount = out.layerCount | 0;
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 布局：点云 → cloud 单位的几何 / 颜色 / 深度分层
+   * ------------------------------------------------------------------ */
+  function buildLayout(cloud, opts) {
+    const count = cloud.points.length / STRIDE;
+    const imgW = cloud.width;
+    const imgH = cloud.height;
+    const pad = opts.padding * Math.min(imgW, imgH);
+    const vb = { x: -pad, y: -pad, w: imgW + pad * 2, h: imgH + pad * 2 };
+    const depthPx = opts.depth * opts.depthScale * Math.min(imgW, imgH);
+
+    let layerCount = opts.layerCount | 0;
+    if (layerCount <= 0) layerCount = Math.round(clamp(Math.sqrt(count) / 2.2, 6, 16));
+
+    const vx = new Float32Array(count);
+    const vy = new Float32Array(count);
+    const vz = new Float32Array(count);
+    const rad = new Float32Array(count);
+    const cr = new Float32Array(count);
+    const cg = new Float32Array(count);
+    const cb = new Float32Array(count);
+    const ca = new Float32Array(count);
+    const layer = new Uint8Array(count);
+    const layerSum = new Float64Array(layerCount);
+    const layerCnt = new Uint32Array(layerCount);
+
+    for (let i = 0; i < count; i++) {
+      const o = i * STRIDE;
+      const z = cloud.points[o + P_Z];
+      // vx/vy 直接使用 viewBox 用户坐标（= 源图像像素），交互时的位移也都是用户单位
+      vx[i] = cloud.points[o + P_X];
+      vy[i] = cloud.points[o + P_Y];
+      vz[i] = z * depthPx;
+      rad[i] = Math.max(0.12, cloud.points[o + P_S]);
+      cr[i] = cloud.points[o + P_R];
+      cg[i] = cloud.points[o + P_G];
+      cb[i] = cloud.points[o + P_B];
+      ca[i] = cloud.points[o + P_A];
+      const li = Math.min(layerCount - 1, Math.floor(clamp((z + 1) * 0.5, 0, 0.999999) * layerCount));
+      layer[i] = li;
+      layerSum[li] += z;
+      layerCnt[li]++;
+    }
+
+    const layerZ = new Float32Array(layerCount);
+    for (let l = 0; l < layerCount; l++) {
+      layerZ[l] = layerCnt[l] ? clamp(layerSum[l] / layerCnt[l], -1, 1) : -1 + (2 * (l + 0.5)) / layerCount;
+    }
+
+    return {
+      count, vb, depthPx, imgW, imgH,
+      vx, vy, vz, rad, cr, cg, cb, ca,
+      layer, layerZ, layerCount,
+      cx: imgW / 2,
+      cy: imgH / 2,
+      minDim: Math.min(vb.w, vb.h),
+    };
+  }
+
+  /** 每层的点索引（升序）。静态 SVG 的文档顺序与交互模式共用这一顺序。 */
+  function layerIndexBuckets(layout) {
+    const buckets = new Array(layout.layerCount);
+    for (let l = 0; l < layout.layerCount; l++) buckets[l] = [];
+    for (let i = 0; i < layout.count; i++) buckets[layout.layer[i]].push(i);
+    return buckets;
+  }
+
+  function cssRgba(r, g, b, a) {
+    const rr = Math.round(clamp(r, 0, 255));
+    const gg = Math.round(clamp(g, 0, 255));
+    const bb = Math.round(clamp(b, 0, 255));
+    return a >= 0.995
+      ? 'rgb(' + rr + ',' + gg + ',' + bb + ')'
+      : 'rgba(' + rr + ',' + gg + ',' + bb + ',' + round(a, 3) + ')';
+  }
+
+  /**
+   * 生成静态 SVG 标记（脱离脚本也能正确渲染）。
+   * 圆圈顺序 = 层索引升序 → 层内点索引升序；交互模式依赖该顺序建立映射，
+   * 因此手工编辑该文件时请勿调整圆圈的先后次序。
+   */
+  function buildSvgMarkup(cloud, options) {
+    const opts = normalizeOptions(options);
+    const layout = buildLayout(cloud, opts);
+    const buckets = layerIndexBuckets(layout);
+    const { vb, vx, vy, rad, cr, cg, cb, ca } = layout;
+    const parts = [];
+    parts.push(
+      '<svg xmlns="' + SVG_NS + '" viewBox="' +
+      round(vb.x, 2) + ' ' + round(vb.y, 2) + ' ' + round(vb.w, 2) + ' ' + round(vb.h, 2) +
+      '" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" data-pc="svg">',
+    );
+    if (opts.background) {
+      parts.push(
+        '<rect x="' + round(vb.x, 2) + '" y="' + round(vb.y, 2) + '" width="' + round(vb.w, 2) +
+        '" height="' + round(vb.h, 2) + '" fill="' + opts.background + '"/>',
+      );
+    }
+    parts.push('<g data-pc-root="1" shape-rendering="geometricPrecision">');
+    for (let l = 0; l < layout.layerCount; l++) {
+      parts.push('<g data-pc-layer="' + l + '" data-z="' + round(layout.layerZ[l], 3) + '">');
+      const list = buckets[l];
+      for (let k = 0; k < list.length; k++) {
+        const i = list[k];
+        parts.push(
+          '<circle cx="' + round(vx[i], 2) + '" cy="' + round(vy[i], 2) + '" r="' + round(rad[i], 2) +
+          '" fill="' + cssRgba(cr[i], cg[i], cb[i], ca[i]) + '"/>',
+        );
+      }
+      parts.push('</g>');
+    }
+    parts.push('</g></svg>');
+    return parts.join('');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 场景
+   * ------------------------------------------------------------------ */
+  function createPointScene(host, cloud, options) {
+    if (!host) throw new Error('createPointScene: 缺少宿主元素');
+    if (!cloud || !cloud.points || !cloud.points.length) throw new Error('createPointScene: 点云为空');
+
+    let opts = normalizeOptions(options);
+    let layout = buildLayout(cloud, opts);
+    let buckets = layerIndexBuckets(layout);
+    const count = layout.count;
+
+    const tagName = String(host.tagName || '').toLowerCase();
+    const isSvgHost = host.namespaceURI === SVG_NS && tagName === 'svg';
+    const isCanvasHost = tagName === 'canvas';
+
+    let svgRoot = null;
+    let rootGroup = null;
+    let layerGroups = [];
+    let circleEls = null;
+    let canvas = null;
+    let viewCtx = null;
+    let dpr = 1;
+    let cssW = 1;
+    let cssH = 1;
+
+    const view = { yaw: 0, pitch: 0, zoom: 1 };
+    const target = { yaw: 0, pitch: 0, zoom: 1 };
+
+    let ptrX = 0;
+    let ptrY = 0;
+    let ptrActive = false;
+    let parallaxX = 0;
+    let parallaxY = 0;
+    let targetParallaxX = 0;
+    let targetParallaxY = 0;
+
+    const offX = new Float32Array(count);
+    const offY = new Float32Array(count);
+    const velX = new Float32Array(count);
+    const velY = new Float32Array(count);
+    const wroteX = new Float32Array(count);
+    const wroteY = new Float32Array(count);
+
+    // 渲染缓冲（复用，避免每帧 GC）
+    const bufPx = new Float32Array(count);
+    const bufPy = new Float32Array(count);
+    const bufPr = new Float32Array(count);
+    const bufPa = new Float32Array(count);
+    const bufCol = new Int32Array(count);
+    const depthKeys = new Float32Array(count);
+    const depthOrder = new Int32Array(count);
+    const bucketOf = new Int32Array(count);
+    const bucketCount = new Int32Array(130);
+    const bucketCursor = new Int32Array(130);
+    const DEPTH_BUCKETS = 128;
+
+    let rafId = 0;
+    let running = false;
+    let hasRendered = false;
+    let lastTime = 0;
+    let fps = 0;
+    let dragging = false;
+    let dragId = -1;
+    let lastPointer = { x: 0, y: 0 };
+    let sortYaw = NaN;
+    let sortPitch = NaN;
+    let destroyed = false;
+    let resizeObserver = null;
+    let onViewChange = typeof opts.onViewChange === 'function' ? opts.onViewChange : null;
+
+    for (let i = 0; i < count; i++) {
+      depthOrder[i] = i;
+      wroteX[i] = NaN;
+      wroteY[i] = NaN;
+    }
+
+    /* ---------------- 度量与坐标换算 ---------------- */
+    function computeMetrics(cw, ch) {
+      const vb = layout.vb;
+      const s = Math.min(cw / vb.w, ch / vb.h);
+      return {
+        cw, ch, s,
+        originX: (cw - vb.w * s) / 2,
+        originY: (ch - vb.h * s) / 2,
+        vcx: cw / 2,
+        vcy: ch / 2,
+      };
+    }
+
+    function liveElement() {
+      // 注意：按“渲染模式”而不是“宿主类型”判断 —— 生成器里 canvas 是我们自己创建的，
+      // 宿主只是一个普通 div，此时 isCanvasHost 为 false。
+      return opts.mode === 'canvas' ? canvas : svgRoot;
+    }
+
+    function isCanvasMode() {
+      return opts.mode === 'canvas';
+    }
+
+    function measure() {
+      const el = liveElement();
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      cssW = Math.max(1, rect.width);
+      cssH = Math.max(1, rect.height);
+      if (isCanvasMode()) {
+        dpr = Math.min(opts.maxPixelRatio, window.devicePixelRatio || 1);
+        const pw = Math.max(1, Math.round(cssW * dpr));
+        const ph = Math.max(1, Math.round(cssH * dpr));
+        if (canvas.width !== pw || canvas.height !== ph) {
+          canvas.width = pw;
+          canvas.height = ph;
+        }
+      }
+    }
+
+    /** client 坐标 → cloud 单位（各自坐标系的相对中心偏移量） */
+    function clientToUnits(clientX, clientY) {
+      const el = liveElement();
+      const rect = el.getBoundingClientRect();
+      const m = computeMetrics(cssW, cssH);
+      const vb = layout.vb;
+      const localX = clientX - rect.left;
+      const localY = clientY - rect.top;
+      // 反解 zoom（围绕元素中心）
+      const zoomedX = m.vcx + (localX - m.vcx) / view.zoom;
+      const zoomedY = m.vcy + (localY - m.vcy) / view.zoom;
+      // 反解 viewBox 映射
+      const ux = vb.x + (zoomedX - m.originX) / m.s;
+      const uy = vb.y + (zoomedY - m.originY) / m.s;
+      return { x: ux - vb.x - vb.w / 2, y: uy - vb.y - vb.h / 2 };
+    }
+
+    /* ---------------- DOM 构建 ---------------- */
+    function applyRootTransform() {
+      if (!rootGroup) return;
+      const cx = layout.vb.x + layout.vb.w / 2;
+      const cy = layout.vb.y + layout.vb.h / 2;
+      rootGroup.setAttribute(
+        'transform',
+        'translate(' + round(cx, 2) + ' ' + round(cy, 2) + ') scale(' + round(view.zoom, 4) +
+        ') translate(' + round(-cx, 2) + ' ' + round(-cy, 2) + ')',
+      );
+    }
+
+    function buildSvgDom() {
+      if (isSvgHost && opts.enhance && host.querySelector('[data-pc-root]')) {
+        svgRoot = host;
+      } else if (isSvgHost) {
+        svgRoot = host;
+        const inner = buildSvgMarkup(cloud, opts);
+        svgRoot.innerHTML = inner.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+        if (!svgRoot.getAttribute('viewBox')) {
+          const vb = layout.vb;
+          svgRoot.setAttribute('viewBox', round(vb.x, 2) + ' ' + round(vb.y, 2) + ' ' + round(vb.w, 2) + ' ' + round(vb.h, 2));
+          svgRoot.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+      } else {
+        host.innerHTML = buildSvgMarkup(cloud, opts);
+        svgRoot = host.querySelector('svg');
+      }
+      rootGroup = svgRoot.querySelector('[data-pc-root]');
+      layerGroups = Array.prototype.slice.call(rootGroup.querySelectorAll('[data-pc-layer]'));
+      circleEls = new Array(count);
+      for (let l = 0; l < layerGroups.length; l++) {
+        const circles = layerGroups[l].querySelectorAll('circle');
+        const list = buckets[l] || [];
+        const n = Math.min(circles.length, list.length);
+        for (let k = 0; k < n; k++) circleEls[list[k]] = circles[k];
+      }
+      applyRootTransform();
+    }
+
+    function buildCanvas() {
+      canvas = isCanvasHost ? host : document.createElement('canvas');
+      if (!isCanvasHost) {
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.touchAction = 'none';
+        host.appendChild(canvas);
+      }
+      viewCtx = canvas.getContext('2d');
+    }
+
+    function teardownDom() {
+      if (canvas && !isCanvasHost && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+      if (svgRoot && !isSvgHost && svgRoot.parentNode) svgRoot.parentNode.removeChild(svgRoot);
+      canvas = null;
+      viewCtx = null;
+      svgRoot = null;
+      rootGroup = null;
+      layerGroups = [];
+      circleEls = null;
+    }
+
+    function rebuild() {
+      teardownDom();
+      layout = buildLayout(cloud, opts);
+      buckets = layerIndexBuckets(layout);
+      if (opts.mode === 'svg') buildSvgDom();
+      else buildCanvas();
+      measure();
+      markAllDirty();
+      requestFrame();
+    }
+
+    function markAllDirty() {
+      for (let i = 0; i < count; i++) {
+        wroteX[i] = NaN;
+        wroteY[i] = NaN;
+      }
+    }
+
+    /* ---------------- 视图 / 物理 ---------------- */
+    function stepView(f) {
+      let active = false;
+      const lerpK = Math.min(1, 0.26 * f);
+      if (Math.abs(target.yaw - view.yaw) > 1e-4) {
+        view.yaw += (target.yaw - view.yaw) * lerpK;
+        active = true;
+      } else view.yaw = target.yaw;
+      if (Math.abs(target.pitch - view.pitch) > 1e-4) {
+        view.pitch += (target.pitch - view.pitch) * lerpK;
+        active = true;
+      } else view.pitch = target.pitch;
+      if (Math.abs(target.zoom - view.zoom) > 1e-4) {
+        view.zoom += (target.zoom - view.zoom) * Math.min(1, 0.24 * f);
+        active = true;
+      } else view.zoom = target.zoom;
+
+      const pk = Math.min(1, 0.16 * f);
+      if (Math.abs(targetParallaxX - parallaxX) > 0.02 || Math.abs(targetParallaxY - parallaxY) > 0.02) {
+        parallaxX += (targetParallaxX - parallaxX) * pk;
+        parallaxY += (targetParallaxY - parallaxY) * pk;
+        active = true;
+      } else {
+        parallaxX = targetParallaxX;
+        parallaxY = targetParallaxY;
+      }
+      return active;
+    }
+
+    function stepPhysics(f) {
+      const minDim = layout.minDim;
+      const R = Math.max(1, opts.avoidRadius * minDim);
+      const pushAmp = opts.avoidStrength * 0.075 * minDim;
+      const useAvoid = opts.avoid && ptrActive && !dragging;
+      const k = opts.rebound ? 0.14 : 0.6;
+      const c = opts.rebound ? 0.22 : 1.35;
+      const R2 = R * R;
+      let active = false;
+
+      for (let i = 0; i < count; i++) {
+        let tx = 0;
+        let ty = 0;
+        if (useAvoid) {
+          const dx = layout.vx[i] - layout.cx + offX[i] - ptrX;
+          const dy = layout.vy[i] - layout.cy + offY[i] - ptrY;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < R2) {
+            const d = Math.sqrt(d2) || 1e-4;
+            const w = 1 - d / R;
+            const amp = pushAmp * w * w;
+            tx = (dx / d) * amp;
+            ty = (dy / d) * amp;
+          }
+        }
+
+        const prevX = offX[i];
+        const prevY = offY[i];
+        velX[i] += (k * (tx - offX[i]) - c * velX[i]) * f;
+        velY[i] += (k * (ty - offY[i]) - c * velY[i]) * f;
+        offX[i] += velX[i] * f;
+        offY[i] += velY[i] * f;
+
+        // 完全归位后彻底清零，避免残留微小抖动
+        if (tx === 0 && ty === 0 &&
+            Math.abs(offX[i]) < 0.05 && Math.abs(offY[i]) < 0.05 &&
+            Math.abs(velX[i]) < 0.05 && Math.abs(velY[i]) < 0.05) {
+          offX[i] = 0; offY[i] = 0; velX[i] = 0; velY[i] = 0;
+        }
+
+        // 用“本帧位移量”判定是否还需要继续跑帧：
+        // 指针静止时点会稳定在避让平衡位置，此时位移为 0，循环自然停下。
+        const moved = Math.abs(offX[i] - prevX) + Math.abs(offY[i] - prevY);
+        if (moved > 0.015 || Math.abs(velX[i]) + Math.abs(velY[i]) > 0.06) active = true;
+      }
+      return active;
+    }
+
+    /* ---------------- 投影 ---------------- */
+    function projectAll(m, isStatic) {
+      const cosY = Math.cos(view.yaw);
+      const sinY = Math.sin(view.yaw);
+      const cosP = Math.cos(view.pitch);
+      const sinP = Math.sin(view.pitch);
+      const zoom = view.zoom;
+      const maxDepth = Math.max(1e-3, layout.depthPx);
+      const { vx, vy, vz, rad, cr, cg, cb, ca, layerZ, layer, vb, cx: lcx, cy: lcy } = layout;
+      const use3d = opts.mode === 'canvas';
+      const shade = !!opts.shadeByDepth;
+      const baseX = vb.x + vb.w / 2;
+      const baseY = vb.y + vb.h / 2;
+
+      for (let i = 0; i < count; i++) {
+        let sx;
+        let sy;
+        let zn;
+        let rk = 1;
+        if (use3d) {
+          const x0 = vx[i] - lcx;
+          const y0 = vy[i] - lcy;
+          const z0 = vz[i];
+          const x1 = x0 * cosY + z0 * sinY;
+          const z1 = -x0 * sinY + z0 * cosY;
+          const y2 = y0 * cosP - z1 * sinP;
+          const z2 = y0 * sinP + z1 * cosP;
+          sx = x1;
+          sy = y2;
+          zn = clamp(z2 / maxDepth, -1, 1);
+          rk = 1 + zn * 0.24;
+        } else {
+          sx = vx[i] - lcx;
+          sy = vy[i] - lcy;
+          zn = layerZ[layer[i]];
+        }
+        const lz = layerZ[layer[i]];
+        if (!isStatic) {
+          sx += lz * parallaxX + offX[i];
+          sy += lz * parallaxY + offY[i];
+        }
+
+        const ux = baseX + sx;
+        const uy = baseY + sy;
+        let px = m.originX + (ux - vb.x) * m.s;
+        let py = m.originY + (uy - vb.y) * m.s;
+        px = m.vcx + (px - m.vcx) * zoom;
+        py = m.vcy + (py - m.vcy) * zoom;
+
+        bufPx[i] = px;
+        bufPy[i] = py;
+        bufPr[i] = Math.max(0.08, rad[i] * rk * m.s * zoom);
+        const shadeK = shade ? 0.7 + 0.3 * ((zn + 1) * 0.5) : 1;
+        bufPa[i] = clamp(ca[i] * shadeK, 0, 1);
+        bufCol[i] =
+          (Math.round(clamp(cr[i] * shadeK, 0, 255)) << 16) |
+          (Math.round(clamp(cg[i] * shadeK, 0, 255)) << 8) |
+          Math.round(clamp(cb[i] * shadeK, 0, 255));
+      }
+      return { m, use3d };
+    }
+
+    /** 画家算法：按当前视角深度做 O(n) 分桶排序 */
+    function sortByDepth(yaw, pitch) {
+      const cosY = Math.cos(yaw);
+      const sinY = Math.sin(yaw);
+      const cosP = Math.cos(pitch);
+      const sinP = Math.sin(pitch);
+      const { vx, vy, vz } = layout;
+      const lcx = layout.cx;
+      const lcy = layout.cy;
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < count; i++) {
+        const z1 = -(vx[i] - lcx) * sinY + vz[i] * cosY;
+        const z2 = (vy[i] - lcy) * sinP + z1 * cosP;
+        depthKeys[i] = z2;
+        if (z2 < min) min = z2;
+        if (z2 > max) max = z2;
+      }
+      const span = (max - min) || 1;
+      bucketCount.fill(0);
+      for (let i = 0; i < count; i++) {
+        const b = clamp(Math.floor(((depthKeys[i] - min) / span) * DEPTH_BUCKETS), 0, DEPTH_BUCKETS);
+        bucketOf[i] = b;
+        bucketCount[b + 1]++;
+      }
+      for (let b = 0; b < DEPTH_BUCKETS; b++) bucketCount[b + 1] += bucketCount[b];
+      bucketCursor.set(bucketCount.subarray(0, DEPTH_BUCKETS + 1));
+      for (let i = 0; i < count; i++) depthOrder[bucketCursor[bucketOf[i]]++] = i;
+    }
+
+    /* ---------------- 绘制 ---------------- */
+    function drawCircles(ctx, m) {
+      const use3d = opts.mode === 'canvas';
+      if (use3d) {
+        if (sortYaw !== view.yaw || sortPitch !== view.pitch) {
+          sortByDepth(view.yaw, view.pitch);
+          sortYaw = view.yaw;
+          sortPitch = view.pitch;
+        }
+      }
+      let lastColor = 0x7fffffff;
+      let lastAlpha = -1;
+      for (let k = 0; k < count; k++) {
+        const i = depthOrder[k];
+        const r = bufPr[i];
+        const alpha = bufPa[i];
+        if (alpha <= 0.004 || r <= 0.06) continue;
+        const x = bufPx[i];
+        const y = bufPy[i];
+        if (x < -r || y < -r || x > m.cw + r || y > m.ch + r) continue;
+        const col = bufCol[i];
+        if (col !== lastColor || alpha !== lastAlpha) {
+          lastColor = col;
+          lastAlpha = alpha;
+          ctx.fillStyle = 'rgba(' + ((col >> 16) & 255) + ',' + ((col >> 8) & 255) + ',' + (col & 255) + ',' + alpha + ')';
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    function renderCanvas() {
+      const m = computeMetrics(cssW, cssH);
+      projectAll(m);
+      viewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      viewCtx.clearRect(0, 0, cssW, cssH);
+      if (opts.background) {
+        viewCtx.fillStyle = opts.background;
+        viewCtx.fillRect(0, 0, cssW, cssH);
+      }
+      drawCircles(viewCtx, m);
+    }
+
+    function renderSvg() {
+      applyRootTransform();
+      const showParallax = Math.abs(parallaxX) > 0.01 || Math.abs(parallaxY) > 0.01;
+      for (let l = 0; l < layerGroups.length; l++) {
+        const g = layerGroups[l];
+        if (!showParallax) {
+          if (g.getAttribute('transform')) g.removeAttribute('transform');
+        } else {
+          const z = layout.layerZ[l];
+          g.setAttribute('transform', 'translate(' + round(z * parallaxX, 2) + ' ' + round(z * parallaxY, 2) + ')');
+        }
+      }
+      for (let i = 0; i < count; i++) {
+        const el = circleEls[i];
+        if (!el) continue;
+        const x = layout.vx[i] + offX[i];
+        const y = layout.vy[i] + offY[i];
+        if (Math.abs(x - wroteX[i]) < 0.02 && Math.abs(y - wroteY[i]) < 0.02) continue;
+        wroteX[i] = x;
+        wroteY[i] = y;
+        el.setAttribute('cx', round(x, 2));
+        el.setAttribute('cy', round(y, 2));
+      }
+    }
+
+    /**
+     * 把当前视角（含纵深、缩放、旋转）静态渲染到任意 2D 上下文 —— PNG 导出使用。
+     * 不含指针引起的瞬时位移，保证导出结果稳定可复现。
+     */
+    function renderStatic(ctx, w, h, pixelRatio) {
+      const ratio = pixelRatio || 1;
+      const m = computeMetrics(w, h);
+      projectAll(m, true);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      if (opts.background) {
+        ctx.fillStyle = opts.background;
+        ctx.fillRect(0, 0, w, h);
+      }
+      drawCircles(ctx, m);
+    }
+
+    /* ---------------- 帧循环 ---------------- */
+    function requestFrame() {
+      if (destroyed || rafId) return;
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function tick(now) {
+      rafId = 0;
+      const dt = lastTime ? clamp((now - lastTime) / 1000, 1 / 240, 1 / 20) : 1 / 60;
+      lastTime = now;
+      const f = clamp(dt * 60, 0.15, 2.5);
+
+      const viewActive = stepView(f);
+      const physActive = stepPhysics(f);
+      if (opts.mode === 'svg') renderSvg();
+      else renderCanvas();
+      hasRendered = true;
+
+      fps = fps === 0 ? 1 / dt : fps * 0.9 + (1 / dt) * 0.1;
+
+      if (viewActive || physActive) {
+        running = true;
+        requestFrame();
+      } else {
+        running = false;
+        lastTime = 0;
+        fps = 0;
+        if (onViewChange) onViewChange(getView());
+      }
+    }
+
+    /* ---------------- 事件 ---------------- */
+    function onPointerMove(e) {
+      if (dragging && dragId !== -1 && e.pointerId !== dragId) return;
+      const u = clientToUnits(e.clientX, e.clientY);
+      if (dragging && opts.dragRotate) {
+        const dx = e.clientX - lastPointer.x;
+        const dy = e.clientY - lastPointer.y;
+        target.yaw += dx * 0.0085;
+        // 上下拖动方向跟随指针：向下拖 → 模型正面随之向下俯
+        target.pitch = clamp(target.pitch + dy * 0.0085, -1.4, 1.4);
+        lastPointer = { x: e.clientX, y: e.clientY };
+      }
+      ptrActive = true;
+      ptrX = u.x;
+      ptrY = u.y;
+      if (opts.parallax > 0) {
+        const amp = opts.parallax * 0.06 * layout.minDim;
+        const nx = clamp((u.x / (layout.vb.w / 2)), -1, 1);
+        const ny = clamp((u.y / (layout.vb.h / 2)), -1, 1);
+        targetParallaxX = nx * amp;
+        targetParallaxY = ny * amp;
+      }
+      requestFrame();
+    }
+
+    function onPointerDown(e) {
+      if (!opts.interactive) return;
+      dragging = true;
+      dragId = e.pointerId;
+      lastPointer = { x: e.clientX, y: e.clientY };
+      const el = liveElement();
+      if (el.setPointerCapture) {
+        try { el.setPointerCapture(e.pointerId); } catch { /* 忽略 */ }
+      }
+      requestFrame();
+    }
+
+    function onPointerUp(e) {
+      if (dragId !== -1 && e.pointerId !== dragId) return;
+      dragging = false;
+      dragId = -1;
+      const el = liveElement();
+      if (el && el.releasePointerCapture) {
+        try { el.releasePointerCapture(e.pointerId); } catch { /* 忽略 */ }
+      }
+      requestFrame();
+    }
+
+    function onPointerLeave() {
+      ptrActive = false;
+      targetParallaxX = 0;
+      targetParallaxY = 0;
+      requestFrame();
+    }
+
+    function onWheel(e) {
+      if (!opts.interactive || !opts.wheelZoom) return;
+      e.preventDefault();
+      target.zoom = clamp(target.zoom * Math.exp(-e.deltaY * 0.0016), opts.minZoom, opts.maxZoom);
+      requestFrame();
+    }
+
+    function onDblClick() {
+      reset();
+    }
+
+    function bind() {
+      if (!opts.interactive) return;
+      const el = liveElement();
+      if (!el) return;
+      el.style.touchAction = 'none';
+      el.addEventListener('pointermove', onPointerMove);
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointerup', onPointerUp);
+      el.addEventListener('pointercancel', onPointerUp);
+      el.addEventListener('pointerleave', onPointerLeave);
+      el.addEventListener('wheel', onWheel, { passive: false });
+      el.addEventListener('dblclick', onDblClick);
+    }
+
+    function unbind() {
+      const el = liveElement();
+      if (!el) return;
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerUp);
+      el.removeEventListener('pointerleave', onPointerLeave);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('dblclick', onDblClick);
+    }
+
+    function observeResize() {
+      if (typeof ResizeObserver === 'undefined') return;
+      const el = liveElement();
+      if (!el) return;
+      resizeObserver = new ResizeObserver(() => {
+        measure();
+        markAllDirty();
+        requestFrame();
+      });
+      resizeObserver.observe(el);
+    }
+
+    /* ---------------- 对外 API ---------------- */
+    function getView() {
+      return { yaw: view.yaw, pitch: view.pitch, zoom: view.zoom };
+    }
+
+    function setView(v) {
+      if (!v) return;
+      if (v.yaw != null) target.yaw = v.yaw;
+      if (v.pitch != null) target.pitch = v.pitch;
+      if (v.zoom != null) target.zoom = clamp(v.zoom, opts.minZoom, opts.maxZoom);
+      requestFrame();
+    }
+
+    function reset() {
+      target.yaw = 0;
+      target.pitch = 0;
+      target.zoom = 1;
+      targetParallaxX = 0;
+      targetParallaxY = 0;
+      requestFrame();
+    }
+
+    function refreshSvgAttributes() {
+      for (let l = 0; l < layerGroups.length; l++) {
+        const circles = layerGroups[l].querySelectorAll('circle');
+        const list = buckets[l] || [];
+        for (let k = 0; k < circles.length && k < list.length; k++) {
+          const i = list[k];
+          circles[k].setAttribute('r', round(layout.rad[i], 2));
+          circles[k].setAttribute('fill', cssRgba(layout.cr[i], layout.cg[i], layout.cb[i], layout.ca[i]));
+        }
+      }
+    }
+
+    function setOptions(partial) {
+      const prev = opts;
+      opts = normalizeOptions(Object.assign({}, opts, partial));
+      onViewChange = typeof opts.onViewChange === 'function' ? opts.onViewChange : null;
+      const structural =
+        prev.mode !== opts.mode ||
+        prev.layerCount !== opts.layerCount ||
+        prev.padding !== opts.padding ||
+        prev.background !== opts.background ||
+        prev.interactive !== opts.interactive;
+      if (structural) {
+        unbind();
+        if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+        rebuild();
+        bind();
+        observeResize();
+        return;
+      }
+      layout = buildLayout(cloud, opts);
+      buckets = layerIndexBuckets(layout);
+      if (opts.mode === 'svg' && layerGroups.length) refreshSvgAttributes();
+      markAllDirty();
+      requestFrame();
+    }
+
+    function getStats() {
+      return {
+        count, layers: layout.layerCount, mode: opts.mode,
+        fps: Math.round(fps), running, rendered: hasRendered,
+      };
+    }
+
+    function destroy() {
+      destroyed = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+      unbind();
+      if (resizeObserver) resizeObserver.disconnect();
+      resizeObserver = null;
+      if (!isCanvasHost && !isSvgHost) host.innerHTML = '';
+      else if (isSvgHost && opts.enhance) { /* 保留静态标记 */ }
+    }
+
+    /* ---------------- 初始化 ---------------- */
+    if (opts.mode === 'svg') buildSvgDom();
+    else buildCanvas();
+    measure();
+    observeResize();
+    bind();
+    markAllDirty();
+    requestFrame();
+
+    return {
+      version: VERSION,
+      getView,
+      setView,
+      reset,
+      setOptions,
+      getOptions: () => Object.assign({}, opts),
+      getStats,
+      renderStatic,
+      isIdle: () => !running,
+      destroy,
+      get svgMarkup() { return buildSvgMarkup(cloud, opts); },
+    };
+  }
+
+  return {
+    version: VERSION,
+    createPointScene,
+    buildSvgMarkup,
+    buildLayout,
+    normalizeOptions,
+    DEFAULT_OPTIONS,
+  };
+};
+
+/* ==== src/render/export-svg.js ==== */
+/**
+ * render/export-svg.js — 交互式 SVG 导出
+ *
+ * 产物结构：
+ *   1. 静态圆点标记（即使禁用脚本也能正确显示人像）；
+ *   2. 内嵌 <script>（CDATA 包裹），把运行时源码 + 点云数据 + 参数一起带进文件，
+ *      加载后由 createPointScene 接管已有节点，补上避让 / 回弹 / 视差 / 缩放。
+ * 全程不引用任何外部资源，也不包含原始照片。
+ */
+
+/** 运行时函数本体（自包含），导出时以字符串形式内嵌 */
+function getRuntimeSource() {
+  return String(POINT_SCENE_RUNTIME);
+}
+
+/** 转义可能提前结束 CDATA 的序列 */
+function escapeCdata(source) {
+  return source.replace(/\]\]>/g, () => ']]\\u003e');
+}
+
+/** 防止脚本内容被 HTML 解析器提前截断 */
+function escapeScriptBody(source) {
+  return source.replace(/<\/script/gi, () => '<\\/script');
+}
+
+/** 最简 XML 转义 */
+function escapeXml(text) {
+  return String(text).replace(/[<>&'"]/g, (c) => (
+    { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
+  ));
+}
+
+/**
+ * 固化随参数变化的结构量（层数），保证静态标记的分层与运行时重建的分层一致。
+ */
+function resolveExportOptions(runtimeOptions, layout) {
+  const RT = POINT_SCENE_RUNTIME();
+  const opts = RT.normalizeOptions(runtimeOptions);
+  opts.layerCount = layout.layerCount;
+  opts.enhance = true;
+  return opts;
+}
+
+/**
+ * 构建可独立打开的交互 SVG。
+ * @param {object} cloud 点云（见 core/pointcloud.js）
+ * @param {object} runtimeOptions 运行时参数（模式固定为 svg）
+ * @param {object} [meta] 附加元信息
+ */
+function buildInteractiveSVG(cloud, runtimeOptions, meta = {}) {
+  const RT = POINT_SCENE_RUNTIME();
+  const baseOpts = RT.normalizeOptions(Object.assign({}, runtimeOptions, { mode: 'svg', enhance: true }));
+  const probe = RT.buildLayout(cloud, baseOpts);
+  const opts = resolveExportOptions(baseOpts, probe);
+
+  const markup = RT.buildSvgMarkup(cloud, opts);
+  const payload = { cloud: serializeCloud(cloud), options: opts };
+  const dotCount = cloud.points.length / 8;
+  const head =
+    '<title>' + escapeXml(meta.title || '彩色点云人像') + '</title>' +
+    '<desc>' + escapeXml(`由点云人像生成器导出：${dotCount} 个彩色圆点，含鼠标避让、回弹、视差与缩放，无外部依赖。`) + '</desc>' +
+    buildEmbeddedScript(payload, true);
+
+  return markup.replace('<svg ', '<svg id="pc-scene" ').replace('</svg>', head + '</svg>');
+}
+
+/**
+ * 内嵌引导脚本：运行时 + 点云数据 + 启动逻辑。
+ * @param {object} payload { cloud, options }
+ * @param {boolean} useCdata SVG（XML）里需要 CDATA；HTML 里绝对不能有 CDATA。
+ */
+function buildEmbeddedScript(payload, useCdata) {
+  const runtime = getRuntimeSource();
+  const data = JSON.stringify(payload);
+  const body = '(function(){\n'
+    + 'var RT=(' + runtime + ')();\n'
+    + 'var DATA=' + data + ';\n'
+    + 'function boot(){\n'
+    + '  var el=document.getElementById("pc-scene");\n'
+    + '  if(!el||!DATA||!DATA.cloud) return;\n'
+    + '  try{ window.__PC_SCENE__ = RT.createPointScene(el, DATA.cloud, DATA.options); }\n'
+    + '  catch(err){ if(window.console) console.error("[pointcloud]", err); }\n'
+    + '}\n'
+    + 'if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", boot);\n'
+    + 'else setTimeout(boot,0);\n'
+    + '})();\n';
+  const safe = escapeScriptBody(body);
+  if (useCdata) {
+    return '<script type="text/javascript"><![CDATA[\n' + escapeCdata(safe) + '\n]]><\/script>';
+  }
+  return '<script type="text/javascript">\n' + safe + '<\/script>';
+}
+
+/* ==== src/render/export-html.js ==== */
+/**
+ * render/export-html.js — 独立交互 HTML 导出
+ *
+ * 产物只包含点云与交互本身：
+ *   · 没有外部脚本、样式、字体或图片；
+ *   · 不含原始照片（只有采样后的点数据）；
+ *   · 舞台元素在普通态与焦点态均无边框、轮廓线、阴影。
+ * 二维模式内联静态 SVG 标记，三维模式使用 <canvas>。
+ */
+
+function buildStandaloneHTML(cloud, runtimeOptions, meta = {}) {
+  const RT = POINT_SCENE_RUNTIME();
+  const mode = runtimeOptions && runtimeOptions.mode === 'canvas' ? 'canvas' : 'svg';
+  const baseOpts = RT.normalizeOptions(Object.assign({}, runtimeOptions, { mode, enhance: true }));
+  const probe = RT.buildLayout(cloud, baseOpts);
+  const opts = resolveExportOptions(baseOpts, probe);
+
+  const payload = { cloud: serializeCloud(cloud), options: opts };
+  const bg = opts.background || 'transparent';
+  const stage = mode === 'svg'
+    ? RT.buildSvgMarkup(cloud, opts).replace('<svg ', '<svg id="pc-scene" ')
+    : '<canvas id="pc-scene"></canvas>';
+
+  const style = [
+    '*,*::before,*::after{box-sizing:border-box}',
+    'html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:' + bg + '}',
+    '#pc-scene{display:block;width:100%;height:100%;margin:0;padding:0;',
+    'border:0 none;outline:0 none;box-shadow:none;background:transparent;',
+    'appearance:none;-webkit-appearance:none;',
+    'touch-action:none;-webkit-tap-highlight-color:transparent}',
+    '#pc-scene:hover,#pc-scene:focus,#pc-scene:focus-visible,#pc-scene:active{',
+    'border:0 none;outline:0 none;box-shadow:none}',
+  ].join('');
+
+  const title = meta.title || '彩色点云人像';
+
+  return '<!doctype html>\n'
+    + '<html lang="zh-CN">\n<head>\n'
+    + '<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n'
+    + '<title>' + escapeXml(title) + '</title>\n'
+    + '<meta name="description" content="由点云人像生成器导出的交互点云，含鼠标避让、回弹、视差与缩放，无外部依赖。">\n'
+    + '<style>' + style + '</style>\n'
+    + '</head>\n<body>\n'
+    + stage + '\n'
+    + buildEmbeddedScript(payload, false) + '\n'
+    + '<!-- source: deepdemos.top | author: minghuaanliu | title: 彩色点云人像生成器 -->
+</body>\n</html>\n';
+}
+
+/** 导出文件名：带时间戳，避免覆盖 */
+function exportFileName(prefix, ext, stamp) {
+  const d = stamp || new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const ts = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+    + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  return `${prefix}-${ts}.${ext}`;
+}
+
+/* ==== src/render/export-png.js ==== */
+/**
+ * render/export-png.js — 高清 PNG 导出
+ *
+ * 复用运行时里的 renderStatic：按当前模式（二维 SVG / 三维 Canvas）、当前纵深与
+ * 当前视角（旋转、缩放）把点云重新栅格化到离屏画布，因此导出结果与预览一致，
+ * 但不含鼠标引起的瞬时位移，可复现。
+ */
+
+const PNG_MAX_DIM = 4096;
+
+/** 依据源图尺寸与倍率算出导出像素尺寸（长边受 maxDim 限制） */
+function computePNGSize(cloud, scale, maxDim = PNG_MAX_DIM) {
+  const w = cloud.width * scale;
+  const h = cloud.height * scale;
+  const k = Math.min(1, maxDim / Math.max(w, h));
+  return { width: Math.max(1, Math.round(w * k)), height: Math.max(1, Math.round(h * k)) };
+}
+
+/** 把场景静态渲染到离屏画布 */
+function renderSceneToCanvas(scene, cloud, scale, maxDim = PNG_MAX_DIM) {
+  const size = computePNGSize(cloud, scale, maxDim);
+  const canvas = document.createElement('canvas');
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const ctx = canvas.getContext('2d');
+  scene.renderStatic(ctx, size.width, size.height, 1);
+  return canvas;
+}
+
+/** 返回 PNG DataURL（自动化测试用） */
+function scenePNGDataURL(scene, cloud, scale, maxDim = PNG_MAX_DIM) {
+  return renderSceneToCanvas(scene, cloud, scale, maxDim).toDataURL('image/png');
+}
+
+/** 导出并触发下载，返回 Blob 便于调用方记录信息 */
+function exportScenePNG(scene, cloud, scale, filename, maxDim = PNG_MAX_DIM) {
+  const canvas = renderSceneToCanvas(scene, cloud, scale, maxDim);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('PNG 编码失败'));
+        return;
+      }
+      downloadFile(filename, blob);
+      resolve({ blob, width: canvas.width, height: canvas.height });
+    }, 'image/png');
+  });
+}
+
+/* ==== src/ui/theme.js ==== */
+/**
+ * ui/theme.js — 明暗主题与自定义配色的持久化
+ * 只依赖 localStorage；读写失败时静默降级（隐私模式等）。
+ */
+
+const STORAGE_KEYS = {
+  theme: 'pc.theme',
+  palette: 'pc.palette',
+  params: 'pc.params',
+};
+
+function readStore(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* 忽略：无痕模式或配额不足 */
+  }
+}
+
+/** 读取主题：优先用户选择，其次系统偏好，最后深色 */
+function detectTheme() {
+  const saved = readStore(STORAGE_KEYS.theme, null);
+  if (saved === 'dark' || saved === 'light') return saved;
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    return 'light';
+  }
+  return 'dark';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  writeStore(STORAGE_KEYS.theme, theme);
+  return theme;
+}
+
+function applyAccent(hex) {
+  document.documentElement.style.setProperty('--accent', hex);
+}
+
+/** 自定义配色：界面强调色 / 单色基调 / 背景色 */
+function loadPalette() {
+  const p = readStore(STORAGE_KEYS.palette, {}) || {};
+  return {
+    accent: /^#[0-9a-f]{6}$/i.test(p.accent || '') ? p.accent : '#ffb454',
+    monoColor: /^#[0-9a-f]{6}$/i.test(p.monoColor || '') ? p.monoColor : '#ffb454',
+    bgColor: /^#[0-9a-f]{6}$/i.test(p.bgColor || '') ? p.bgColor : '#0b0a0e',
+  };
+}
+
+function savePalette(palette) {
+  writeStore(STORAGE_KEYS.palette, palette);
+}
+
+function loadParams() {
+  return readStore(STORAGE_KEYS.params, {}) || {};
+}
+
+function saveParams(params) {
+  writeStore(STORAGE_KEYS.params, params);
+}
+
+/* ==== src/ui/controls.js ==== */
+/**
+ * ui/controls.js — 三栏界面的控件绑定
+ *
+ * 把 DOM 控件与 state 建立双向关系：
+ *   · 滑杆 group = 'sample' / 'depth' → 需要重新采样；
+ *   · 滑杆 group = 'view'             → 只需更新运行时参数（实时）；
+ *   · 其余开关与颜色同理。
+ * 所有改动都会写入 localStorage，下次打开自动恢复。
+ */
+
+const RANGE_MAP = {
+  'ctl-spacing': { key: 'spacing', out: 'out-spacing', digits: 2, group: 'sample' },
+  'ctl-size': { key: 'dotSize', out: 'out-size', digits: 2, group: 'sample' },
+  'ctl-contrast': { key: 'contrast', out: 'out-contrast', digits: 2, group: 'sample' },
+  'ctl-lift': { key: 'shadowLift', out: 'out-lift', digits: 2, group: 'sample' },
+  'ctl-darkcut': { key: 'darkCut', out: 'out-darkcut', digits: 2, group: 'sample' },
+  'ctl-edge': { key: 'edgeBoost', out: 'out-edge', digits: 2, group: 'sample' },
+  'ctl-depth': { key: 'depth', out: 'out-depth', digits: 2, group: 'view' },
+  'ctl-bulge': { key: 'bulge', out: 'out-bulge', digits: 2, group: 'depth' },
+  'ctl-thickness': { key: 'thickness', out: 'out-thickness', digits: 2, group: 'depth' },
+  'ctl-parallax': { key: 'parallax', out: 'out-parallax', digits: 2, group: 'view' },
+  'ctl-avoid-strength': { key: 'avoidStrength', out: 'out-avoid-strength', digits: 2, group: 'view' },
+};
+
+const CHECK_MAP = {
+  'ctl-mono': { key: 'monochrome', group: 'sample' },
+  'ctl-transparent': { key: 'transparentBg', group: 'view', invert: true },
+  'ctl-avoid': { key: 'avoid', group: 'view' },
+  'ctl-rebound': { key: 'rebound', group: 'view' },
+  'ctl-shade': { key: 'shadeByDepth', group: 'view' },
+};
+
+function groupOf(state, group) {
+  if (group === 'sample') return state.sample;
+  if (group === 'depth') return state.depth;
+  return state.view;
+}
+
+/**
+ * @param {object} state 应用状态
+ * @param {object} actions { onSampleChange, onDepthChange, onViewChange, onModeChange,
+ *                           onThemeToggle, onAccentChange, onReset, onDemo, onExport,
+ *                           onScaleChange, onFile, onPaletteChange }
+ * @returns {{ syncFromState: Function, setBusy: Function }}
+ */
+function bindControls(state, actions) {
+  const $ = (id) => document.getElementById(id);
+
+  /* ---------------- 滑杆 ---------------- */
+  for (const id in RANGE_MAP) {
+    const cfg = RANGE_MAP[id];
+    const input = $(id);
+    const out = $(cfg.out);
+    if (!input) continue;
+    const write = (value, fire) => {
+      const v = Number(value);
+      input.value = String(v);
+      if (out) out.textContent = v.toFixed(cfg.digits);
+      groupOf(state, cfg.group)[cfg.key] = v;
+      if (fire) {
+        if (cfg.group === 'sample') actions.onSampleChange(cfg.key);
+        else if (cfg.group === 'depth') actions.onDepthChange(cfg.key);
+        else actions.onViewChange(cfg.key);
+      }
+    };
+    input.addEventListener('input', () => write(input.value, true));
+    input.__pcWrite = write;
+  }
+
+  /* ---------------- 开关 ---------------- */
+  for (const id in CHECK_MAP) {
+    const cfg = CHECK_MAP[id];
+    const input = $(id);
+    if (!input) continue;
+    const write = (checked, fire) => {
+      const v = cfg.invert ? !checked : !!checked;
+      input.checked = !!checked;
+      groupOf(state, cfg.group)[cfg.key] = v;
+      if (fire) {
+        if (cfg.group === 'sample') actions.onSampleChange(cfg.key);
+        else actions.onViewChange(cfg.key);
+      }
+    };
+    input.addEventListener('change', () => write(input.checked, true));
+    input.__pcWrite = write;
+  }
+
+  /* ---------------- 颜色 ---------------- */
+  const monoColor = $('ctl-mono-color');
+  if (monoColor) {
+    monoColor.addEventListener('input', () => {
+      state.sample.monoColor = monoColor.value;
+      actions.onPaletteChange();
+      actions.onSampleChange('monoColor');
+    });
+  }
+
+  const accent = $('ctl-accent');
+  if (accent) {
+    accent.addEventListener('input', () => {
+      applyAccent(accent.value);
+      actions.onAccentChange(accent.value);
+    });
+  }
+
+  const bgColor = $('ctl-bg-color');
+  if (bgColor) {
+    bgColor.addEventListener('input', () => {
+      state.view.bgColor = bgColor.value;
+      actions.onPaletteChange();
+      actions.onViewChange('bgColor');
+    });
+  }
+
+  /* ---------------- 渲染模式 ---------------- */
+  const modeRadios = document.querySelectorAll('input[name="mode"]');
+  for (const radio of modeRadios) {
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      state.view.mode = radio.value === '3d' ? 'canvas' : 'svg';
+      actions.onModeChange();
+    });
+  }
+
+  /* ---------------- PNG 倍率 ---------------- */
+  const scaleSelect = $('ctl-scale');
+  if (scaleSelect) {
+    scaleSelect.addEventListener('change', () => {
+      state.scale = Number(scaleSelect.value) || 2;
+      actions.onScaleChange(state.scale);
+    });
+  }
+
+  /* ---------------- 按钮 ---------------- */
+  const demo = $('btn-demo');
+  if (demo) demo.addEventListener('click', () => actions.onDemo());
+
+  const reset = $('btn-reset');
+  if (reset) reset.addEventListener('click', () => actions.onReset());
+
+  const themeBtn = $('btn-theme');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+    });
+  }
+
+  const exportBtns = {
+    'btn-export-html': 'html',
+    'btn-export-svg': 'svg',
+    'btn-export-png': 'png',
+    'btn-export-json': 'json',
+  };
+  for (const id in exportBtns) {
+    const el = $(id);
+    if (el) el.addEventListener('click', () => actions.onExport(exportBtns[id]));
+  }
+
+  /* ---------------- 文件输入 / 拖放 ---------------- */
+  const fileInput = $('file-input');
+  const dropzone = $('dropzone');
+  if (fileInput) fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) actions.onFile(fileInput.files[0]);
+    fileInput.value = '';
+  });
+  if (dropzone) {
+    dropzone.addEventListener('click', () => fileInput && fileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (fileInput) fileInput.click();
+      }
+    });
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    dropzone.addEventListener('dragover', (e) => { stop(e); dropzone.classList.add('is-over'); });
+    dropzone.addEventListener('dragleave', (e) => { stop(e); dropzone.classList.remove('is-over'); });
+    dropzone.addEventListener('drop', (e) => {
+      stop(e);
+      dropzone.classList.remove('is-over');
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) actions.onFile(file);
+    });
+  }
+
+  /* ---------------- 移动端面板切换 ---------------- */
+  const workspace = document.querySelector('.workspace');
+  const tabs = document.querySelectorAll('.mobile-tabs .tab');
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => {
+      for (const other of tabs) other.classList.toggle('is-active', other === tab);
+      if (workspace) workspace.setAttribute('data-mobile-tab', tab.dataset.tab || 'image');
+    });
+  }
+
+  /* ---------------- 键盘快捷键 ---------------- */
+  window.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (e.key === 'r' || e.key === 'R') actions.onReset();
+  });
+
+  return {
+    setBusy(busy) {
+      const el = $('stage-busy');
+      if (el) el.hidden = !busy;
+    },
+    setStats(text) {
+      const el = $('stat-points');
+      if (el) el.textContent = text;
+    },
+    setModeLabel(text) {
+      const el = $('stat-mode');
+      if (el) el.textContent = text;
+    },
+    setViewLabel(text) {
+      const el = $('stat-view');
+      if (el) el.textContent = text;
+    },
+    setFpsLabel(text) {
+      const el = $('stat-fps');
+      if (el) el.textContent = text;
+    },
+    setSource(name, thumbUrl) {
+      const nameEl = $('source-name');
+      if (nameEl) nameEl.textContent = name;
+      const thumb = $('source-thumb');
+      const hint = $('dropzone-hint');
+      if (thumb && thumbUrl) {
+        thumb.src = thumbUrl;
+        thumb.hidden = false;
+        if (hint) hint.hidden = true;
+      } else if (thumb) {
+        thumb.hidden = true;
+        if (hint) hint.hidden = false;
+      }
+    },
+    toast(message, isError) {
+      const el = $('toast');
+      if (!el) return;
+      el.textContent = message;
+      el.classList.toggle('is-error', !!isError);
+      el.classList.add('is-show');
+      clearTimeout(el.__pcTimer);
+      el.__pcTimer = setTimeout(() => el.classList.remove('is-show'), 2600);
+    },
+    /** 用 state 回填所有控件（启动时用） */
+    syncFromState() {
+      for (const id in RANGE_MAP) {
+        const input = $(id);
+        const cfg = RANGE_MAP[id];
+        if (input && input.__pcWrite) input.__pcWrite(groupOf(state, cfg.group)[cfg.key], false);
+      }
+      for (const id in CHECK_MAP) {
+        const input = $(id);
+        const cfg = CHECK_MAP[id];
+        if (!input || !input.__pcWrite) continue;
+        const value = groupOf(state, cfg.group)[cfg.key];
+        input.__pcWrite(cfg.invert ? !value : value, false);
+      }
+      if (monoColor) monoColor.value = state.sample.monoColor;
+      if (bgColor) bgColor.value = state.view.bgColor;
+      if (accent) accent.value = state.accent;
+      if (scaleSelect) scaleSelect.value = String(state.scale);
+      const radio = document.querySelector(`input[name="mode"][value="${state.view.mode === 'canvas' ? '3d' : '2d'}"]`);
+      if (radio) radio.checked = true;
+    },
+  };
+}
+
+/* ==== src/ui/app.js ==== */
+/**
+ * ui/app.js — 应用编排
+ *
+ * 职责：
+ *   · 维护 state（采样参数 / 浮雕参数 / 运行时参数 / 配色）；
+ *   · 在“参数变化 → 重新采样 → 重建场景”之间做去抖，避免滑杆拖动卡顿；
+ *   · 组织导出（HTML / SVG / PNG / JSON）；
+ *   · 提供 window.__PC_APP__ 供自动化测试与产物生成使用。
+ *
+ * 说明：本文件与 ui/*、main.js 依赖打包后共享的作用域（见 build.mjs），
+ * 因此直接使用 POINT_SCENE_RUNTIME 等模块级标识符，不写 import。
+ */
+
+const DEFAULT_VIEW_STATE = {
+  mode: 'svg',
+  depth: 0.55,
+  parallax: 0.42,
+  avoid: true,
+  avoidStrength: 0.6,
+  rebound: true,
+  shadeByDepth: true,
+  transparentBg: true,
+  bgColor: '#0b0a0e',
+};
+
+const DEFAULT_DEPTH_STATE = {
+  bulge: 0.45,
+  thickness: 0.28,
+};
+
+const WORKING_MAX_DIM = 1600;
+const DEMO_SIZE = 512;
+
+/** 把 ImageData 风格对象画成 dataURL（用于缩略图） */
+function imageToDataURL(image, maxDim = 220) {
+  const k = Math.min(1, maxDim / Math.max(image.width, image.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(image.width * k));
+  c.height = Math.max(1, Math.round(image.height * k));
+  const ctx = c.getContext('2d');
+  const tmp = document.createElement('canvas');
+  tmp.width = image.width;
+  tmp.height = image.height;
+  tmp.getContext('2d').putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
+  ctx.drawImage(tmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
+
+function loadImageElement(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('图片解码失败'));
+    img.src = url;
+  });
+}
+
+function clamp01(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback;
+}
+
+/** 用 URL 查询参数覆盖初始状态（可复现的调试与产物生成入口） */
+function applyUrlOverrides(state) {
+  let qs;
+  try {
+    qs = new URLSearchParams(window.location.search);
+  } catch {
+    return;
+  }
+  const mode = qs.get('mode');
+  if (mode === 'svg' || mode === 'canvas') state.view.mode = mode;
+  const depth = Number(qs.get('depth'));
+  if (Number.isFinite(depth) && qs.has('depth')) state.view.depth = Math.min(1.6, Math.max(0, depth));
+  const theme = qs.get('theme');
+  if (theme === 'light' || theme === 'dark') applyTheme(theme);
+}
+
+function createApp() {
+  const RT = POINT_SCENE_RUNTIME();
+  const params = loadParams();
+  const palette = loadPalette();
+
+  const state = {
+    sourceName: 'demo-portrait',
+    image: null,
+    cloud: null,
+    sample: Object.assign({}, DEFAULT_SAMPLE_OPTIONS, params.sample || {}),
+    depth: Object.assign({}, DEFAULT_DEPTH_STATE, params.depth || {}),
+    view: Object.assign({}, DEFAULT_VIEW_STATE, params.view || {}),
+    accent: palette.accent,
+    scale: Number(params.scale) || 2,
+  };
+  state.sample.monoColor = palette.monoColor;
+  state.view.bgColor = palette.bgColor;
+  state.depth.bulge = clamp01(state.depth.bulge, 0.45);
+  state.depth.thickness = clamp01(state.depth.thickness, 0.28);
+
+  let scene = null;
+  let controls = null;
+  let ready = false;
+  let pendingSample = false;
+
+  // 允许用 URL 参数覆盖初始状态，便于复现与自动化测试：
+  //   ?mode=svg|canvas   ?depth=0.5   ?theme=light|dark   ?artifacts=1
+  applyUrlOverrides(state);
+
+  /* ---------------- 参数持久化 ---------------- */
+  const persist = debounce(() => {
+    saveParams({
+      sample: state.sample,
+      depth: state.depth,
+      view: state.view,
+      scale: state.scale,
+    });
+    savePalette({ accent: state.accent, monoColor: state.sample.monoColor, bgColor: state.view.bgColor });
+  }, 320);
+
+  /* ---------------- 运行时参数 ---------------- */
+  function runtimeOptions(overrides) {
+    return Object.assign({
+      mode: state.view.mode,
+      background: state.view.transparentBg ? null : state.view.bgColor,
+      padding: 0.05,
+      depth: state.view.depth,
+      depthScale: 0.34,
+      parallax: state.view.parallax,
+      avoid: state.view.avoid,
+      avoidStrength: state.view.avoidStrength,
+      avoidRadius: 0.18,
+      rebound: state.view.rebound,
+      shadeByDepth: state.view.shadeByDepth,
+      interactive: true,
+      wheelZoom: true,
+      dragRotate: true,
+      layerCount: 0,
+      enhance: false,
+    }, overrides || {});
+  }
+
+  /* ---------------- 采样与场景 ---------------- */
+  function buildCloud() {
+    state.cloud = buildPointCloud(
+      state.image,
+      state.sample,
+      { bulge: state.depth.bulge, thickness: state.depth.thickness, seed: state.sample.seed },
+    );
+  }
+
+  function destroyScene() {
+    if (scene) {
+      scene.destroy();
+      scene = null;
+    }
+  }
+
+  function createScene() {
+    const host = document.getElementById('stage-host');
+    destroyScene();
+    scene = RT.createPointScene(host, state.cloud, runtimeOptions({
+      onViewChange: (v) => {
+        if (!controls) return;
+        controls.setViewLabel(
+          `yaw ${Math.round((v.yaw * 180) / Math.PI)}° · pitch ${Math.round((v.pitch * 180) / Math.PI)}° · zoom ${v.zoom.toFixed(2)}×`,
+        );
+        controls.setFpsLabel(scene && scene.isIdle() ? 'idle' : 'live');
+      },
+    }));
+  }
+
+  function updateStats() {
+    if (!controls) return;
+    const count = state.cloud ? state.cloud.points.length / 8 : 0;
+    controls.setStats(`${formatInt(count)} pts`);
+    controls.setModeLabel(state.view.mode === 'canvas' ? 'Canvas 3D' : 'SVG 2D');
+    controls.setFpsLabel('idle');
+  }
+
+  function rerender() {
+    if (!state.image) return;
+    if (pendingSample) return;
+    pendingSample = true;
+    controls && controls.setBusy(true);
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          buildCloud();
+          createScene();
+          updateStats();
+        } catch (err) {
+          console.error(err);
+          controls && controls.toast('采样失败：' + err.message, true);
+        } finally {
+          pendingSample = false;
+          controls && controls.setBusy(false);
+        }
+      }, 0);
+    });
+  }
+
+  const scheduleRerender = debounce(rerender, 90);
+
+  /* ---------------- 图片来源 ---------------- */
+  async function useFile(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type) && !/\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)) {
+      controls.toast('请选择图片文件', true);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImageElement(url);
+      state.image = imageToWorkingData(img, WORKING_MAX_DIM);
+      state.sourceName = file.name;
+      const thumb = imageToDataURL(state.image, 220);
+      controls.setSource(file.name, thumb);
+      ready = true;
+      rerender();
+      controls.toast(`已载入 ${file.name}`);
+    } catch (err) {
+      controls.toast('读取失败：' + err.message, true);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function useDemo() {
+    state.image = createDemoPortrait(DEMO_SIZE);
+    state.sourceName = 'demo-portrait';
+    controls.setSource('demo-portrait', imageToDataURL(state.image, 220));
+    ready = true;
+    rerender();
+    controls.toast('已载入内置演示人像');
+  }
+
+  /* ---------------- 导出 ---------------- */
+  function currentExportOptions() {
+    return runtimeOptions({ enhance: false });
+  }
+
+  async function exportAs(kind) {
+    if (!state.cloud) {
+      controls.toast('还没有可导出的点云', true);
+      return null;
+    }
+    const opts = currentExportOptions();
+    try {
+      if (kind === 'html') {
+        const html = buildStandaloneHTML(state.cloud, opts, { title: '彩色点云人像' });
+        downloadFile(exportFileName('pointcloud-portrait', 'html'), html, 'text/html;charset=utf-8');
+        controls.toast(`已导出交互 HTML（${state.cloud.points.length / 8} 点）`);
+        return html.length;
+      }
+      if (kind === 'svg') {
+        const svg = buildInteractiveSVG(state.cloud, opts, { title: '彩色点云人像' });
+        downloadFile(exportFileName('pointcloud-portrait', 'svg'), svg, 'image/svg+xml;charset=utf-8');
+        controls.toast(`已导出交互 SVG（${state.cloud.points.length / 8} 点）`);
+        return svg.length;
+      }
+      if (kind === 'png') {
+        const res = await exportScenePNG(scene, state.cloud, state.scale, exportFileName('pointcloud-portrait', 'png'));
+        controls.toast(`已导出 PNG（${res.width}×${res.height}）`);
+        return res;
+      }
+      if (kind === 'json') {
+        const json = JSON.stringify(serializeCloud(state.cloud));
+        downloadFile(exportFileName('pointcloud-portrait', 'json'), json, 'application/json;charset=utf-8');
+        controls.toast('已导出点云 JSON');
+        return json.length;
+      }
+    } catch (err) {
+      console.error(err);
+      controls.toast('导出失败：' + err.message, true);
+      return null;
+    }
+    return null;
+  }
+
+  /* ---------------- 初始化 ---------------- */
+  function init() {
+    applyTheme(detectTheme());
+    applyAccent(state.accent);
+
+    controls = bindControls(state, {
+      onSampleChange: () => { persist(); scheduleRerender(); },
+      onDepthChange: () => { persist(); scheduleRerender(); },
+      onViewChange: (key) => {
+        persist();
+        if (scene) scene.setOptions(runtimeOptions({ onViewChange: scene.getOptions().onViewChange }));
+        else scheduleRerender();
+        if (key === 'bgColor' || key === 'transparentBg') updateStageBackground();
+      },
+      onModeChange: () => {
+        persist();
+        updateStats();
+        scheduleRerender();
+      },
+      onScaleChange: () => persist(),
+      onAccentChange: (value) => { state.accent = value; persist(); },
+      onPaletteChange: () => persist(),
+      onReset: () => { if (scene) scene.reset(); },
+      onDemo: () => useDemo(),
+      onFile: (file) => useFile(file),
+      onExport: (kind) => exportAs(kind),
+    });
+    controls.syncFromState();
+    updateStageBackground();
+    useDemo();
+  }
+
+  function updateStageBackground() {
+    const el = document.getElementById('stage-canvas');
+    if (!el) return;
+    el.style.background = state.view.transparentBg ? '' : state.view.bgColor;
+    const checker = el.querySelector('.checker');
+    if (checker) checker.style.display = state.view.transparentBg ? '' : 'none';
+  }
+
+  /** 等场景进入静止（无逐帧更新）状态，供自动化测试使用 */
+  function whenIdle(timeout = 3000) {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const tick = () => {
+        if (!scene || scene.isIdle() || Date.now() - started > timeout) resolve(true);
+        else requestAnimationFrame(tick);
+      };
+      tick();
+    });
+  }
+
+  return {
+    state,
+    init,
+    exportAs,
+    whenIdle,
+    get scene() { return scene; },
+    get controls() { return controls; },
+    isReady: () => ready,
+    /** 产物生成：把真实导出结果 POST 给开发服务器落盘 */
+    async postArtifacts() {
+      const started = Date.now();
+      while (!state.cloud && Date.now() - started < 8000) {
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      if (!state.cloud) throw new Error('点云尚未就绪');
+      await whenIdle();
+      const opts = currentExportOptions();
+      const html = buildStandaloneHTML(state.cloud, opts, { title: '彩色点云人像' });
+      const svg = buildInteractiveSVG(state.cloud, opts, { title: '彩色点云人像' });
+      const pngUrl = scenePNGDataURL(scene, state.cloud, 2);
+      const report = {
+        generatedAt: new Date().toISOString(),
+        mode: state.view.mode,
+        dots: state.cloud.points.length / 8,
+        source: state.sourceName,
+        sourceSize: [state.cloud.width, state.cloud.height],
+        step: state.cloud.step,
+        layers: scene.getStats().layers,
+        view: scene.getView(),
+        depth: state.view.depth,
+        sample: state.sample,
+        htmlBytes: html.length,
+        svgBytes: svg.length,
+        pngBytes: Math.round((pngUrl.length - pngUrl.indexOf(',') - 1) * 0.75),
+        colorSample: sampleColors(state.cloud),
+      };
+      const res = await fetch('/__artifacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: [
+            { path: 'tests/points-demo.html', content: html, encoding: 'utf8' },
+            { path: 'tests/points-demo.svg', content: svg, encoding: 'utf8' },
+            { path: 'tests/points-demo.png', content: pngUrl.slice(pngUrl.indexOf(',') + 1), encoding: 'base64' },
+            { path: 'tests/report.json', content: JSON.stringify(report, null, 2), encoding: 'utf8' },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error('落盘失败：' + (await res.text()));
+      return res.json();
+    },
+    htmlString: () => buildStandaloneHTML(state.cloud, currentExportOptions(), { title: '彩色点云人像' }),
+    svgString: () => buildInteractiveSVG(state.cloud, currentExportOptions(), { title: '彩色点云人像' }),
+    pngDataURL: () => scenePNGDataURL(scene, state.cloud, 2),
+  };
+}
+
+/** 统计若干代表点的颜色，用于校验“确实是彩色而不是灰度” */
+function sampleColors(cloud) {
+  const n = cloud.points.length / 8;
+  const picks = [];
+  for (let k = 0; k < 8; k++) {
+    const i = Math.floor((n - 1) * (k / 7));
+    const o = i * 8;
+    picks.push({
+      at: [Math.round(cloud.points[o]), Math.round(cloud.points[o + 1])],
+      rgb: [Math.round(cloud.points[o + 3]), Math.round(cloud.points[o + 4]), Math.round(cloud.points[o + 5])],
+    });
+  }
+  const saturation = picks.map((p) => {
+    const max = Math.max(...p.rgb);
+    const min = Math.min(...p.rgb);
+    return max === 0 ? 0 : (max - min) / max;
+  });
+  return { picks, maxSaturation: Math.max(...saturation) };
+}
+
+function bootApp() {
+  const app = createApp();
+  app.init();
+  window.__PC_APP__ = app;
+  const wantsArtifacts = new URLSearchParams(window.location.search).has('artifacts');
+  if (wantsArtifacts) {
+    app.postArtifacts()
+      .then((r) => console.log('[artifacts]', r))
+      .catch((err) => console.error('[artifacts]', err));
+  }
+  return app;
+}
+
+/* ==== src/main.js ==== */
+/**
+ * main.js — 启动入口
+ * 打包后位于 IIFE 末尾；页面脚本置于 </body> 之前，DOM 已可用。
+ */
+(function boot() {
+  if (typeof document === 'undefined') return;
+
+  function start() {
+    try {
+      bootApp();
+    } catch (err) {
+      console.error('[pointcloud] 启动失败', err);
+      const el = document.getElementById('toast');
+      if (el) {
+        el.textContent = '启动失败：' + err.message;
+        el.classList.add('is-show', 'is-error');
+      }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+})();</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3a41608aec51c92',t:'MTc4OTI3MDM2MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"4fefd53add854ea4b22475a4d86bdd4c","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
