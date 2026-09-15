@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网络环境检测</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 860px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .back-link { display: inline-block; margin-bottom: 16px; color: #0969da; text-decoration: none; font-weight: 500; }
+    .back-link:hover { text-decoration: underline; }
+    h1 { font-size: 32px; font-weight: 600; border-bottom: 2px solid #d0d7de; padding-bottom: 12px; margin-bottom: 8px; }
+    .sub { color: #57606a; font-size: 16px; margin-bottom: 24px; }
+
+    .card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid #d0d7de;
+        padding: 20px 24px 22px;
+        margin-bottom: 16px;
+    }
+    .card h2 {
+        font-size: 17px;
+        font-weight: 600;
+        margin: 0 0 14px;
+        padding-left: 10px;
+        border-left: 3px solid #0969da;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+    }
+    .card h2 .tag {
+        font-size: 12px;
+        font-weight: normal;
+        color: #8b949e;
+        border: 1px solid #d0d7de;
+        padding: 1px 7px;
+        white-space: nowrap;
+    }
+
+    .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 7px 0;
+        border-bottom: 1px solid #eef1f4;
+        font-size: 14.5px;
+        align-items: baseline;
+    }
+    .row:last-child { border-bottom: none; }
+    .row .k { color: #57606a; flex: 0 0 auto; }
+    .row .v {
+        font-family: ui-monospace, Consolas, "Courier New", monospace;
+        text-align: right;
+        word-break: break-all;
+        flex: 1 1 auto;
+    }
+    .row .v.pending { color: #8b949e; font-style: italic; font-family: inherit; }
+    .row .v.good { color: #1a7f37; }
+    .row .v.warn { color: #bf8700; }
+    .row .v.bad { color: #cf222e; }
+
+    .badge {
+        display: inline-block;
+        font-size: 12px;
+        padding: 1px 7px;
+        border: 1px solid #d0d7de;
+        color: #57606a;
+        margin-left: 6px;
+        vertical-align: 1px;
+    }
+    .badge.good { border-color: #2da44e; color: #1a7f37; background: #eafaef; }
+    .badge.warn { border-color: #bf8700; color: #bf8700; background: #fdf8ec; }
+    .badge.bad { border-color: #cf222e; color: #cf222e; background: #fff0ee; }
+
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+    button {
+        font-family: inherit;
+        font-size: 14px;
+        padding: 9px 18px;
+        border: 1px solid #d0d7de;
+        background: #ffffff;
+        color: #24292e;
+        cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #f6f8fa; }
+    button.primary { background: #0969da; border-color: #0969da; color: #ffffff; }
+    button.primary:hover:not(:disabled) { background: #0860ca; }
+    button:disabled { color: #8b949e; cursor: not-allowed; }
+
+    .meter { height: 4px; background: #e1e4e8; margin-top: 4px; overflow: hidden; }
+    .meter > i { display: block; height: 100%; width: 0; background: #0969da; transition: width .3s; }
+
+    .dns-out {
+        font-family: ui-monospace, Consolas, "Courier New", monospace;
+        font-size: 13px;
+        background: #f6f8fa;
+        border: 1px solid #e1e4e8;
+        padding: 10px 12px;
+        max-height: 220px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.65;
+        margin-top: 10px;
+    }
+    .dns-out:empty { display: none; }
+
+    .note {
+        border-left: 3px solid #bf8700;
+        background: #fdf8ec;
+        padding: 12px 16px;
+        margin: 16px 0 0;
+        font-size: 14px;
+        line-height: 1.75;
+    }
+    .note b { color: #bf8700; }
+    .def {
+        border-left: 3px solid #2da44e;
+        background: #eafaef;
+        padding: 12px 16px;
+        margin: 0 0 16px;
+        font-size: 14px;
+        line-height: 1.75;
+    }
+    .def b { color: #1a7f37; }
+
+    .verdict {
+        font-size: 14.5px;
+        line-height: 1.8;
+        padding: 12px 16px;
+        border: 1px solid #e1e4e8;
+        background: #f6f8fa;
+        margin-top: 12px;
+    }
+    .verdict:empty { display: none; }
+    .verdict b { font-weight: 600; }
+
+    .footer { margin-top: 34px; text-align: center; font-size: 13px; color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; }
+
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        .back-link { color: #58a6ff; }
+        h1 { border-bottom-color: #30363d; }
+        .sub { color: #8b949e; }
+        .card { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        .card h2 .tag { color: #8b949e; border-color: #30363d; }
+        .row { border-bottom-color: #21262d; }
+        .row .k { color: #8b949e; }
+        .row .v.pending { color: #8b949e; }
+        .row .v.good { color: #3fb950; }
+        .row .v.warn { color: #d29922; }
+        .row .v.bad { color: #f85149; }
+        .badge { border-color: #30363d; color: #8b949e; }
+        .badge.good { border-color: #238636; color: #3fb950; background: rgba(35,134,54,.12); }
+        .badge.warn { border-color: #9e6a03; color: #d29922; background: rgba(210,153,34,.1); }
+        .badge.bad { border-color: #da3633; color: #f85149; background: rgba(248,81,73,.1); }
+        button { background: #21262d; color: #c9d1d9; border-color: #30363d; }
+        button:hover:not(:disabled) { background: #30363d; }
+        button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+        .meter { background: #30363d; }
+        .dns-out { background: #161b22; border-color: #30363d; }
+        .note { background: rgba(210,153,34,.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .def { background: rgba(35,134,54,.12); border-left-color: #238636; }
+        .def b { color: #3fb950; }
+        .verdict { background: #161b22; border-color: #30363d; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 560px) {
+        .row { flex-direction: column; gap: 2px; }
+        .row .v { text-align: left; }
+    }
+</style>
+</head>
+<body>
+    <a href="../index.html" class="back-link">← 返回主页</a>
+
+    <h1>网络环境检测</h1>
+    <div class="sub">出口 IP · 归属与运营商 · DNS 解析 · 延迟抖动 · IP 纯净度</div>
+
+    <div class="def">
+        <b>怎么用：</b>点下面的按钮逐项检测，或者直接「一键全测」。除了 IP 归属和 DNS 解析需要请求公开接口，
+        延迟测试全部是<b>直接连你填的域名</b>，不经过任何第三方。
+    </div>
+
+    <div class="btns">
+        <button class="primary" id="runAll">一键全测</button>
+        <button id="clearAll">清空结果</button>
+    </div>
+
+    <div class="card">
+        <h2>出口 IP 与归属<span class="tag">需联网</span></h2>
+        <div class="row"><span class="k">公网 IP</span><span class="v pending" id="vIp">未检测</span></div>
+        <div class="row"><span class="k">IP 版本</span><span class="v pending" id="vType">未检测</span></div>
+        <div class="row"><span class="k">国家 / 地区</span><span class="v pending" id="vCountry">未检测</span></div>
+        <div class="row"><span class="k">省 / 市</span><span class="v pending" id="vCity">未检测</span></div>
+        <div class="row"><span class="k">运营商 / ASN</span><span class="v pending" id="vIsp">未检测</span></div>
+        <div class="row"><span class="k">时区</span><span class="v pending" id="vTz">未检测</span></div>
+        <div class="btns" style="margin-top:14px;">
+            <button id="btnIp">检测出口 IP</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>IP 纯净度<span class="tag">综合判断</span></h2>
+        <div class="row"><span class="k">连接类型</span><span class="v pending" id="vConnType">未检测</span></div>
+        <div class="row"><span class="k">代理特征</span><span class="v pending" id="vProxy">未检测</span></div>
+        <div class="row"><span class="k">风险评分</span><span class="v pending" id="vRisk">未检测</span></div>
+        <div class="meter"><i id="riskMeter"></i></div>
+        <div class="verdict" id="purityVerdict"></div>
+        <div class="btns" style="margin-top:14px;">
+            <button id="btnPurity">评估纯净度</button>
+        </div>
+        <div class="note">
+            <b>说明：</b>「纯净度」是看这个 IP <b>看起来像不像家宽</b>。
+            机房 IP（IDC）、公开代理、VPN 出口会被很多网站标记，容易触发验证码或风控。
+            本页只能根据公开接口返回的<b>连接类型和代理标记</b>给一个参考判断，
+            <b>不是精确的欺诈评分</b>——真正的风控库（如 IPQS、Scamalytics）不公开免费查询。
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>延迟与稳定性<span class="tag">直连，不经第三方</span></h2>
+        <div class="row"><span class="k">目标</span>
+            <span class="v" style="text-align:right;">
+                <input type="text" id="pingHost" value="www.baidu.com" style="font-family:ui-monospace,Consolas,monospace;font-size:14px;padding:5px 8px;border:1px solid #d0d7de;background:#fff;color:#1e1e1e;width:220px;max-width:100%;">
+            </span>
+        </div>
+        <div class="row"><span class="k">采样次数</span>
+            <span class="v" style="text-align:right;">
+                <select id="pingCount" style="font-family:inherit;font-size:14px;padding:5px 8px;border:1px solid #d0d7de;background:#fff;color:#1e1e1e;">
+                    <option value="5">5 次</option>
+                    <option value="10" selected>10 次</option>
+                    <option value="20">20 次</option>
+                </select>
+            </span>
+        </div>
+        <div class="row"><span class="k">平均延迟</span><span class="v pending" id="vPingAvg">未检测</span></div>
+        <div class="row"><span class="k">最小 / 最大</span><span class="v pending" id="vPingMinMax">未检测</span></div>
+        <div class="row"><span class="k">抖动 (jitter)</span><span class="v pending" id="vJitter">未检测</span></div>
+        <div class="row"><span class="k">丢包率</span><span class="v pending" id="vLoss">未检测</span></div>
+        <div class="row"><span class="k">综合评价</span><span class="v pending" id="vPingVerdict">未检测</span></div>
+        <div class="btns" style="margin-top:14px;">
+            <button id="btnPing">开始延迟测试</button>
+        </div>
+        <div class="note">
+            <b>关于浏览器测延迟的局限：</b>浏览器没法发 ICMP，只能靠加载一张小图片来测往返时间。
+            这个数字<b>包含了 TCP 握手和 HTTP 请求的开销</b>，所以会比 <code>ping</code> 命令的结果略高，
+            但对比不同时间点或不同域名的<b>相对变化</b>是准的。丢包靠设置超时阈值来判断。
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>DNS 解析<span class="tag">需联网</span></h2>
+        <div class="row"><span class="k">查询域名</span>
+            <span class="v" style="text-align:right;">
+                <input type="text" id="dnsHost" value="www.baidu.com" style="font-family:ui-monospace,Consolas,monospace;font-size:14px;padding:5px 8px;border:1px solid #d0d7de;background:#fff;color:#1e1e1e;width:220px;max-width:100%;">
+            </span>
+        </div>
+        <div class="row"><span class="k">解析耗时</span><span class="v pending" id="vDnsTime">未检测</span></div>
+        <div class="row"><span class="k">记录条数</span><span class="v pending" id="vDnsCount">未检测</span></div>
+        <div class="btns" style="margin-top:14px;">
+            <button id="btnDns">查询 DNS 记录</button>
+        </div>
+        <div class="dns-out" id="dnsOut"></div>
+        <div class="note">
+            <b>注意：</b>这里查的是<b>公共 DNS 服务器</b>的解析结果，用于看域名解析是否正常、延迟高不高。
+            它<b>不能查出你本机或路由器用的是哪个 DNS</b>——浏览器没有权限读系统 DNS 配置。
+            想知道本机 DNS，Windows 上跑 <code>ipconfig /all</code>，或用 <code>nslookup</code>。
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>浏览器网络能力<span class="tag">本地检测</span></h2>
+        <div class="row"><span class="k">在线状态</span><span class="v pending" id="vOnLine">未检测</span></div>
+        <div class="row"><span class="k">连接类型</span><span class="v pending" id="vEffective">未检测</span></div>
+        <div class="row"><span class="k">下行估算</span><span class="v pending" id="vDownlink">未检测</span></div>
+        <div class="row"><span class="k">往返估算 (RTT)</span><span class="v pending" id="vRtt">未检测</span></div>
+        <div class="btns" style="margin-top:14px;">
+            <button id="btnLocal">读取本机网络信息</button>
+        </div>
+    </div>
+
+    <div class="footer">4444442.xyz · ZYHS · 工具箱</div>
+
+<script>
+(function () {
+    "use strict";
+
+    function $(id) { return document.getElementById(id); }
+
+    function set(id, text, cls) {
+        var el = $(id);
+        // 容错：元素不存在时不要抛错，否则一处笔误会把整页功能带崩
+        if (!el) { console.warn("找不到元素 #" + id); return; }
+        el.textContent = text;
+        el.className = "v" + (cls ? " " + cls : "");
+    }
+
+    function pending(id) { set(id, "检测中…", "pending"); }
+    function fail(id, msg) { set(id, msg || "失败", "bad"); }
+
+    var TIMEOUT = 9000;
+
+    function fetchJson(url, ms) {
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || TIMEOUT);
+        return fetch(url, ctrl ? { signal: ctrl.signal } : {})
+            .then(function (r) {
+                clearTimeout(timer);
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .catch(function (e) {
+                clearTimeout(timer);
+                throw e;
+            });
+    }
+
+    function fetchText(url, ms) {
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || TIMEOUT);
+        return fetch(url, ctrl ? { signal: ctrl.signal } : {})
+            .then(function (r) {
+                clearTimeout(timer);
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.text();
+            })
+            .catch(function (e) { clearTimeout(timer); throw e; });
+    }
+
+    // ---------- 1. 出口 IP ----------
+    var lastGeo = null;
+
+    function testIp() {
+        pending("vIp"); pending("vType"); pending("vCountry");
+        pending("vCity"); pending("vIsp"); pending("vTz");
+
+        // 主接口
+        fetchJson("https://ipwho.is/")
+            .then(function (d) {
+                if (!d || d.success === false) throw new Error("接口返回失败");
+                lastGeo = d;
+                var ipv = d.type || (String(d.ip).indexOf(":") >= 0 ? "IPv6" : "IPv4");
+                set("vIp", d.ip || "未知", "good");
+                set("vType", ipv, "good");
+                set("vCountry", (d.country || "未知") + (d.country_code ? " (" + d.country_code + ")" : ""));
+                set("vCity", [d.region, d.city].filter(Boolean).join(" / ") || "未知");
+                set("vIsp", (d.connection && (d.connection.isp || d.connection.org)) || "未知");
+                set("vTz", (d.timezone && d.timezone.id) || "未知");
+            })
+            .catch(function () {
+                // 备用接口
+                return fetchJson("https://ipwhois.app/json/").then(function (d) {
+                    if (!d || d.success === false) throw new Error("备用接口失败");
+                    lastGeo = d;
+                    set("vIp", d.ip || "未知", "good");
+                    set("vType", d.type || "IPv4", "good");
+                    set("vCountry", (d.country || "未知") + (d.country_code ? " (" + d.country_code + ")" : ""));
+                    set("vCity", [d.region, d.city].filter(Boolean).join(" / ") || "未知");
+                    set("vIsp", d.isp || d.org || "未知");
+                    set("vTz", d.timezone || "未知");
+                });
+            })
+            .catch(function () {
+                // 第三备用：ip.sb（只给少量字段）
+                return fetchJson("https://api.ip.sb/geoip").then(function (d) {
+                    if (!d || !d.ip) throw new Error("接口不可用");
+                    lastGeo = d;
+                    set("vIp", d.ip, "good");
+                    set("vType", String(d.ip).indexOf(":") >= 0 ? "IPv6" : "IPv4", "good");
+                    set("vCountry", d.country || "未知");
+                    set("vCity", [d.region, d.city].filter(Boolean).join(" / ") || "未知");
+                    set("vIsp", d.organization || d.isp || "未知");
+                    set("vTz", d.timezone || "未提供");
+                });
+            })
+            .catch(function (e) {
+                fail("vIp", "获取失败");
+                fail("vType", "—"); fail("vCountry", "—");
+                fail("vCity", "—"); fail("vIsp", (e && e.message) || "接口全都不通");
+                fail("vTz", "—");
+            });
+    }
+
+    // ---------- 2. IP 纯净度 ----------
+    function testPurity() {
+        pending("vConnType"); pending("vProxy"); pending("vRisk");
+        $("purityVerdict").textContent = "";
+
+        var tasks = [];
+
+        // 连接类型（ip.sb 会给出 organization，能区分机房/家宽）
+        tasks.push(fetchJson("https://api.ip.sb/geoip").then(function (d) {
+            var org = (d.organization || d.isp || d.asn_organization || "").toString();
+            var asn = d.asn || d.asn_organization || "";
+            lastOrg = org;
+            var vt = "未知";
+            if (/cloud|tencent|aliyun|amazon|aws|google|azure|ovh|digitalocean|linode|vultr|hosting|data ?center|idc|colo/i.test(org)) {
+                vt = "机房 IP（IDC / 云服务器）";
+            } else if (/mobile|cellular|无线|移动/i.test(org)) {
+                vt = "移动网络";
+            } else if (/telecom|unicom|broadband|电信|联通|家宽/i.test(org)) {
+                vt = "家宽 / 固定宽带";
+            }
+            return { org: org, asn: asn, type: vt };
+        }).catch(function () { return null; }));
+
+        // 代理标记（bigdatacloud 有 isBehindProxy）
+        tasks.push(fetchJson("https://api.bigdatacloud.net/data/client-info").then(function (d) {
+            return {
+                behind: !!d.isBehindProxy,
+                ipType: d.ipType || "",
+                device: d.device || "",
+                os: d.os || ""
+            };
+        }).catch(function () { return null; }));
+
+        Promise.all(tasks).then(function (res) {
+            var sb = res[0];
+            var bd = res[1];
+
+            if (sb && sb.type) {
+                set("vConnType", sb.type + (sb.org ? "（" + sb.org + "）" : ""),
+                    sb.type.indexOf("机房") >= 0 ? "warn" : (sb.type.indexOf("家宽") >= 0 ? "good" : ""));
+            } else {
+                set("vConnType", "接口不可用", "pending");
+            }
+
+            if (bd) {
+                set("vProxy", bd.behind ? "检测到代理特征" : "未检测到代理特征",
+                    bd.behind ? "warn" : "good");
+            } else {
+                set("vProxy", "接口不可用", "pending");
+            }
+
+            // 综合评分：分数越低越"干净"
+            var score = 0;
+            var reasons = [];
+            if (sb && /cloud|tencent|aliyun|amazon|aws|google|azure|ovh|digitalocean|linode|vultr|hosting|data ?center|idc|colo/i.test(sb.org || "")) {
+                score += 45;
+                reasons.push("出口 IP 属于云服务商/机房，不是家庭宽带");
+            } else if (sb && sb.type === "家宽 / 固定宽带") {
+                reasons.push("出口 IP 归属家庭宽带，特征干净");
+            }
+            if (bd && bd.behind) {
+                score += 40;
+                reasons.push("接口标记为隐藏代理");
+            }
+            if (!reasons.length) reasons.push("可用信息不足，无法给出有把握的判断");
+
+            score = Math.max(0, Math.min(100, score));
+            var grade, cls;
+            if (score <= 15) { grade = "较干净（" + score + "/100）"; cls = "good"; }
+            else if (score <= 55) { grade = "一般（" + score + "/100）"; cls = "warn"; }
+            else { grade = "风险偏高（" + score + "/100）"; cls = "bad"; }
+
+            set("vRisk", grade, cls);
+            var meter = $("riskMeter");
+            meter.style.width = score + "%";
+            meter.style.background = score <= 15 ? "#2da44e" : (score <= 55 ? "#bf8700" : "#cf222e");
+
+            var v = $("purityVerdict");
+            v.innerHTML = "<b>判断依据：</b>" + reasons.join("；") + "。<br>" +
+                "这个结果<b>仅供参考</b>。想让 IP 更干净，家庭宽带直连通常最稳；" +
+                "用机房 IP 或公共代理访问对风控敏感的网站，容易被要求验证。";
+        });
+    }
+
+    var lastOrg = "";
+
+    // ---------- 3. 延迟测试 ----------
+    function testPing() {
+        var host = ($("pingHost").value || "").trim();
+        if (!host) { alert("请填目标域名"); return; }
+        var count = parseInt($("pingCount").value, 10) || 10;
+
+        $("btnPing").disabled = true;
+        pending("vPingAvg"); pending("vPingMinMax"); pending("vJitter");
+        pending("vLoss"); pending("vPingVerdict");
+
+        var samples = [];
+        var lost = 0;
+        var TIMEOUT_MS = 3000;
+        var done = 0;
+
+        function oneShot() {
+            return new Promise(function (resolve) {
+                var start = performance.now();
+                var img = new Image();
+                var settled = false;
+                var timer = setTimeout(function () {
+                    if (settled) return;
+                    settled = true;
+                    img.onload = img.onerror = null;
+                    img.src = "";
+                    lost++;
+                    resolve(null);
+                }, TIMEOUT_MS);
+
+                img.onload = img.onerror = function () {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    var dt = performance.now() - start;
+                    img.onload = img.onerror = null;
+                    resolve(dt);
+                };
+                // 加时间戳避免缓存，不然测得全是 0
+                img.src = "https://" + host + "/favicon.ico?_=" + Date.now() + Math.random();
+            });
+        }
+
+        (function loop() {
+            if (done >= count) {
+                var lossRate = lost / count;
+                var ok = samples.filter(function (x) { return x !== null; });
+
+                if (!ok.length) {
+                    fail("vPingAvg", "全部超时");
+                    set("vLoss", "100%", "bad");
+                    fail("vPingVerdict", "完全不通");
+                    $("btnPing").disabled = false;
+                    return;
+                }
+
+                var avg = ok.reduce(function (a, b) { return a + b; }, 0) / ok.length;
+                var min = Math.min.apply(null, ok);
+                var max = Math.max.apply(null, ok);
+
+                // 抖动 = 相邻差值的平均绝对值
+                var jit = 0;
+                for (var i = 1; i < ok.length; i++) jit += Math.abs(ok[i] - ok[i - 1]);
+                jit = ok.length > 1 ? jit / (ok.length - 1) : 0;
+
+                var avgCls = avg < 100 ? "good" : (avg < 300 ? "warn" : "bad");
+                set("vPingAvg", avg.toFixed(0) + " ms", avgCls);
+                set("vPingMinMax", min.toFixed(0) + " / " + max.toFixed(0) + " ms");
+                set("vJitter", jit.toFixed(0) + " ms", jit < 40 ? "good" : (jit < 120 ? "warn" : "bad"));
+                set("vLoss", (lossRate * 100).toFixed(0) + "%",
+                    lossRate === 0 ? "good" : (lossRate <= 0.2 ? "warn" : "bad"));
+
+                var verdict, vc;
+                if (lossRate > 0.2) { verdict = "丢包严重，连接不稳定"; vc = "bad"; }
+                else if (avg > 300 || jit > 120) { verdict = "延迟或抖动偏大，体验可能卡顿"; vc = "warn"; }
+                else if (avg < 100 && jit < 40 && lossRate === 0) { verdict = "稳定，表现良好"; vc = "good"; }
+                else { verdict = "基本可用"; vc = "warn"; }
+                set("vPingVerdict", verdict, vc);
+
+                $("btnPing").disabled = false;
+                return;
+            }
+            oneShot().then(function (dt) {
+                if (dt !== null) samples.push(dt);
+                done++;
+                loop();
+            });
+        })();
+    }
+
+    // ---------- 4. DNS ----------
+    function testDns() {
+        var host = ($("dnsHost").value || "").trim();
+        if (!host) { alert("请填要查询的域名"); return; }
+        $("btnDns").disabled = true;
+        pending("vDnsTime"); pending("vDnsCount");
+        $("dnsOut").textContent = "查询中…";
+
+        var t0 = performance.now();
+        fetchText("https://api.hackertarget.com/dnslookup/?q=" + encodeURIComponent(host))
+            .then(function (text) {
+                var dt = performance.now() - t0;
+                text = String(text).trim();
+                if (/API count exceeded|no records found|error/i.test(text)) {
+                    set("vDnsTime", dt.toFixed(0) + " ms", "warn");
+                    set("vDnsCount", "0 条", "warn");
+                    $("dnsOut").textContent = "未解析到记录，或接口限流：\n" + text;
+                    return;
+                }
+
+                var lines = text.split("\n").map(function (s) { return s.trim(); }).filter(Boolean);
+                set("vDnsTime", dt.toFixed(0) + " ms", dt < 300 ? "good" : (dt < 900 ? "warn" : "bad"));
+                set("vDnsCount", lines.length + " 条", lines.length ? "good" : "warn");
+                $("dnsOut").textContent = lines.join("\n");
+            })
+            .catch(function (e) {
+                fail("vDnsTime", "查询失败");
+                fail("vDnsCount", "—");
+                $("dnsOut").textContent = "DNS 查询失败：" + (e.message || "接口不通") +
+                    "\n\n可能是网络受限，或该公共 DNS 接口被拦截。";
+            })
+            .then(function () { $("btnDns").disabled = false; });
+    }
+
+    // ---------- 5. 本机浏览器网络能力 ----------
+    function testLocal() {
+        var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        set("vOnLine", navigator.onLine ? "在线" : "离线", navigator.onLine ? "good" : "bad");
+
+        if (c) {
+            var map = { "slow-2g": "极慢 (slow-2g)", "2g": "2G", "3g": "3G", "4g": "4G", "5g": "5G" };
+            set("vEffective", map[c.effectiveType] || c.effectiveType || "未知",
+                c.effectiveType === "4g" || c.effectiveType === "5g" ? "good" : "warn");
+            set("vDownlink", c.downlink != null ? c.downlink + " Mbps（浏览器估算）" : "不可用");
+            set("vRtt", c.rtt != null ? c.rtt + " ms（浏览器估算）" : "不可用");
+        } else {
+            set("vEffective", "浏览器不支持 Network Information API", "pending");
+            set("vDownlink", "不可用", "pending");
+            set("vRtt", "不可用", "pending");
+        }
+    }
+
+    // ---------- 绑定 ----------
+    $("btnIp").addEventListener("click", testIp);
+    $("btnPurity").addEventListener("click", testPurity);
+    $("btnPing").addEventListener("click", testPing);
+    $("btnDns").addEventListener("click", testDns);
+    $("btnLocal").addEventListener("click", testLocal);
+
+    $("runAll").addEventListener("click", function () {
+        testLocal();
+        testIp();
+        setTimeout(testPurity, 300);
+        setTimeout(testPing, 600);
+        setTimeout(testDns, 400);
+    });
+
+    $("clearAll").addEventListener("click", function () {
+        ["vIp","vType","vCountry","vCity","vIsp","vTz",
+         "vConnType","vProxy","vRisk",
+         "vPingAvg","vPingMinMax","vJitter","vLoss","vPingVerdict",
+         "vDnsTime","vDnsCount","vOnLine","vEffective","vDownlink","vRtt"].forEach(function (id) {
+            set(id, "未检测", "pending");
+        });
+        $("riskMeter").style.width = "0";
+        $("purityVerdict").textContent = "";
+        $("dnsOut").textContent = "";
+    });
+
+    // 打开就把能本地拿到的显示出来
+    testLocal();
+})();
+</script>
+</body>
+</html>

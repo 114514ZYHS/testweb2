@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: none">
+  <title>我的世界 3D · 无限世界 · 创造模式</title>
+  <style>
+    :root {
+      --bg: #0a0a14;
+      --ui-bg: rgba(0,0,0,0.7);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: var(--bg);
+      overflow: hidden;
+      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      height: 100vh;
+      width: 100vw;
+      touch-action: none;
+      user-select: none;
+    }
+    #game-container { position:fixed; inset:0; z-index:1; }
+    canvas { display:block; }
+    #crosshair {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:10; pointer-events:none; display:flex; align-items:center; justify-content:center;
+      opacity:0.9;
+    }
+    #crosshair .dot { width:4px; height:4px; background:#fff; border-radius:50%; box-shadow:0 0 6px #000; }
+    #crosshair .line-h, #crosshair .line-v {
+      position:absolute; background:rgba(255,255,255,0.65); box-shadow:0 0 2px #000;
+    }
+    .line-h { width:20px; height:1.5px; left:50%; transform:translateX(-50%); }
+    .line-v { width:1.5px; height:20px; top:50%; transform:translateY(-50%); }
+    #hotbar {
+      position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:10;
+      display:flex; gap:4px; background:rgba(0,0,0,0.6); border-radius:12px;
+      padding:6px 10px; border:1.5px solid rgba(255,255,255,0.25);
+      backdrop-filter:blur(10px);
+    }
+    .hotbar-slot {
+      width:42px; height:42px; border-radius:6px; border:2px solid rgba(255,255,255,0.25);
+      cursor:pointer; transition:all 0.15s; background:rgba(20,20,20,0.7);
+      display:flex; align-items:center; justify-content:center; position:relative;
+    }
+    .hotbar-slot:hover { border-color:#fff; transform:translateY(-3px); box-shadow:0 6px 15px rgba(0,0,0,0.5); }
+    .hotbar-slot.active { border-color:#fff; box-shadow:0 0 16px rgba(255,255,255,0.5), 0 0 0 3px rgba(255,255,255,0.25); transform:translateY(-5px); background:#333; }
+    .hotbar-slot .block-preview { width:26px; height:26px; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.5); background-size:cover; }
+    .hotbar-slot .slot-number { position:absolute; top:-8px; left:50%; transform:translateX(-50%); font-size:10px; color:#ccc; font-weight:bold; text-shadow:0 0 4px #000; }
+    #backpack-overlay {
+      position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.6); display:none;
+      align-items:center; justify-content:center; backdrop-filter:blur(6px);
+    }
+    #backpack-panel {
+      background:rgba(30,30,40,0.9); border:2px solid rgba(255,255,255,0.25);
+      border-radius:20px; padding:25px; width:min(500px, 85vw); max-height:80vh;
+      overflow-y:auto; display:flex; flex-wrap:wrap; gap:12px; justify-content:center;
+      box-shadow:0 20px 40px rgba(0,0,0,0.7);
+    }
+    .backpack-item {
+      width:68px; height:68px; background:rgba(0,0,0,0.5); border:2px solid rgba(255,255,255,0.2);
+      border-radius:10px; cursor:pointer; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; transition:0.2s;
+    }
+    .backpack-item:hover { border-color:#ffda6b; transform:scale(1.05); background:rgba(255,255,255,0.1); }
+    .backpack-item .item-img { width:38px; height:38px; border-radius:4px; background-size:cover; margin-bottom:2px; }
+    .backpack-item .item-name { font-size:10px; color:#ddd; text-shadow:0 1px 3px #000; }
+    #backpack-close {
+      position:absolute; top:20px; right:30px; color:#fff; font-size:28px; cursor:pointer;
+      z-index:101; background:none; border:none; text-shadow:0 0 8px #000;
+    }
+    #info-overlay {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20;
+      pointer-events:none; text-align:center; transition:opacity 0.5s; color:#fff;
+    }
+    #info-overlay.hidden { opacity:0; }
+    .title { font-size:26px; font-weight:bold; letter-spacing:4px; margin-bottom:12px; text-shadow:0 0 20px #000; }
+    .hint { font-size:14px; line-height:2; text-shadow:0 0 10px #000; }
+    .click-hint { margin-top:18px; font-size:18px; color:#ffda6b; animation:pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:0.8;transform:scale(1);} 50%{opacity:1;transform:scale(1.05);} }
+    @media (max-width:600px) {
+      .hotbar-slot { width:34px; height:34px; }
+      .hotbar-slot .block-preview { width:20px; height:20px; }
+      #backpack-panel { padding:15px; gap:8px; }
+      .backpack-item { width:55px; height:55px; }
+      .backpack-item .item-img { width:30px; height:30px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container"></div>
+  <div id="crosshair"><div class="line-h"></div><div class="line-v"></div><div class="dot"></div></div>
+  <div id="hotbar"></div>
+  <div id="backpack-overlay">
+    <button id="backpack-close">&times;</button>
+    <div id="backpack-panel"></div>
+  </div>
+  <div id="info-overlay">
+    <div class="title">⛏ 我的世界 3D · 无限世界</div>
+    <div class="hint">WASD 飞行 | 空格上升 | Shift下降 | 鼠标视角<br>左键破坏 | 右键放置 | E键打开背包<br>数字1-6快捷栏 | 滚轮切换</div>
+    <div class="click-hint">👆 点击屏幕开始</div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+    // ==================== 常量 ====================
+    const CHUNK_SIZE = 16;
+    const CHUNK_HEIGHT = 64;
+    const VIEW_RADIUS = 5; // 加载半径（区块数）
+    const TEXTURE_SIZE = 16; // 纹理分辨率 16x16 (>8x8)
+    
+    // 方块类型定义
+    const BLOCK_AIR = 0;
+    const BLOCK_GRASS = 1;
+    const BLOCK_DIRT = 2;
+    const BLOCK_STONE = 3;
+    const BLOCK_WOOD = 4;
+    const BLOCK_LEAVES = 5;
+    const BLOCK_SAND = 6;
+    const BLOCK_PLANKS = 7;
+    const BLOCK_BRICK = 8;
+    const TOTAL_TYPES = 9;
+
+    const BLOCK_NAMES = {
+      [BLOCK_GRASS]: '草方块', [BLOCK_DIRT]: '泥土', [BLOCK_STONE]: '石头',
+      [BLOCK_WOOD]: '原木', [BLOCK_LEAVES]: '树叶', [BLOCK_SAND]: '沙子',
+      [BLOCK_PLANKS]: '木板', [BLOCK_BRICK]: '砖块',
+    };
+
+    // 快捷栏与背包可用的方块类型
+    const SELECTABLE_BLOCKS = [BLOCK_GRASS, BLOCK_DIRT, BLOCK_STONE, BLOCK_WOOD, BLOCK_PLANKS, BLOCK_BRICK];
+
+    // ==================== 纹理生成 ====================
+    function generateBlockTexture(type) {
+      const canvas = document.createElement('canvas');
+      canvas.width = TEXTURE_SIZE;
+      canvas.height = TEXTURE_SIZE;
+      const ctx = canvas.getContext('2d');
+      
+      const drawPixel = (x, y, color) => { ctx.fillStyle = color; ctx.fillRect(x, y, 1, 1); };
+      
+      switch(type) {
+        case BLOCK_GRASS:
+          ctx.fillStyle = '#7ec850'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let i=0;i<40;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#5a9e32');
+          break;
+        case BLOCK_DIRT:
+          ctx.fillStyle = '#966c3b'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let i=0;i<60;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#7a5530');
+          for(let i=0;i<15;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#5c4022');
+          break;
+        case BLOCK_STONE:
+          ctx.fillStyle = '#7f7f7f'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let i=0;i<70;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#6a6a6a');
+          for(let i=0;i<20;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#555');
+          break;
+        case BLOCK_WOOD:
+          ctx.fillStyle = '#b08050'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let y=0;y<16;y++) {
+            if(y%3===0) ctx.fillStyle = '#8b5a2b';
+            else ctx.fillStyle = '#c4945a';
+            for(let x=0;x<16;x+=2) drawPixel(x,y,ctx.fillStyle);
+          }
+          break;
+        case BLOCK_LEAVES:
+          ctx.fillStyle = '#3a8a20'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let i=0;i<80;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#2d6b18');
+          for(let i=0;i<10;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#1f4d10');
+          break;
+        case BLOCK_SAND:
+          ctx.fillStyle = '#e8d5a3'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let i=0;i<50;i++) drawPixel(Math.floor(Math.random()*16), Math.floor(Math.random()*16), '#d4b87a');
+          break;
+        case BLOCK_PLANKS:
+          ctx.fillStyle = '#c4945a'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let y=0;y<16;y+=4) { ctx.fillStyle = '#a97c45'; for(let x=0;x<16;x++) drawPixel(x,y,'#a97c45'); }
+          break;
+        case BLOCK_BRICK:
+          ctx.fillStyle = '#b4403a'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+          for(let y=0;y<16;y+=4) { ctx.fillStyle = '#8e2e28'; for(let x=0;x<16;x+=2) drawPixel(x,y,'#8e2e28'); }
+          for(let x=0;x<16;x+=4) { ctx.fillStyle = '#8e2e28'; for(let y=0;y<16;y+=2) drawPixel(x,y,'#8e2e28'); }
+          break;
+        default: ctx.fillStyle = '#888'; ctx.fillRect(0,0,TEXTURE_SIZE,TEXTURE_SIZE);
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      return texture;
+    }
+
+    // 预生成所有纹理
+    const BLOCK_TEXTURES = {};
+    for (let t = 1; t < TOTAL_TYPES; t++) {
+      BLOCK_TEXTURES[t] = generateBlockTexture(t);
+    }
+
+    // ==================== 噪声与地形 ====================
+    function simpleNoise(x, z) {
+      const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+      return n - Math.floor(n);
+    }
+    function smoothNoise(x, z) {
+      const ix = Math.floor(x), iz = Math.floor(z);
+      const fx = x - ix, fz = z - iz;
+      const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz);
+      const n00 = simpleNoise(ix, iz), n10 = simpleNoise(ix+1, iz);
+      const n01 = simpleNoise(ix, iz+1), n11 = simpleNoise(ix+1, iz+1);
+      return (n00 + (n10-n00)*sx + (n01-n00)*sz + (n11-n01-n10+n00)*sx*sz);
+    }
+    function getTerrainHeight(x, z) {
+      const large = Math.sin(x*0.15)*Math.cos(z*0.18)*4;
+      const medium = Math.sin(x*0.28+1.5)*Math.cos(z*0.32-0.8)*2.5;
+      const small = smoothNoise(x*0.5, z*0.5)*3;
+      const micro = smoothNoise(x*1.2, z*1.2)*1.5;
+      let h = 10 + large + medium + small + micro;
+      return Math.max(2, Math.min(22, Math.round(h)));
+    }
+
+    // ==================== 区块类 ====================
+    const sharedGeometry = new THREE.BoxGeometry(1,1,1);
+    
+    class Chunk {
+      constructor(cx, cz) {
+        this.cx = cx;
+        this.cz = cz;
+        this.worldX = cx * CHUNK_SIZE;
+        this.worldZ = cz * CHUNK_SIZE;
+        this.blocks = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+        this.meshes = {}; // type -> InstancedMesh
+        this.loaded = false;
+        this.generated = false;
+      }
+      
+      worldIndex(x, y, z) {
+        return y * CHUNK_SIZE * CHUNK_SIZE + x * CHUNK_SIZE + z;
+      }
+      
+      getBlock(x, y, z) {
+        if (x<0||x>=CHUNK_SIZE||y<0||y>=CHUNK_HEIGHT||z<0||z>=CHUNK_SIZE) return BLOCK_AIR;
+        return this.blocks[this.worldIndex(x,y,z)];
+      }
+      
+      setBlock(x, y, z, type) {
+        if (x<0||x>=CHUNK_SIZE||y<0||y>=CHUNK_HEIGHT||z<0||z>=CHUNK_SIZE) return;
+        this.blocks[this.worldIndex(x,y,z)] = type;
+      }
+      
+      generate() {
+        if (this.generated) return;
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          for (let z = 0; z < CHUNK_SIZE; z++) {
+            const wx = this.worldX + x;
+            const wz = this.worldZ + z;
+            const height = getTerrainHeight(wx, wz);
+            for (let y = 0; y <= height; y++) {
+              if (y === height) {
+                this.setBlock(x, y, z, height <= 5 ? BLOCK_SAND : BLOCK_GRASS);
+              } else if (y >= height - 4) {
+                this.setBlock(x, y, z, BLOCK_DIRT);
+              } else {
+                this.setBlock(x, y, z, BLOCK_STONE);
+              }
+            }
+            // 树木生成（简化，按噪声位置）
+            if (height >= 6 && this.getBlock(x, height, z) === BLOCK_GRASS && simpleNoise(wx*3, wz*3) < 0.08) {
+              const trunkH = 3 + Math.floor(simpleNoise(wx+100, wz+100)*3);
+              for (let ty = height+1; ty <= height+trunkH; ty++) {
+                if (ty < CHUNK_HEIGHT) this.setBlock(x, ty, z, BLOCK_WOOD);
+              }
+              const crownBase = height + trunkH - 1;
+              for (let dy = 0; dy <= 3; dy++) {
+                const r = dy === 0 ? 2 : (dy === 3 ? 0 : 1.5);
+                for (let dx = -2; dx <= 2; dx++) {
+                  for (let dz = -2; dz <= 2; dz++) {
+                    if (Math.sqrt(dx*dx+dz*dz) <= r && (dy<3 || Math.random()<0.6)) {
+                      const bx = x+dx, bz = z+dz, by = crownBase+dy;
+                      if (bx>=0&&bx<CHUNK_SIZE&&bz>=0&&bz<CHUNK_SIZE&&by<CHUNK_HEIGHT&&this.getBlock(bx,by,bz)===BLOCK_AIR)
+                        this.setBlock(bx,by,bz,BLOCK_LEAVES);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        this.generated = true;
+      }
+      
+      buildMesh(scene) {
+        if (!this.generated) this.generate();
+        // 收集每种类型的位置
+        const positionsByType = {};
+        for (let t = 1; t < TOTAL_TYPES; t++) positionsByType[t] = [];
+        
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          for (let z = 0; z < CHUNK_SIZE; z++) {
+            for (let y = 0; y < CHUNK_HEIGHT; y++) {
+              const type = this.getBlock(x, y, z);
+              if (type !== BLOCK_AIR) {
+                positionsByType[type].push({ x: this.worldX + x + 0.5, y: y + 0.5, z: this.worldZ + z + 0.5 });
+              }
+            }
+          }
+        }
+        
+        // 为每种类型创建InstancedMesh
+        for (let type = 1; type < TOTAL_TYPES; type++) {
+          const list = positionsByType[type];
+          if (list.length === 0) continue;
+          const material = new THREE.MeshStandardMaterial({
+            map: BLOCK_TEXTURES[type],
+            roughness: 0.6,
+            metalness: 0.05,
+          });
+          const mesh = new THREE.InstancedMesh(sharedGeometry, material, list.length);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.count = list.length;
+          const dummy = new THREE.Matrix4();
+          list.forEach((pos, i) => {
+            dummy.setPosition(pos.x, pos.y, pos.z);
+            mesh.setMatrixAt(i, dummy);
+          });
+          mesh.instanceMatrix.needsUpdate = true;
+          scene.add(mesh);
+          this.meshes[type] = mesh;
+        }
+        this.loaded = true;
+      }
+      
+      removeFromScene(scene) {
+        for (const type in this.meshes) {
+          const mesh = this.meshes[type];
+          scene.remove(mesh);
+          mesh.dispose();
+          mesh.material.dispose();
+        }
+        this.meshes = {};
+        this.loaded = false;
+      }
+      
+      // 修改单个方块并更新网格
+      modifyBlock(localX, y, localZ, newType, scene) {
+        if (!this.generated) return;
+        const oldType = this.getBlock(localX, y, localZ);
+        if (oldType === newType) return;
+        this.setBlock(localX, y, localZ, newType);
+        
+        const worldPos = { x: this.worldX + localX + 0.5, y: y + 0.5, z: this.worldZ + localZ + 0.5 };
+        
+        // 移除旧方块实例
+        if (oldType !== BLOCK_AIR && this.meshes[oldType]) {
+          this.removeInstanceFromMesh(oldType, localX, y, localZ, worldPos);
+        }
+        // 添加新方块实例
+        if (newType !== BLOCK_AIR) {
+          if (!this.meshes[newType]) {
+            const material = new THREE.MeshStandardMaterial({ map: BLOCK_TEXTURES[newType], roughness:0.6 });
+            const mesh = new THREE.InstancedMesh(sharedGeometry, material, 1);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            scene.add(mesh);
+            this.meshes[newType] = mesh;
+          }
+          this.addInstanceToMesh(newType, worldPos);
+        }
+      }
+      
+      removeInstanceFromMesh(type, lx, ly, lz, worldPos) {
+        const mesh = this.meshes[type];
+        if (!mesh || mesh.count === 0) return;
+        // 找到实例索引（通过位置匹配）
+        const dummy = new THREE.Vector3();
+        let foundIndex = -1;
+        for (let i = 0; i < mesh.count; i++) {
+          mesh.getMatrixAt(i, new THREE.Matrix4()).decompose(dummy, new THREE.Quaternion(), new THREE.Vector3());
+          if (Math.abs(dummy.x - worldPos.x) < 0.01 && Math.abs(dummy.y - worldPos.y) < 0.01 && Math.abs(dummy.z - worldPos.z) < 0.01) {
+            foundIndex = i;
+            break;
+          }
+        }
+        if (foundIndex === -1) return;
+        // 与最后一个交换
+        const lastIdx = mesh.count - 1;
+        if (foundIndex < lastIdx) {
+          const lastMatrix = new THREE.Matrix4();
+          mesh.getMatrixAt(lastIdx, lastMatrix);
+          mesh.setMatrixAt(foundIndex, lastMatrix);
+        }
+        mesh.count--;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.count === 0) {
+          const scene = mesh.parent;
+          if (scene) scene.remove(mesh);
+          mesh.dispose();
+          mesh.material.dispose();
+          delete this.meshes[type];
+        }
+      }
+      
+      addInstanceToMesh(type, worldPos) {
+        let mesh = this.meshes[type];
+        if (!mesh) return;
+        if (mesh.count >= mesh.instanceMatrix.count) {
+          // 扩容（简单处理：重新创建）
+          const scene = mesh.parent;
+          const oldCount = mesh.count;
+          const newMesh = new THREE.InstancedMesh(sharedGeometry, mesh.material, oldCount + 50);
+          newMesh.castShadow = true; newMesh.receiveShadow = true;
+          for (let i = 0; i < oldCount; i++) {
+            const m = new THREE.Matrix4();
+            mesh.getMatrixAt(i, m);
+            newMesh.setMatrixAt(i, m);
+          }
+          newMesh.count = oldCount + 1;
+          const mat = new THREE.Matrix4().setPosition(worldPos.x, worldPos.y, worldPos.z);
+          newMesh.setMatrixAt(oldCount, mat);
+          newMesh.instanceMatrix.needsUpdate = true;
+          if (scene) {
+            scene.remove(mesh);
+            scene.add(newMesh);
+          }
+          mesh.dispose();
+          this.meshes[type] = newMesh;
+        } else {
+          const mat = new THREE.Matrix4().setPosition(worldPos.x, worldPos.y, worldPos.z);
+          mesh.setMatrixAt(mesh.count, mat);
+          mesh.count++;
+          mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    }
+
+    // ==================== 区块管理器 ====================
+    class ChunkManager {
+      constructor(scene) {
+        this.scene = scene;
+        this.chunks = new Map();
+        this.loadQueue = [];
+        this.lastPlayerChunk = null;
+      }
+      
+      getChunkKey(cx, cz) { return `${cx},${cz}`; }
+      
+      getChunk(cx, cz) {
+        return this.chunks.get(this.getChunkKey(cx, cz));
+      }
+      
+      update(playerWorldPos) {
+        const pcx = Math.floor(playerWorldPos.x / CHUNK_SIZE);
+        const pcz = Math.floor(playerWorldPos.z / CHUNK_SIZE);
+        const currentKey = this.getChunkKey(pcx, pcz);
+        
+        if (currentKey !== this.lastPlayerChunk) {
+          this.lastPlayerChunk = currentKey;
+          this.loadRequiredChunks(pcx, pcz);
+          this.unloadDistantChunks(pcx, pcz);
+        }
+        
+        // 逐步构建队列中的区块（每帧一个）
+        if (this.loadQueue.length > 0) {
+          const chunk = this.loadQueue.shift();
+          if (!chunk.loaded) {
+            chunk.buildMesh(this.scene);
+          }
+        }
+      }
+      
+      loadRequiredChunks(centerCX, centerCZ) {
+        const radius = VIEW_RADIUS;
+        // 先生成中心，再外围
+        const toLoad = [];
+        for (let dx = -radius; dx <= radius; dx++) {
+          for (let dz = -radius; dz <= radius; dz++) {
+            const cx = centerCX + dx;
+            const cz = centerCZ + dz;
+            const key = this.getChunkKey(cx, cz);
+            if (!this.chunks.has(key)) {
+              const chunk = new Chunk(cx, cz);
+              this.chunks.set(key, chunk);
+              toLoad.push({ chunk, dist: Math.sqrt(dx*dx+dz*dz) });
+            }
+          }
+        }
+        toLoad.sort((a,b) => a.dist - b.dist);
+        for (const item of toLoad) {
+          if (!item.chunk.generated) {
+            item.chunk.generate();
+            this.loadQueue.push(item.chunk);
+          } else if (!item.chunk.loaded) {
+            this.loadQueue.push(item.chunk);
+          }
+        }
+      }
+      
+      unloadDistantChunks(centerCX, centerCZ) {
+        const radius = VIEW_RADIUS + 2;
+        for (const [key, chunk] of this.chunks.entries()) {
+          const dx = chunk.cx - centerCX;
+          const dz = chunk.cz - centerCZ;
+          if (Math.abs(dx) > radius || Math.abs(dz) > radius) {
+            if (chunk.loaded) chunk.removeFromScene(this.scene);
+            this.chunks.delete(key);
+          }
+        }
+      }
+      
+      getBlockWorld(wx, wy, wz) {
+        const cx = Math.floor(wx / CHUNK_SIZE);
+        const cz = Math.floor(wz / CHUNK_SIZE);
+        const chunk = this.getChunk(cx, cz);
+        if (!chunk || !chunk.generated) return BLOCK_AIR;
+        const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        return chunk.getBlock(Math.floor(lx), Math.floor(wy), Math.floor(lz));
+      }
+      
+      setBlockWorld(wx, wy, wz, type) {
+        const cx = Math.floor(wx / CHUNK_SIZE);
+        const cz = Math.floor(wz / CHUNK_SIZE);
+        const chunk = this.getChunk(cx, cz);
+        if (!chunk || !chunk.generated) return false;
+        const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        chunk.modifyBlock(Math.floor(lx), Math.floor(wy), Math.floor(lz), type, this.scene);
+        return true;
+      }
+      
+      getLoadedMeshes() {
+        const meshes = [];
+        for (const chunk of this.chunks.values()) {
+          if (chunk.loaded) {
+            for (const mesh of Object.values(chunk.meshes)) {
+              meshes.push(mesh);
+            }
+          }
+        }
+        return meshes;
+      }
+    }
+
+    // ==================== 场景初始化 ====================
+    const container = document.getElementById('game-container');
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    container.appendChild(renderer.domElement);
+    
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog = new THREE.Fog(0xc8e0f0, 60, 160);
+    
+    const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, 300);
+    camera.position.set(0, 25, 0);
+    
+    // 光照
+    scene.add(new THREE.AmbientLight(0x7b9ec7, 0.6));
+    const sun = new THREE.DirectionalLight(0xfff8e8, 3.0);
+    sun.position.set(80, 100, 50);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 300;
+    sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
+    sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
+    sun.shadow.bias = -0.0003;
+    scene.add(sun);
+    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a7d4a, 0.5));
+    
+    // 区块管理器
+    const chunkManager = new ChunkManager(scene);
+    
+    // ==================== 玩家状态（创造模式） ====================
+    const player = {
+      position: new THREE.Vector3(0, 30, 0),
+      velocity: new THREE.Vector3(),
+    };
+    
+    const controls = new PointerLockControls(camera, document.body);
+    controls.pointerSpeed = 0.5;
+    controls.maxPolarAngle = Math.PI * 0.85;
+    
+    const infoOverlay = document.getElementById('info-overlay');
+    const crosshairEl = document.getElementById('crosshair');
+    controls.addEventListener('lock', () => { infoOverlay.classList.add('hidden'); crosshairEl.style.display='flex'; });
+    controls.addEventListener('unlock', () => { infoOverlay.classList.remove('hidden'); crosshairEl.style.display='none'; });
+    
+    document.addEventListener('click', (e) => {
+      if (!controls.isLocked && !e.target.closest('#hotbar') && !e.target.closest('#backpack-overlay')) {
+        controls.lock();
+      }
+    });
+    
+    // ==================== 输入 ====================
+    const keys = {};
+    document.addEventListener('keydown', (e) => {
+      keys[e.code] = true;
+      if (e.code === 'KeyE') {
+        toggleBackpack();
+      }
+      if (e.code >= 'Digit1' && e.code <= 'Digit6') {
+        const idx = parseInt(e.code.replace('Digit','')) - 1;
+        if (idx < SELECTABLE_BLOCKS.length) {
+          selectedHotbarIndex = idx;
+          selectedBlockType = SELECTABLE_BLOCKS[idx];
+          updateHotbarUI();
+        }
+      }
+      if (e.code === 'Space') e.preventDefault();
+    });
+    document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+    
+    document.addEventListener('wheel', (e) => {
+      if (!controls.isLocked) return;
+      if (e.deltaY > 0) selectedHotbarIndex = (selectedHotbarIndex+1) % SELECTABLE_BLOCKS.length;
+      else selectedHotbarIndex = (selectedHotbarIndex-1+SELECTABLE_BLOCKS.length) % SELECTABLE_BLOCKS.length;
+      selectedBlockType = SELECTABLE_BLOCKS[selectedHotbarIndex];
+      updateHotbarUI();
+    });
+    
+    document.addEventListener('mousedown', (e) => {
+      if (!controls.isLocked) return;
+      if (e.button === 0) destroyBlock();
+      else if (e.button === 2) placeBlock();
+    });
+    document.addEventListener('contextmenu', e => { if (controls.isLocked) e.preventDefault(); });
+    
+    // ==================== 射线检测 ====================
+    const raycaster = new THREE.Raycaster();
+    raycaster.far = 9;
+    let currentHit = null;
+    const highlightLine = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.005,1.005,1.005)),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent:true, opacity:0.4, depthTest:true })
+    );
+    highlightLine.visible = false;
+    scene.add(highlightLine);
+    
+    function updateRaycaster() {
+      raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+      const meshes = chunkManager.getLoadedMeshes();
+      const intersects = raycaster.intersectObjects(meshes, false);
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const mesh = hit.object;
+        const instanceId = hit.instanceId;
+        if (instanceId !== undefined && mesh.count > instanceId) {
+          const matrix = new THREE.Matrix4();
+          mesh.getMatrixAt(instanceId, matrix);
+          const pos = new THREE.Vector3();
+          matrix.decompose(pos, new THREE.Quaternion(), new THREE.Vector3());
+          const blockX = Math.floor(pos.x);
+          const blockY = Math.floor(pos.y);
+          const blockZ = Math.floor(pos.z);
+          currentHit = {
+            point: hit.point.clone(),
+            face: hit.face,
+            blockX, blockY, blockZ,
+          };
+          highlightLine.position.set(blockX+0.5, blockY+0.5, blockZ+0.5);
+          highlightLine.visible = true;
+          return;
+        }
+      }
+      currentHit = null;
+      highlightLine.visible = false;
+    }
+    
+    function destroyBlock() {
+      if (!currentHit) return;
+      const { blockX, blockY, blockZ } = currentHit;
+      chunkManager.setBlockWorld(blockX, blockY, blockZ, BLOCK_AIR);
+      currentHit = null;
+      highlightLine.visible = false;
+    }
+    
+    function placeBlock() {
+      if (!currentHit || !currentHit.face) return;
+      const nx = currentHit.blockX + Math.round(currentHit.face.normal.x);
+      const ny = currentHit.blockY + Math.round(currentHit.face.normal.y);
+      const nz = currentHit.blockZ + Math.round(currentHit.face.normal.z);
+      if (ny < 0 || ny >= CHUNK_HEIGHT) return;
+      chunkManager.setBlockWorld(nx, ny, nz, selectedBlockType);
+      updateRaycaster();
+    }
+    
+    // ==================== 背包UI ====================
+    let selectedBlockType = BLOCK_GRASS;
+    let selectedHotbarIndex = 0;
+    const backpackOverlay = document.getElementById('backpack-overlay');
+    const backpackPanel = document.getElementById('backpack-panel');
+    
+    function buildBackpackUI() {
+      backpackPanel.innerHTML = '';
+      SELECTABLE_BLOCKS.forEach(type => {
+        const item = document.createElement('div');
+        item.className = 'backpack-item';
+        const img = document.createElement('div');
+        img.className = 'item-img';
+        img.style.backgroundImage = `url(${BLOCK_TEXTURES[type].image.src})`;
+        img.style.backgroundSize = 'cover';
+        const name = document.createElement('span');
+        name.className = 'item-name';
+        name.textContent = BLOCK_NAMES[type];
+        item.appendChild(img);
+        item.appendChild(name);
+        item.addEventListener('click', () => {
+          selectedBlockType = type;
+          selectedHotbarIndex = SELECTABLE_BLOCKS.indexOf(type);
+          updateHotbarUI();
+          backpackOverlay.style.display = 'none';
+          if (!controls.isLocked) controls.lock();
+        });
+        backpackPanel.appendChild(item);
+      });
+    }
+    function toggleBackpack() {
+      if (backpackOverlay.style.display === 'flex') {
+        backpackOverlay.style.display = 'none';
+        if (!controls.isLocked) controls.lock();
+      } else {
+        backpackOverlay.style.display = 'flex';
+        if (controls.isLocked) controls.unlock();
+      }
+    }
+    document.getElementById('backpack-close').addEventListener('click', () => {
+      backpackOverlay.style.display = 'none';
+      if (!controls.isLocked) controls.lock();
+    });
+    
+    // 快捷栏
+    const hotbarEl = document.getElementById('hotbar');
+    function buildHotbar() {
+      hotbarEl.innerHTML = '';
+      SELECTABLE_BLOCKS.forEach((type, i) => {
+        const slot = document.createElement('div');
+        slot.className = `hotbar-slot ${i === selectedHotbarIndex ? 'active' : ''}`;
+        slot.dataset.index = i;
+        const preview = document.createElement('div');
+        preview.className = 'block-preview';
+        preview.style.backgroundImage = `url(${BLOCK_TEXTURES[type].image.src})`;
+        preview.style.backgroundSize = 'cover';
+        slot.appendChild(preview);
+        const num = document.createElement('span');
+        num.className = 'slot-number';
+        num.textContent = i+1;
+        slot.appendChild(num);
+        slot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectedHotbarIndex = i;
+          selectedBlockType = type;
+          updateHotbarUI();
+          if (!controls.isLocked) controls.lock();
+        });
+        hotbarEl.appendChild(slot);
+      });
+    }
+    function updateHotbarUI() {
+      const slots = hotbarEl.querySelectorAll('.hotbar-slot');
+      slots.forEach((s, i) => s.classList.toggle('active', i === selectedHotbarIndex));
+    }
+    
+    // ==================== 游戏循环 ====================
+    let lastTime = performance.now();
+    function animate(time) {
+      requestAnimationFrame(animate);
+      let dt = (time - lastTime) / 1000;
+      lastTime = time;
+      if (dt > 0.2) dt = 0.2;
+      
+      if (controls.isLocked) {
+        // 创造模式飞行
+        const moveDir = new THREE.Vector3();
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0; forward.normalize();
+        const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+        
+        if (keys['KeyW']) moveDir.add(forward);
+        if (keys['KeyS']) moveDir.sub(forward);
+        if (keys['KeyA']) moveDir.sub(right);
+        if (keys['KeyD']) moveDir.add(right);
+        if (keys['Space']) moveDir.y += 1;
+        if (keys['ShiftLeft'] || keys['ShiftRight']) moveDir.y -= 1;
+        
+        if (moveDir.length() > 1) moveDir.normalize();
+        const speed = 12;
+        player.position.x += moveDir.x * speed * dt;
+        player.position.y += moveDir.y * speed * dt;
+        player.position.z += moveDir.z * speed * dt;
+        camera.position.copy(player.position);
+        
+        // 射线更新
+        updateRaycaster();
+      }
+      
+      // 区块管理
+      chunkManager.update(player.position);
+      
+      renderer.render(scene, camera);
+    }
+    
+    // ==================== 启动 ====================
+    function init() {
+      buildBackpackUI();
+      buildHotbar();
+      updateHotbarUI();
+      // 预加载初始区块
+      const initCX = Math.floor(player.position.x / CHUNK_SIZE);
+      const initCZ = Math.floor(player.position.z / CHUNK_SIZE);
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          const chunk = new Chunk(initCX+dx, initCZ+dz);
+          chunk.generate();
+          chunkManager.chunks.set(chunkManager.getChunkKey(chunk.cx, chunk.cz), chunk);
+          chunkManager.loadQueue.push(chunk);
+        }
+      }
+      // 立即构建几个中心区块
+      for (let i=0; i<9; i++) {
+        const c = chunkManager.loadQueue.shift();
+        if (c && !c.loaded) c.buildMesh(scene);
+      }
+      camera.position.copy(player.position);
+      requestAnimationFrame(animate);
+    }
+    
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    
+    init();
+    console.log('✅ 无限世界已启动！创造模式飞行，按E打开背包。');
+  </script>
+</body>
+</html>
