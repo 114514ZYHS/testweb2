@@ -14,8 +14,6 @@
 2. 本地测试：在文件夹里开一个服务，比如 `python -m http.server 8000`，然后浏览器打开 `http://localhost:8000`。
 3. 传到 GitHub Pages 上也行，仓库设置里开 Pages，指向 main 分支根目录。
 
-如果只是想一个人玩，不想弄服务器，那就直接开 `Eaglercraft_1.5_Offline_Download.html`，这个是离线单文件版，双击就能用。
-
 ## 文件说明
 
 - `index.html` —— 网页入口，在线版的加载页面
@@ -24,9 +22,12 @@
 - `worker_bootstrap.js` —— worker 启动脚本
 - `assets.epk` —— 游戏资源包（贴图、音效那些）
 - `eagswebrtc.js` —— 局域网联机用的
-- `Eaglercraft_1.5_Offline_Download.html` —— 离线单文件版
 
 以上这些是一个都不能少的，删了就跑不起来。
+
+> 曾经有一份 `Eaglercraft_1.5_Offline_Download.html` 离线单文件版，
+> 因为浏览器安全策略会拒绝它内部动态创建的 Worker，**必然崩溃、无法修复**，
+> 已于 2026-09-16 删除。别再放回来。
 
 ## 关于联机
 
