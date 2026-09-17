@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API 设计：把接口写成别人愿意用的样子 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    pre {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+        background: #f6f8fa; border-left: 3px solid #8b949e;
+        padding: 12px 14px; margin: 14px 0; overflow-x: auto; line-height: 1.65;
+    }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        pre { background: #161b22; border-left-color: #484f58; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>API 设计：把接口写成别人愿意用的样子</h1>
+    <div class="meta">2026-09-14 · API 系列 · 第二篇</div>
+
+    <div class="article">
+        <p>接口能跑通，和接口设计得好，是两回事。前者只要代码不报错，后者要考虑的是：别人第一次看你文档，能不能猜对大半；出了问题，能不能一眼定位；半年后加需求，能不能不破坏已有的调用方。</p>
+        <p>这篇讲的是那些"踩过才知道"的经验。</p>
+
+        <h2>一、先把"资源"想清楚</h2>
+        <p>REST 风格的核心就一句话：<b>用 URL 表示资源（名词），用方法表示动作（动词）</b>。</p>
+        <pre>好的：
+GET    /articles          列出文章
+GET    /articles/42       看第 42 篇
+POST   /articles          新建一篇
+PUT    /articles/42       整体替换第 42 篇
+PATCH  /articles/42       局部修改第 42 篇
+DELETE /articles/42       删掉第 42 篇
+
+不好的：
+GET  /getArticleList
+POST /createArticle
+POST /deleteArticleById?article_id=42
+POST /article/update</pre>
+        <p>为什么不好？因为把动作塞进了 URL。结果是每个程序员都会造出自己的一套命名，接口列表变成一锅粥，而且没法利用 HTTP 本身已经定义好的语义（比如 GET 应该是安全、可缓存的）。</p>
+
+        <h3>复数还是单数</h3>
+        <p>两种都有人用，但<b>同一个项目里必须统一</b>。常见做法是集合用复数（<code>/articles</code>），单个资源带 ID（<code>/articles/42</code>）。</p>
+
+        <h3>层级别太深</h3>
+        <pre>可以：/articles/42/comments
+别太深：/articles/42/comments/7/replies/3/likes</pre>
+        <p>超过两三层就该考虑换个写法了，比如把深层资源提到顶层加查询参数：<code>/replies/3/likes</code>。</p>
+
+        <h2>二、一致性比"好看"重要得多</h2>
+        <p>接口设计里最值钱的不是某个技巧，而是<b>一致</b>。看三个例子：</p>
+        <ul>
+            <li><b>命名风格。</b>要么全蛇形 <code>user_name</code>，要么全驼峰 <code>userName</code>，别混。混了之后调用方永远记不住。</li>
+            <li><b>时间格式。</b>统一用 ISO 8601（<code>2026-09-14T12:34:56Z</code>），别一会儿时间戳一会儿字符串一会儿 <code>2026/09/14</code>。</li>
+            <li><b>分页参数。</b>要么全是 <code>page/page_size</code>，要么全是 <code>offset/limit</code>，要么全是 <code>cursor</code>，别一个接口一个样。</li>
+        </ul>
+        <p>一个反直觉的事实：<span class="hl">一个稍微别扭但处处一致的接口，比一个单看很优雅但风格混乱的接口好用得多。</span></p>
+
+        <h2>三、HTTP 方法该怎么选</h2>
+        <p>每个方法有明确的语义约定，遵守它能让中间的各种设施（缓存、代理、日志）自动正常工作：</p>
+        <ul>
+            <li><b>GET</b> —— 只读，<b>必须安全且幂等</b>。绝不能用来改数据。也不要放敏感信息在 URL 里（会被记录到日志、浏览器历史）。</li>
+            <li><b>POST</b> —— 创建，不安全也不幂等。重复调用会创建多个。</li>
+            <li><b>PUT</b> —— 整体替换，<b>幂等</b>。调一次和调十次结果一样。适合"我提供完整内容，你给我存下来"。</li>
+            <li><b>PATCH</b> —— 局部更新，理论上不必幂等，实践中很多实现是幂等的。</li>
+            <li><b>DELETE</b> —— 删除，幂等。删一个已经不存在的东西，应该返回成功或者 404，而不是 500。</li>
+        </ul>
+
+        <h3>幂等为什么值钱</h3>
+        <p>因为网络不可靠。用户点了一次提交，请求发出去但响应超时了——这时候客户端不知道到底成没成，要不要重试？</p>
+        <p><b>如果接口是幂等的，重试就安全</b>；不幂等的话，重试可能造成重复下单、重复扣款。这就是为什么支付类接口会引入"幂等键"（idempotency key）这套机制。</p>
+
+        <h2>四、错误响应：这里最容易设计烂</h2>
+        <p>看看这个反面教材：</p>
+        <pre>HTTP/1.1 200 OK
+{"result": false, "err": -1001, "info": "系统繁忙，请稍后再试"}</pre>
+        <p>问题一堆：用 200 表示失败、错误码是自己编的、错误信息笼统得没法用、调用方还得写两套判断逻辑。</p>
+        <p>好的做法：</p>
+        <pre>HTTP/1.1 400 Bad Request
+{
+  "error": "invalid_parameter",
+  "message": "字段 start_date 格式不正确，应为 YYYY-MM-DD",
+  "field": "start_date",
+  "request_id": "b3f1a2c4-8e7d-4a91-9c02-5d6e8f1a2b3c"
+}</pre>
+        <p>好在哪里：</p>
+        <ul>
+            <li><b>状态码表达类别</b>，4xx 表示是调用方的问题。</li>
+            <li><b>machine-readable 的 error 字段</b>（稳定不变），调用方可以按它分支处理，而不是去匹配那句会变的 message。</li>
+            <li><b>message 具体可执行</b>，直接告诉用户改了哪个字段。</li>
+            <li><b>request_id</b> 让你能在服务端日志里反查这一条。</li>
+        </ul>
+        <p>状态码的具体含义见<a href="http-status-codes.html">上一篇</a>。</p>
+
+        <h2>五、列表接口：分页、筛选、排序</h2>
+        <p>列表接口的坑最多，因为它一定会遇到"数据量变大"这一天。</p>
+
+        <h3>两种分页方式</h3>
+        <ul>
+            <li><b>偏移分页</b>（<code>?page=3&amp;page_size=20</code> 或 <code>?offset=40&amp;limit=20</code>）：实现简单，可以跳到任意页。缺点有两个：数据量大时数据库要扫描前面所有行，越翻越慢；并且在数据频繁变动的场景下会<b>漏项或重复</b>。</li>
+            <li><b>游标分页</b>（<code>?cursor=eyJpZCI6MTIzfQ&amp;limit=20</code>）：用"上一页最后一条的标记"作为起点。性能稳定，不会漏项重复。缺点是只能顺序翻，不能跳到第 50 页。</li>
+        </ul>
+        <p>选择标准：<b>后台管理系统这种要跳页的用偏移，信息流/聊天记录这种一直往下刷的用游标。</b></p>
+
+        <h3>响应里要带上"还有没有下一页"</h3>
+        <pre>{
+  "data": [ ... ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6MTIzfQ",
+  "total": 1234
+}</pre>
+        <p>注意 <code>total</code> 这个字段是有代价的——算总数在大表上很贵。<b>如果前端不需要显示总数，就不要返回它。</b></p>
+
+        <h3>筛选和排序</h3>
+        <pre>?status=published&amp;author=42&amp;sort=-created_at&amp;limit=20</pre>
+        <p>几个经验：</p>
+        <ul>
+            <li>筛选字段用平铺的查询参数，别塞一个 JSON 字符串进去。</li>
+            <li>排序用 <code>sort=字段名</code>，前面加 <code>-</code> 表示倒序，简洁好记。</li>
+            <li><b>一定要给 limit 设上限</b>（比如最多 100）。否则有人传 <code>limit=999999</code>，你的数据库就遭殃了。</li>
+            <li>白名单控制可筛选、可排序的字段，<b>绝不要把用户输入直接拼进 SQL</b>。</li>
+        </ul>
+
+        <h2>六、版本管理：怎么改而不砸别人的饭碗</h2>
+        <p>接口一旦发布就有人在用，而需求一定会变。核心原则：<span class="hl">只做向后兼容的改动</span>。</p>
+
+        <h3>安全（兼容）的改动</h3>
+        <ul>
+            <li>新增<b>可选</b>的请求参数。</li>
+            <li>在响应里新增字段（调用方应该忽略不认识的字段）。</li>
+            <li>新增接口。</li>
+            <li>把必填改成可选。</li>
+        </ul>
+
+        <h3>破坏性的改动</h3>
+        <ul>
+            <li>删除或重命名字段。</li>
+            <li>把可选改成必填。</li>
+            <li>改变字段类型或含义（比如原来秒现在毫秒）。</li>
+            <li>修改 URL 结构。</li>
+            <li>改变错误码的含义。</li>
+        </ul>
+        <p>破坏性改动要做的话，得走版本化：URL 里带版本（<code>/v2/articles</code>）、请求头带版本（<code>Accept: application/vnd.api+json; version=2</code>）、或者域名区分。</p>
+
+        <div class="note">
+            <b>代价要知道：</b>URL 版本号（<code>/v1</code>、<code>/v2</code>）是行业里最常见的做法，也好理解，但它会带来一堆长期要维护的旧版本，代码里到处是分支。<b>更经济的做法是尽量设计得稳一点，少升版本</b>——把最容易变的字段放在一个嵌套对象里，将来改它就换那个对象，不动顶层结构。
+        </div>
+
+        <h2>七、几个具体的小决策</h2>
+        <ul>
+            <li><b>字段缺失 vs null。</b>要有明确约定。常见做法：字段一定出现，无值时为 <code>null</code>。这比"有时在有时不在"好处理得多。</li>
+            <li><b>布尔值命名。</b>用 <code>is_active</code> 这类带前缀的名字，别用 <code>active</code>（分不清是名词还是形容词）。</li>
+            <li><b>ID 类型。</b>统一用字符串传 ID（哪怕内部是数字），避免 JavaScript 大整数精度问题。这个坑很隐蔽，用户量大了才会撞上。</li>
+            <li><b>时间。</b>永远存和传 UTC，带时区偏移或者 Z 后缀，由前端负责展示成本地时间。传"当前时间"这种概念最容易出时区 bug。</li>
+            <li><b>金额。</b>绝不用浮点数。<b>用整数分</b>，或者字符串。浮点数算钱迟早出问题。</li>
+        </ul>
+
+        <h2>八、认证和限流，别等出事再加</h2>
+        <ul>
+            <li><b>认证</b>用标准方案：长期凭证用 <code>Authorization: Bearer &lt;token&gt;</code>，会话用标准的 Cookie 属性（<code>HttpOnly</code>、<code>Secure</code>、<code>SameSite</code>）。别自己发明一套塞在自定义头里。</li>
+            <li><b>限流</b>要从第一天就设计。返回 429 时带上 <code>Retry-After</code> 和剩余配额的头（如 <code>X-RateLimit-Remaining</code>），让调用方能优雅退避。</li>
+            <li><b>CORS</b> 是最小权限原则的典型场景：<code>Access-Control-Allow-Origin: *</code> 加上允许携带凭证，是个危险的组合，想清楚再写。</li>
+        </ul>
+
+        <h2>九、文档：接口的门面</h2>
+        <p>再好的接口，文档烂就等于没有。几条实践经验：</p>
+        <ul>
+            <li><b>给能直接跑的例子。</b>一个 <code>curl</code> 命令或者一段可复制的代码，胜过三段文字描述。</li>
+            <li><b>写清楚错误情况。</b>哪个参数错了会返回什么，比只写"成功返回"有用得多。</li>
+            <li><b>标注幂等性和副作用。</b>调用方需要知道"能不能重试"。</li>
+            <li><b>给出真实的响应示例</b>，包括那些可选字段。</li>
+        </ul>
+        <p>如果有余力，用 OpenAPI（Swagger）这类规范来描述接口，能自动生成文档、生成客户端 SDK、做在线调试。前期一点的投入，后期省很多。</p>
+
+        <h2>十、最后：从调用方的角度想一遍</h2>
+        <p>设计完一个接口，拿它当陌生人去看一遍，问自己几个问题：</p>
+        <ul>
+            <li>不看文档，我能猜对 URL 和方法的组合吗？</li>
+            <li>出错的时候，我能知道要改什么吗？</li>
+            <li>这个请求失败了，我能安全地重试吗？</li>
+            <li>半年后我加个字段，会不会把现在写好的客户端搞崩？</li>
+            <li>我要抓 10000 条数据，会不会把服务器拖死或者被限流？</li>
+        </ul>
+        <p>能答上这五条，接口基本就是"别人愿意用"的样子了。</p>
+
+        <div class="note">
+            <b>一句话总结：</b>好的 API 设计没有高深技巧，就是三件事——<b>用名词表示资源、保证处处一致、永远做向后兼容的改动</b>。剩下的细节，都从这三点推出来。
+        </div>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · API 系列<br>
+        本文为个人整理，供参考
+    </div>
+</body>
+</html>

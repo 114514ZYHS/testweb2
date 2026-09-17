@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>域名和 DNS：你按下回车之后的三百毫秒 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    pre {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+        background: #f6f8fa; border-left: 3px solid #8b949e;
+        padding: 12px 14px; margin: 14px 0; overflow-x: auto; line-height: 1.65;
+    }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        pre { background: #161b22; border-left-color: #484f58; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>域名和 DNS：你按下回车之后的三百毫秒</h1>
+    <div class="meta">2026-09-14 · 网络系列 · 第一篇</div>
+
+    <div class="article">
+        <p>你在地址栏敲下 <code>www.example.com</code>，回车，页面出来了。这中间发生了什么？大多数人会说"连上服务器了"。但真实过程比这有意思得多，而且理解它对你排错极有帮助——因为<strong>网站打不开的原因，一大半出在这一段里</strong>。</p>
+
+        <h2>一、互联网只认数字，域名是给人看的</h2>
+        <p>网络上每一台服务器都有一个 IP 地址，比如 <code>93.184.216.34</code>（IPv4）或者 <code>2606:2800:220:1:248:1893:25c8:1946</code>（IPv6）。IP 是门牌号，真正的路由全靠它。</p>
+        <p>但没有人记得住一长串数字，而且服务器换机房、换服务商时 IP 会变。所以有了域名：<b>给 IP 起的人类友好的别名</b>。</p>
+        <p>把域名翻译成 IP 的这套系统，就叫 <b>DNS</b>（Domain Name System，域名系统）。它是整个互联网最不起眼、但也最基础的一层——DNS 挂了，你记得住 IP 的网站还能开，其他全都打不开。</p>
+
+        <h2>二、一个域名是怎么拆的</h2>
+        <p>拿 <code>www.4444442.xyz</code> 举例，从右往左读：</p>
+        <ul>
+            <li><b><code>.xyz</code></b> —— 顶级域名（TLD）。类似的还有 <code>.com</code>、<code>.cn</code>、<code>.top</code>。</li>
+            <li><b><code>4444442</code></b> —— 二级域名。这是你真正去注册局花钱买的那一段。</li>
+            <li><b><code>www</code></b> —— 子域名（subdomain）。这一层不用花钱，你想加多少加多少。</li>
+        </ul>
+        <p>所以买域名，严格说买的是<b>某个顶级域名下面的一个二级域名的使用权</b>，通常是按年租，不是买断。</p>
+
+        <h3>子域名能干嘛</h3>
+        <p>一个域名下可以挂无数个子域名，指向完全不同的服务器：</p>
+        <pre>www.example.com    -> 主站
+blog.example.com   -> 博客，可能托管在另一家
+api.example.com    -> 接口服务
+img.example.com    -> 图床
+test.example.com   -> 测试环境
+*.example.com      -> 泛解析：任何没单独配置的子域名都落到这里</pre>
+        <p>这非常实用：<b>一台服务器可以托管几十个网站</b>，靠子域名区分。你现在看到这个博客，就是 <code>4444442.xyz</code> 下的一个路径，同一套域名体系里的事。</p>
+
+        <h2>三、DNS 查询到底走了几步</h2>
+        <p>浏览器要知道 <code>www.example.com</code> 的 IP，会按顺序问一圈，任何一步命中缓存就提前返回：</p>
+        <ol>
+            <li><b>浏览器自己的缓存。</b>刚访问过的域名，Chrome 自己记着。</li>
+            <li><b>操作系统的缓存。</b>Windows 里可以 <code>ipconfig /displaydns</code> 看，<code>ipconfig /flushdns</code> 清。</li>
+            <li><b>hosts 文件。</b>本地手工写的对照表，优先级很高，常用来做屏蔽或者本地调试。</li>
+            <li><b>本地 DNS 服务器。</b>通常是你路由器，或者运营商（电信/联通/移动）的 DNS。这一层是绝大多数家用场景的真正出口。</li>
+            <li><b>根域名服务器 → 顶级域名服务器 → 权威域名服务器。</b>如果本地 DNS 也没有缓存，它会替你从根开始一层层问下去，最后拿到答案。</li>
+        </ol>
+        <p>整个过程通常几十到几百毫秒。第一次访问慢，第二次快，就是因为缓存。</p>
+
+        <div class="note">
+            <b>实用结论一：</b>网站"昨天还好好的今天打不开，但手机流量能打开"——八成是<b>本地 DNS 缓存或者运营商 DNS 出了问题</b>，不是网站挂了。换 DNS（比如 <code>223.5.5.5</code> 阿里、<code>119.29.29.29</code> 腾讯）往往立刻见效。
+        </div>
+
+        <h2>四、几种常见的记录类型</h2>
+        <p>在域名管理后台配置解析时，你会看到这些类型：</p>
+        <ul>
+            <li><b>A 记录</b> —— 域名指向一个 IPv4 地址。最常用。</li>
+            <li><b>AAAA 记录</b> —— 指向 IPv6 地址。四个 A 是因为 IPv6 地址是 128 位，是 IPv4 的四倍。</li>
+            <li><b>CNAME 记录</b> —— 域名指向另一个域名，由对方去解析。常见于把子域名托管给云服务商。</li>
+            <li><b>MX 记录</b> —— 邮件服务器地址。收发邮件靠它。</li>
+            <li><b>TXT 记录</b> —— 存放文本，常用来做域名所有权验证、邮件防伪（SPF/DKIM）。</li>
+            <li><b>NS 记录</b> —— 指定这个域名由哪台服务器负责解析。改 NS 相当于"换 DNS 供应商"。</li>
+        </ul>
+
+        <h3>TTL 是什么</h3>
+        <p>每条记录后面都跟着一个 TTL（Time To Live），单位是秒，表示<b>这条解析结果可以被缓存多久</b>。TTL=600 就是十分钟内别人问同一个域名，本地 DNS 直接用缓存，不再去问。</p>
+        <p>所以换服务器时有个经验：<span class="hl">先把 TTL 调小（比如 60 秒），等生效后再改 IP，最后再调回去</span>。否则 TTL 没到期，一部分用户还在访问老服务器。</p>
+
+        <h2>五、动手看一下自己的域名解析</h2>
+        <p>这几个命令很值得存起来：</p>
+        <pre>nslookup www.example.com          # 最简单，看解析结果
+nslookup www.example.com 8.8.8.8  # 指定用 8.8.8.8 去问
+dig www.example.com +trace        # Linux/macOS：完整展示从根开始的查询链
+ipconfig /flushdns                # Windows：清空本地 DNS 缓存
+ping www.example.com              # 顺便能看到解析出的 IP</pre>
+        <p><code>+trace</code> 那个特别直观，它会一步步打印出根服务器、顶级域名服务器、权威服务器的回答。第一次看到的时候会觉得"原来是这样"。</p>
+
+        <h2>六、DNS 是怎么被拿来做手脚的</h2>
+        <p>DNS 设计于上世纪八十年代，那时候默认所有人都是善意的。它有两个天生的弱点：<b>查询默认明文</b>，而且<b>基本不做来源验证</b>。</p>
+        <p>由此衍生出一类攻击：</p>
+        <ul>
+            <li><b>DNS 劫持/投毒。</b>在链路上篡改应答，把你要访问的域名指向别的 IP。运营商插广告弹窗，就是这个原理的温和版本。</li>
+            <li><b>DNS 欺骗。</b>攻击者在局域网内抢先应答伪造结果。所以公共 WiFi 上的 DNS 不可信。</li>
+            <li><b>域名抢注与仿冒。</b>注册 <code>examp1e.com</code>（数字 1 冒充字母 l）这类形近域名，配合证书骗人。</li>
+        </ul>
+        <p>应对方式是加密查询：<b>DoH</b>（DNS over HTTPS）和 <b>DoT</b>（DNS over TLS），把查询包进加密通道，中间人看不到也改不了。</p>
+        <p>但要说清楚：<span class="hl">加密 DNS 只是让别人看不到你在查什么，不改变"你能不能访问"这件事</span>。这两件事经常被混为一谈。</p>
+
+        <h2>七、HTTPS 里的域名：证书是绑在域名上的</h2>
+        <p>你可能注意到地址栏的小锁。它背后的机制是 TLS 证书，而证书里有一项关键字段叫 <b>Common Name / SAN</b>，写明了<b>这张证书对哪些域名有效</b>。</p>
+        <p>所以：</p>
+        <ul>
+            <li>证书是签给 <code>example.com</code> 的，你用 <code>example.net</code> 访问就会报错。</li>
+            <li>证书过期、域名不匹配、签发机构不受信任——浏览器会直接拦下来，给你一个吓人的红页面。</li>
+            <li>免费证书（比如 Let's Encrypt）可以自动化签发，有效期三个月，所以现在"给一个域名配 HTTPS"基本是零成本、零门槛的事。</li>
+        </ul>
+        <p>关于 HTTPS 和证书更细的机制，见同系列的<a href="https-and-tls.html">另一篇</a>。</p>
+
+        <h2>八、自己搞一个网站，域名这块要做几件事</h2>
+        <p>如果你以后想自己搭个站，域名相关的动作大致是：</p>
+        <ol>
+            <li><b>注册域名。</b>选一个短、好记、不容易打错的。注册商的续费价格比首年价格重要得多。</li>
+            <li><b>做实名认证。</b>国内后缀（<code>.cn</code> 等）必须实名，否则会被停止解析。</li>
+            <li><b>配解析。</b>在注册商后台加 A 记录或者 CNAME。</li>
+            <li><b>等生效。</b>通常几分钟，慢的话几小时，取决于 TTL。</li>
+            <li><b>配 HTTPS。</b>托管平台（GitHub Pages、Cloudflare Pages 这类）一般一键搞定。</li>
+        </ol>
+
+        <div class="note">
+            <b>容易被忽略的一点：</b>域名是有<b>到期日</b>的。忘了续费，解析会被停掉，网站直接消失，严重的话域名会被抢注。注册商一般会提前发邮件，但那封邮件很容易被当成垃圾邮件忽略。<b>给自己的域名设个日历提醒。</b>
+        </div>
+
+        <h2>九、几个常识性误区</h2>
+        <ul>
+            <li><b>"域名就是网站。"</b> 不是。域名只是名字，网站是跑在服务器上的程序。域名可以指向空服务器，也可以随时换指向。</li>
+            <li><b>"买了域名就有网站了。"</b> 不是。域名 + 服务器 + 网站内容，是三件事。</li>
+            <li><b>"DNS 生效是瞬间的。"</b> 不是。受 TTL 和各层缓存影响，全世界生效可能要几小时。</li>
+            <li><b>"用 IP 访问更快。"</b> 通常反而更慢甚至失败——因为 HTTPS 证书绑定域名、服务器上可能有多个网站共用同一个 IP（靠域名区分），不报域名对方不知道你要哪个。</li>
+        </ul>
+
+        <div class="note">
+            <b>一句话总结：</b>域名是给人记的别名，DNS 是那本电话簿，TTL 决定这本簿子的信息多旧。搞清楚这三件事，网页打不开时你就有了一个明确的分诊思路——<b>先 ping 域名能不能解析出 IP，能解析就是后面的问题，解析不出来就查 DNS。</b>
+        </div>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · 网络系列<br>
+        本文为个人整理，供参考
+    </div>
+</body>
+</html>

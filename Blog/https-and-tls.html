@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTPS 到底保护了什么——证书、加密与常见误解 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    pre {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+        background: #f6f8fa; border-left: 3px solid #8b949e;
+        padding: 12px 14px; margin: 14px 0; overflow-x: auto; line-height: 1.65;
+    }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        pre { background: #161b22; border-left-color: #484f58; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>HTTPS 到底保护了什么——证书、加密与常见误解</h1>
+    <div class="meta">2026-09-14 · 网络系列 · 第三篇</div>
+
+    <div class="article">
+        <p>浏览器地址栏的小锁，几乎所有人都见过。但"有小锁 = 安全"这个等式是错的，而且错得挺危险。这篇把 HTTPS 到底做了什么、没做什么说清楚。</p>
+
+        <h2>一、HTTP 裸奔的三个问题</h2>
+        <p>HTTP 本身是明文协议。你在链路上发的每一个字节，中间任何一个环节都能看到：</p>
+        <ul>
+            <li><b>没有机密性。</b>同一个 WiFi 下的人、运营商、链路中间的任何设备，都能原样读到你的请求和响应。密码、Cookie、聊天内容，全是明文。</li>
+            <li><b>没有完整性。</b>中间人可以修改内容再转发，双方都察觉不到。插入广告、替换下载链接，都是这么干的。</li>
+            <li><b>没有身份验证。</b>你怎么知道回你话的真的是 <code>bank.com</code>，而不是有人在链路上冒充它？</li>
+        </ul>
+        <p>HTTPS 就是针对这三点来的：<b>加密保机密性，MAC 保完整性，证书保身份</b>。</p>
+
+        <h2>二、证书解决的是"你是谁"</h2>
+        <p>加密本身不难，难的是<b>跟谁加密</b>。如果一开始就被人冒充，后面加密再强也没意义。</p>
+        <p>证书体系（PKI）的思路是引入<b>第三方背书</b>：</p>
+        <ol>
+            <li>网站把自己的公钥和域名信息提交给 <b>CA</b>（证书颁发机构）。</li>
+            <li>CA 通过某种方式验证这个域名确实归申请人控制（比如让你在域名下放一个指定文件，或者加一条指定的 DNS 记录）。</li>
+            <li>CA 用自己的私钥对"这个公钥属于这个域名"这件事签名，生成证书。</li>
+            <li>浏览器内置了受信任 CA 的根证书，于是能验证这个签名。</li>
+        </ol>
+        <p>所以小锁真正的含义是：<span class="hl">这个站点的身份经过了某个受浏览器信任的机构背书，且你和它之间的通信是加密的</span>。</p>
+
+        <h3>它没说的几件事</h3>
+        <ul>
+            <li><b>没说这个网站是好人。</b>钓鱼网站也能申请到合法证书。小锁只证明"你连的是 <code>examp1e.com</code> 而不是被冒充的别的东西"，不证明这个域名想干嘛。</li>
+            <li><b>没说网站后端是安全的。</b>它只保护传输过程，数据库被拖库跟 HTTPS 没关系。</li>
+            <li><b>没说你输入的密码不会被记录。</b>服务端想记还是能记。</li>
+        </ul>
+
+        <div class="note">
+            <b>关键区分：</b>HTTPS 保护的是<b>传输过程</b>，不是<b>网站本身</b>。看到小锁时要看的是<b>域名对不对</b>——锁本身没有意义，"锁 + 正确的域名"才有意义。
+        </div>
+
+        <h2>三、为什么不是全程非对称加密</h2>
+        <p>非对称加密（RSA、ECC）解决了"怎么在不安全信道上交换密钥"，但它的计算开销是对称加密的成百上千倍。所以实际做法是<b>混合</b>：</p>
+        <ul>
+            <li>用非对称加密，安全地协商出一个<b>临时会话密钥</b>；</li>
+            <li>之后所有数据都用这个会话密钥做对称加密（AES 或 ChaCha20）；</li>
+            <li>会话结束密钥就丢，下次重来。</li>
+        </ul>
+        <p>这个设计还带来一个额外好处：<b>前向保密</b>。就算将来某天服务器的私钥泄露了，攻击者也无法解密之前录下来的历史流量——因为那些会话密钥早丢了，而且从来没在网络上明文传过。</p>
+
+        <h2>四、TLS 1.2 和 1.3 的差距</h2>
+        <p>现在主要用的是 TLS 1.2 和 1.3：</p>
+        <ul>
+            <li><b>TLS 1.2</b>：握手要两个往返（2-RTT）。允许一堆老旧、已被证明有问题的加密套件，配置不当就出事。</li>
+            <li><b>TLS 1.3</b>：握手压到一个往返，会话恢复能到 0-RTT。砍掉了所有不安全的算法，只留 AEAD 类。还加密了更多握手元数据。</li>
+        </ul>
+        <p>结论很简单：<b>能上 1.3 就上 1.3</b>，它更快也更安全。这不是"更安全但更慢"的取舍，而是两边都赢。</p>
+
+        <h2>五、那些吓人的证书错误，分别是什么意思</h2>
+        <ul>
+            <li><b>证书已过期。</b>最常见的自建站事故。免费证书一般是 90 天有效期，忘了续就是这样。加了自动续期就不该再出现。</li>
+            <li><b>证书域名不匹配。</b>证书签给 <code>example.com</code>，你访问的是 <code>www.example.com</code> 但证书里没包含这个 SAN。或者访问的是另一个域名。</li>
+            <li><b>证书不受信任 / 签发者未知。</b>自签名证书，或者根证书不在浏览器信任列表里。自建内网服务常见。</li>
+            <li><b>证书已被吊销。</b>CA 主动作废了这张证书（比如私钥泄露）。</li>
+        </ul>
+        <p>还有一种情况特别值得警惕：<span class="hl">如果某个正常网站突然报证书错误，不要习惯性地点"继续访问"</span>。那可能是有人在中间做手脚，这个警告正是设计出来拦这个的。</p>
+
+        <h2>六、关于"继续访问"这件事</h2>
+        <p>浏览器允许你手动跳过证书警告（先在页面敲 <code>thisisunsafe</code> 之类的绕过手段）。这在内网测试自签证书时有用。</p>
+        <p>但要知道后果：<b>一旦你选择继续，这次连接就失去了身份验证，也可能失去保密性</b>。你等于在说"我知道我在跟某个不确定是谁的东西通信，我接受"。在公共网络上，这个决定通常不该做。</p>
+
+        <h2>七、免费证书和自动化</h2>
+        <p>以前 HTTPS 是收费服务，一年几百到几千块，还得手工装。现在完全变了：</p>
+        <ul>
+            <li><b>Let's Encrypt</b> 之类免费 CA 提供 90 天证书，通过 ACME 协议自动化签发和续期；</li>
+            <li>很多托管平台（Cloudflare、各家静态托管）直接代管证书，你什么都不用做；</li>
+            <li>于是"全站 HTTPS"从奢侈品变成了默认配置。</li>
+        </ul>
+        <p>这也是为什么现在浏览器敢对 HTTP 站点标"不安全"——因为升级成本已经接近零了。</p>
+
+        <h2>八、混合内容：全站 HTTPS 的坑</h2>
+        <p>页面本身是 HTTPS，但里面加载了一张 <code>http://</code> 的图片，这叫<b>混合内容</b>。浏览器会警告甚至直接拦下这个子资源。</p>
+        <p>原因很直接：加密页面上混了一个明文资源，攻击者可以篡改那个资源，进而影响整个页面（比如替换成一个恶意脚本）。<b>所以 HTTPS 必须全站一致，不能一半一半。</b></p>
+        <p>排查方法：打开开发者工具的 Console，混合内容的警告会明确告诉你是哪个 URL。</p>
+
+        <h2>九、HSTS：让降级攻击没机会</h2>
+        <p>有种攻击叫 SSL 剥离：攻击者拦截你对 <code>https://</code> 的访问，把它降级成 <code>http://</code>，你全程无感。</p>
+        <p><b>HSTS</b>（HTTP Strict Transport Security）是对策。服务器返回一个头：</p>
+        <pre>Strict-Transport-Security: max-age=31536000; includeSubDomains</pre>
+        <p>意思是"接下来一年内，这个域名（含所有子域名）只准用 HTTPS 访问"。浏览器记住这条，之后即使用户手输 <code>http://</code>，浏览器也会自动改成 <code>https://</code>，攻击者没有降级的机会。</p>
+
+        <div class="note">
+            <b>注意：</b>HSTS 的 <code>max-age</code> 一旦设长了就很难撤销，配 <code>includeSubDomains</code> 更容易误伤还没配好证书的子域名。<b>先设个短时间（比如 300 秒）验证没问题，再逐步调大。</b>
+        </div>
+
+        <h2>十、回到那个小锁</h2>
+        <p>总结一下正确的理解方式：</p>
+        <ul>
+            <li><b>有小锁</b> = 传输加密 + 站点身份被某个 CA 背过书。</li>
+            <li><b>有小锁不等于网站可信</b>。要看域名拼写是否正确，尤其警惕形近域名。</li>
+            <li><b>有小锁不等于服务端安全</b>。它不管后端、不管数据存储、不管业务逻辑。</li>
+            <li><b>输入敏感信息前，先看域名。</b>这一步比看小锁重要得多。</li>
+        </ul>
+
+        <div class="note">
+            <b>一句话总结：</b>HTTPS 是一件很扎实的工程，它解决的是"传输过程中的窃听、篡改、冒充"这三件事，解决得相当好。但它不是安全认证标签，<b>它保护的是管道，不是管道尽头的那个人。</b>
+        </div>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · 网络系列<br>
+        本文为个人整理，供参考
+    </div>
+</body>
+</html>

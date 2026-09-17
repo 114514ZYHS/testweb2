@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给 AI Agent 写一个 API：它和人类用起来有什么不一样 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    pre {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+        background: #f6f8fa; border-left: 3px solid #8b949e;
+        padding: 12px 14px; margin: 14px 0; overflow-x: auto; line-height: 1.65;
+    }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        pre { background: #161b22; border-left-color: #484f58; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>给 AI Agent 写一个 API：它和人类用起来有什么不一样</h1>
+    <div class="meta">2026-09-14 · Agent 系列 · 第一篇</div>
+
+    <div class="article">
+        <p>Agent 正在成为接口的重要调用方。它不像人那样能"猜"、能"看懂一个大致的说明"、能在报错时自己摸索着改。这些差异，反过来会改变接口该怎么设计。</p>
+
+        <h2>一、Agent 是最挑剔的调用方</h2>
+        <p>一个典型的 Agent 工作方式是：给它一个目标，它自己决定调哪些工具、按什么顺序调、失败了怎么办。它没有眼睛去看你的界面，没有常识去补全你的暗示，也不能打开浏览器去搜一下"这个报错是什么意思"。</p>
+        <p>所以对人类来说"差不多能用"的接口，对 Agent 来说可能是完全不可用的。它需要的性质其实是：</p>
+        <ul>
+            <li><b>自描述。</b>接口有什么能力、参数是什么类型、有哪些取值范围，必须明确写出来。</li>
+            <li><b>错误可理解。</b>失败时给出的是"哪个参数错了、应该是什么样"，而不是一个错误码。</li>
+            <li><b>结果可判断。</b>调用完，Agent 要能确凿地知道做成了没有。</li>
+            <li><b>幂等或可查询。</b>它一定会重试，因为网络会抖、它会判断失误。重试必须安全。</li>
+        </ul>
+
+        <h2>二、工具的粒度：太大和太小都不行</h2>
+        <p>把能力暴露给 Agent 时，第一个要做的选择是粒度。</p>
+
+        <h3>粒度太粗</h3>
+        <pre>do_thing(action: string, params: object)</pre>
+        <p>这等于把一个万能入口丢给 Agent——它得猜 <code>action</code> 该填什么、<code>params</code> 里有什么，而且模型看不到每个动作的具体参数定义，只能瞎猜。结果就是反复试错、大量无效调用。</p>
+
+        <h3>粒度太细</h3>
+        <pre>open_file()
+read_line()
+read_next_line()
+close_file()</pre>
+        <p>这会让一个简单任务变成十几个来回，每一步都在消耗上下文和 token，还容易在中途"忘了自己在干什么"。</p>
+
+        <h3>合适的粒度</h3>
+        <p>大致是<b>"一个语义完整的动作"</b>——人类操作员会一次做完的事。比如 <code>search_articles(query, limit)</code>、<code>create_invoice(customer_id, items)</code>、<code>run_tests(path)</code>。每个函数名字本身就是一句说明。</p>
+
+        <div class="note">
+            <b>一个判断方法：</b>如果你的工具描述需要写超过一句话才能让 Agent 明白用途，那它可能太大了，该拆；如果两个工具永远连在一起调用，那它们可能太小了，该合。
+        </div>
+
+        <h2>三、描述文本是接口的一部分</h2>
+        <p>对 Agent 来说，函数的<b>描述文本和参数说明就是它的全部信息来源</b>。这不是文档，这是接口本身。</p>
+        <p>对比一下：</p>
+        <pre>名字：process(data)
+描述：处理数据。
+
+名字：resize_image(path, width, height)
+描述：把本地图片缩放到指定像素尺寸，并覆盖写回原文件。
+      width 和 height 都是像素，必须是 1 到 4096 之间的整数。
+      如果图片本身比目标尺寸小，不会放大，直接返回原路径。
+      失败时返回错误信息，原文件不变。</pre>
+        <p>第二个描述里包含了 Agent 做决策需要的一切：<b>干什么、单位是什么、取值范围、边界行为、失败时的状态</b>。这些不是"冗余说明"，而是"接口契约"。</p>
+
+        <h3>值得写进去的几类信息</h3>
+        <ul>
+            <li><b>副作用。</b>会不会改文件、发请求、花钱、发消息。这一条极其重要，Agent 需要知道哪些操作不可逆。</li>
+            <li><b>幂等性。</b>调用两次会不会产生两个结果。</li>
+            <li><b>边界行为。</b>空输入怎么办、超限怎么办、找不到怎么办。</li>
+            <li><b>单位。</b>秒还是毫秒、字节还是 KB。这类参数一旦搞错，后果很具体。</li>
+            <li><b>返回值结构。</b>成功返回什么、失败返回什么。</li>
+        </ul>
+
+        <h2>四、错误信息：写给 Agent 看，也写给"修复"看</h2>
+        <p>Agent 拿到错误后要做的不是"显示给用户"，而是<b>决定下一步怎么办</b>。所以错误信息要能支撑这个决策。</p>
+        <pre>差的：{"error": "invalid input"}
+
+好的：
+{
+  "error": "invalid_parameter",
+  "message": "参数 retry 必须是 0 到 5 之间的整数，收到的是 -1",
+  "field": "retry",
+  "retryable": false
+}</pre>
+        <p>多出来的两个信息特别关键：</p>
+        <ul>
+            <li><b>哪个字段错了。</b>Agent 可以精确修正这一个参数重试，而不是推翻整个调用。</li>
+            <li><b>retryable。</b>告诉 Agent"这个错误重试有用吗"。参数错误重试一百次都是错的；而临时故障重试就可能成功。<b>没有这个信号，Agent 只能盲目重试或者盲目放弃。</b></li>
+        </ul>
+
+        <h2>五、幂等与"重试安全"</h2>
+        <p>Agent 一定会重试。可能因为网络超时，可能因为它自己判断错了。所以每个会产生副作用的操作都要问一句：<b>重试一次会怎样？</b></p>
+        <ul>
+            <li>读取类操作天然安全。</li>
+            <li>更新类操作如果是"设为某个值"，多次执行结果一样，安全。</li>
+            <li>"增加"类操作（扣款、加库存、发通知）必须引入幂等键。调用方带一个唯一 ID，服务端看到重复 ID 就返回上次的结果，不重复执行。</li>
+        </ul>
+        <pre>POST /payments
+Idempotency-Key: 7f3a-91c2-4d8e</pre>
+        <p>这个机制在主流的支付接口里已经是标配。当调用方是 Agent 时，它不是"锦上添花"，而是必需品。</p>
+
+        <h2>六、别让 Agent 面对无限可能</h2>
+        <p>人类可以接受"这里填一个任意字符串"，Agent 面对开放参数时容易生成看起来合理但完全没用的内容。</p>
+        <p>能收窄就收窄：</p>
+        <ul>
+            <li><b>枚举代替自由文本。</b>状态参数给 <code>pending / active / closed</code> 三个选项，别让它自由发挥。</li>
+            <li><b>格式写明。</b>日期写清 <code>YYYY-MM-DD</code>，不要只说"日期"。</li>
+            <li><b>给示例。</b>描述里带一个真实可用的例子，Agent 会照着仿写，正确率明显提高。</li>
+            <li><b>参数数量控制住。</b>一个函数十几个参数，模型填错的概率显著上升。考虑分组，或者拆成几个函数。</li>
+        </ul>
+
+        <h2>七、返回结果：省 token 也是设计目标</h2>
+        <p>Agent 的上下文窗口是有限的，而每一次工具调用的返回结果都要塞进去。所以：</p>
+        <ul>
+            <li><b>别返回一大堆用不上的字段。</b>一个用户对象返回 40 个字段，Agent 只需要其中的名字和 ID，那 38 个字段就是纯浪费。</li>
+            <li><b>提供精简视图。</b>比如 <code>?fields=id,name,status</code> 让调用方自己选。</li>
+            <li><b>长列表要分页。</b>并且默认页大小别太大。</li>
+            <li><b>大内容给引用而不是正文。</b>比如返回一个大文件的下载地址，而不是把几兆内容塞进上下文。</li>
+            <li><b>结构化优先。</b>同样信息用 JSON 比一大段自然语言更好解析、更省 token。</li>
+        </ul>
+
+        <div class="note">
+            <b>一个容易忽略的点：</b>错误日志、堆栈、HTML 页面这些"对人类友好"的返回，对 Agent 是灾难——它会尝试把一堆无意义的标签和路径读进上下文，既浪费又容易误导。<b>面向 Agent 的接口应该只返回结构化数据。</b>
+        </div>
+
+        <h2>八、给危险操作加护栏</h2>
+        <p>Agent 会犯错，而且犯错的方式和人类不同：它可能更"遵守规则"地执行一个错误的指令。所以：</p>
+        <ul>
+            <li><b>破坏性操作要显式确认。</b>删除、覆盖、批量修改、发送对外消息——这些应该要求一个明确的确认参数，而不是默认执行。</li>
+            <li><b>权限最小化。</b>给 Agent 的凭证只开放它真正需要的范围。不要给它一把能开所有门的钥匙。</li>
+            <li><b>可回滚。</b>软删除优于硬删除。改之前留副本。这样出错还能救。</li>
+            <li><b>可审计。</b>每次调用都记下来：谁调的、什么参数、什么结果。<b>出问题时要能还原现场</b>，这是事后复盘的唯一依据。</li>
+            <li><b>限制影响范围。</b>一次最多删多少条、最多花多少钱、最多发多少条消息，设个硬上限。</li>
+        </ul>
+
+        <h2>九、让 Agent 知道自己"能做什么"</h2>
+        <p>工具列表本身就是 Agent 的能力清单。它按照这份清单来判断"这个任务我能不能做"。</p>
+        <p>所以：</p>
+        <ul>
+            <li><b>工具数量别失控。</b>几十个工具会让选择变得困难，还会占满上下文。可以考虑分组或者按场景动态加载。</li>
+            <li><b>名字要有区分度。</b><code>get_user</code> 和 <code>fetch_user</code> 这种名字会让 Agent 随机挑一个，该合并或者明确区分用途。</li>
+            <li><b>明确冲突时的取舍。</b>如果有两个工具功能重叠，描述里要说清什么时候用哪个。</li>
+        </ul>
+
+        <h2>十、和人类接口的差别，一句话概括</h2>
+        <p>人类接口的隐含假设是"使用者会自己补全上下文、会搜索、会求助"。Agent 接口的假设是：<b>使用者只会读你写下的东西，然后严格照做。</b></p>
+        <p>所以设计重点从"界面友好"变成了"契约完备"：</p>
+        <ul>
+            <li>人类接口：描述可以省略，用户会摸索。</li>
+            <li>Agent 接口：描述必须完整，因为没人会摸索。</li>
+            <li>人类接口：报错可以笼统，人能猜。</li>
+            <li>Agent 接口：报错必须指明字段和可否重试。</li>
+            <li>人类接口：误操作可以点确认挽回。</li>
+            <li>Agent 接口：必须先设计好幂等和上限。</li>
+        </ul>
+
+        <div class="note">
+            <b>一句话总结：</b>给 Agent 写接口，本质上不是"新的技术"，而是<b>把接口契约写严谨</b>这件事重新变得重要——因为这一次，调用方真的会一字一句照着你写的东西执行，一个字没写清楚，就是一次失败的调用。<b>把每个工具当成"要交给一个很听话但完全没有常识的新同事"，设计方向就对了。</b>
+        </div>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · Agent 系列<br>
+        本文为个人整理，供参考
+    </div>
+</body>
+</html>

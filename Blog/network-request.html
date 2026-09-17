@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从敲下网址到看见页面：一次网络请求的完整旅程 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    pre {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+        background: #f6f8fa; border-left: 3px solid #8b949e;
+        padding: 12px 14px; margin: 14px 0; overflow-x: auto; line-height: 1.65;
+    }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        pre { background: #161b22; border-left-color: #484f58; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>从敲下网址到看见页面：一次网络请求的完整旅程</h1>
+    <div class="meta">2026-09-14 · 网络系列 · 第二篇</div>
+
+    <div class="article">
+        <p>上一篇讲了域名和 DNS。这一篇把整个过程串起来：从你敲下回车，到浏览器把页面画出来，中间到底经过了多少层。理解了这条链路，网速慢、网页打不开、图片加载失败这类问题，你就能自己定位到大概哪一段出了毛病。</p>
+
+        <h2>一、总览：七个阶段</h2>
+        <p>一次典型的首次访问，按顺序是：</p>
+        <ol>
+            <li><b>解析域名。</b>把 <code>example.com</code> 变成 IP。</li>
+            <li><b>建立 TCP 连接。</b>和服务器握手，建立可靠通道。</li>
+            <li><b>建立 TLS 加密。</b>握手协商密钥，把通道加密。</li>
+            <li><b>发送 HTTP 请求。</b>告诉服务器你要什么。</li>
+            <li><b>接收响应。</b>服务器返回状态码、响应头和正文。</li>
+            <li><b>解析渲染。</b>浏览器把 HTML/CSS/JS 变成画面。</li>
+            <li><b>加载子资源。</b>图片、字体、脚本，重复前几步。</li>
+        </ol>
+        <p>下面逐段说。</p>
+
+        <h2>二、传输层：TCP 的三次握手</h2>
+        <p>HTTP 是"应用层"的协议，它自己不负责把字节可靠地送到对面。这个活是 TCP 干的。TCP 建立连接要三次握手：</p>
+        <pre>客户端 -> 服务器：SYN，我想连你
+服务器 -> 客户端：SYN + ACK，收到，我也想连你
+客户端 -> 服务器：ACK，好，连上了</pre>
+        <p>为什么是三次不是两次？因为要<b>双方都确认对方的收发能力正常</b>。两次的话，服务器无法确认客户端能收到自己的包。</p>
+        <p>代价是：<span class="hl">建立连接本身要花一个来回（RTT）</span>。跨洋访问一个 RTT 可能 200 毫秒，还没传数据就先花掉 200 毫秒，这就是为什么 CDN 有用——把服务器搬到离你近的地方。</p>
+        <p>后来有了 <b>TCP 快速打开（TFO）</b>和 <b>QUIC</b>（基于 UDP 的一套新传输协议，HTTP/3 用它），把握手次数压下来。QUIC 甚至能做到 0-RTT 恢复。</p>
+
+        <h2>三、TLS 握手：不只是"加密一下"</h2>
+        <p>HTTPS 就是 HTTP over TLS。TLS 握手要做三件事：<b>验证对方身份</b>、<b>协商加密算法</b>、<b>交换密钥</b>。</p>
+        <p>简化后的流程（TLS 1.3）：</p>
+        <ol>
+            <li>客户端说：我支持这些加密套件，这是我的一次性公钥。</li>
+            <li>服务器回：我用这个套件，这是我的证书，这也是我的一次性公钥，附带用私钥做的签名。</li>
+            <li>双方各自用对方公钥 + 自己的私钥，算出同一个会话密钥。</li>
+        </ol>
+        <p>之后所有数据用对称加密（通常 AES 或 ChaCha20）传，因为对称加密速度远快于非对称。</p>
+
+        <div class="note">
+            <b>一个常见误解：</b>"HTTPS 是不是让网站变快了？" 不，HTTPS 是<b>变慢一点</b>的——多了握手、多了加解密开销。现代优化（TLS 1.3 的一次往返、会话复用、硬件加速）把这个开销压得很小，但不等于没有。HTTPS 换来的东西是<b>机密性和完整性</b>，不是速度。
+        </div>
+
+        <h2>四、HTTP 请求长什么样</h2>
+        <p>一个 GET 请求，去掉各种头之后本质是：</p>
+        <pre>GET /Blog/index.html HTTP/2
+Host: www.4444442.xyz
+User-Agent: Mozilla/5.0 ...
+Accept: text/html,application/xhtml+xml
+Accept-Encoding: gzip, deflate, br
+Cookie: ...</pre>
+        <p>关键点：</p>
+        <ul>
+            <li><b>方法（GET/POST/PUT/DELETE）</b>表示想干什么。</li>
+            <li><b>路径</b>是要的资源。</li>
+            <li><b>Host</b> 指定域名——同一台 IP 上可能有很多网站，靠这个区分。</li>
+            <li><b>Accept-Encoding</b> 表示我能解压，服务器可以压缩后发。这能省一半以上流量。</li>
+            <li><b>Cookie</b> 是服务器之前发给你的凭证，自动带上。这也是为什么追踪能跨页面。</li>
+        </ul>
+        <p>关于 HTTP 方法和状态码的细节，见<a href="http-status-codes.html">状态码那篇</a>。</p>
+
+        <h2>五、响应：状态码 + 头 + 正文</h2>
+        <pre>HTTP/2 200 OK
+content-type: text/html; charset=utf-8
+content-length: 4826
+cache-control: max-age=600
+etag: "5f3a-2f1b"
+
+&lt;!DOCTYPE html&gt;...</pre>
+        <ul>
+            <li><b>200</b> 成功。<b>301/302</b> 跳转。<b>404</b> 找不到。<b>500</b> 服务器出错。</li>
+            <li><b>content-type</b> 决定浏览器怎么解释这些字节。写成 <code>text/plain</code> 的 HTML 不会被渲染，会直接显示源码。</li>
+            <li><b>cache-control / etag</b> 决定能不能用本地缓存。用得好，第二次访问几乎不发请求。</li>
+        </ul>
+
+        <h3>条件请求：省流量的关键</h3>
+        <p>浏览器第二次请求同一个资源时，会带上 <code>If-None-Match: "5f3a-2f1b"</code>。服务器对比后如果没变，直接回 <code>304 Not Modified</code>，<b>不带正文</b>。省下的就是整个文件的流量。</p>
+
+        <h2>六、渲染：真正慢的地方往往在这</h2>
+        <p>拿到 HTML 之后，浏览器要：</p>
+        <ol>
+            <li><b>解析 HTML</b>，构建 DOM 树。</li>
+            <li><b>解析 CSS</b>，构建 CSSOM。CSS 是<b>阻塞渲染</b>的——没解析完不画画面。</li>
+            <li><b>执行 JavaScript。</b>普通 <code>&lt;script&gt;</code> 还会<b>阻塞解析</b>，这就是为什么脚本常放在 body 末尾。</li>
+            <li><b>布局（Layout）</b>：算出每个元素的位置和大小。</li>
+            <li><b>绘制（Paint）</b>：填充像素。</li>
+            <li><b>合成（Composite）</b>：分层拼成最终画面。</li>
+        </ol>
+        <p>这套流程里，"重排"（reflow）最贵——改动一个元素尺寸可能引发整棵树的重新布局。而只改颜色这类属性只需"重绘"，快得多。至于只影响合成的属性（<code>transform</code>、<code>opacity</code>），最快。</p>
+
+        <div class="note">
+            <b>实用结论：</b>页面卡，先别怪网速。打开开发者工具的 Performance 面板录一段，看看时间花在"网络等待"还是"渲染/脚本"上。这两个方向的优化手段完全不同。
+        </div>
+
+        <h2>七、这些阶段各自会怎么坏掉</h2>
+        <p>把每一层的典型故障列一下，排错时能对号入座：</p>
+        <ul>
+            <li><b>DNS 失败。</b>症状是"找不到服务器"，浏览器提示 <code>DNS_PROBE_FINISHED_NXDOMAIN</code>。原因：域名过期、解析没生效、本地 DNS 有问题。</li>
+            <li><b>连接失败。</b>症状是"连接超时"或"拒绝连接"。原因：服务器宕了、端口没开、防火墙拦了、被墙。</li>
+            <li><b>TLS 失败。</b>症状是红色警告页，提示证书无效/过期/域名不匹配。原因：证书到期、配置漏了某个子域名、系统时间不对。</li>
+            <li><b>HTTP 层失败。</b>症状是 404、403、500 页面。原因：路径写错、没权限、后端崩了。</li>
+            <li><b>渲染失败。</b>页面能打开但样式全乱、或者白屏。原因：CSS/JS 路径 404、脚本报错中断执行、跨域被拦。</li>
+        </ul>
+
+        <h3>怎么快速分诊</h3>
+        <pre>ping example.com              # 能解析出 IP 吗？
+ping 93.184.216.34            # 用 IP 能通吗？（Windows 默认禁 ping，可能误判）
+curl -v https://example.com   # 一步步打印握手和响应头，最直观
+nslookup example.com          # 单独验 DNS</pre>
+        <p><code>curl -v</code> 是这里最有用的一个：它会把 DNS 解析、TCP 连接、TLS 握手、请求头、响应头逐条打印出来，卡在哪一步一目了然。</p>
+
+        <h2>八、性能优化的方向，其实就是减少往返</h2>
+        <p>回头看整条链路，优化的本质就三条：</p>
+        <ul>
+            <li><b>减少往返次数。</b>复用连接（Keep-Alive）、HTTP/2 多路复用、TLS 1.3 减一轮、QUIC 减到 0 轮。</li>
+            <li><b>缩短往返距离。</b>用 CDN，把内容放到离用户近的节点。</li>
+            <li><b>减少往返数据量。</b>压缩（gzip/brotli）、图片用 WebP/AVIF、按需加载、强缓存。</li>
+        </ul>
+        <p>光速是绕不过去的。中美之间物理距离一万多公里，光在光纤里的速度大约是真空中的三分之二，单程理论极限就有约 60 毫秒。<b>这就是为什么 CDN 不是"优化技巧"而是"物理必需"。</b></p>
+
+        <h2>九、HTTP/1.1、HTTP/2、HTTP/3 差在哪</h2>
+        <ul>
+            <li><b>HTTP/1.1</b>：一个连接同时只处理一个请求，浏览器只能开多个连接绕过去（通常 6 个）。队头阻塞明显。</li>
+            <li><b>HTTP/2</b>：一个连接上多路复用，多个请求并发跑；头部压缩；服务器可以主动推送。基于 TCP，所以 TCP 层丢包还是会拖累所有流。</li>
+            <li><b>HTTP/3</b>：改用 QUIC（UDP），把丢包影响限制在单个流内，连接迁移更好（换 WiFi 不断线）。目前主流大站基本都开了。</li>
+        </ul>
+
+        <div class="note">
+            <b>一句话总结：</b>一次网页访问是<b>解析→连接→加密→请求→响应→渲染</b>六个阶段串起来的，每一阶段都可能单独失败。遇到问题不要靠猜，打开开发者工具的 Network 面板，或者 <code>curl -v</code> 跑一遍，<b>看它卡在第几步，问题就定位了一半。</b>
+        </div>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · 网络系列<br>
+        本文为个人整理，供参考
+    </div>
+</body>
+</html>
