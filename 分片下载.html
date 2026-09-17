@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分片下载合并</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 0 20px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .back-link {
+        display: inline-block;
+        margin-bottom: 18px;
+        color: #0969da;
+        text-decoration: none;
+        font-size: 14px;
+    }
+    .back-link:hover { text-decoration: underline; }
+    h1 {
+        font-size: 32px;
+        font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        padding-bottom: 12px;
+        margin-bottom: 8px;
+    }
+    .sub { color: #57606a; font-size: 14px; margin-bottom: 20px; }
+
+    .card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid #d0d7de;
+        padding: 18px 20px;
+        margin-bottom: 16px;
+    }
+    .card h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e1e4e8;
+    }
+
+    .note {
+        border-left: 3px solid #0969da;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 12px 15px;
+        font-size: 13px;
+        color: #57606a;
+        line-height: 1.75;
+        margin-bottom: 16px;
+    }
+    .note b { color: #1e1e1e; }
+    .note .hl { color: #cf222e; font-weight: 600; }
+
+    .meta-table { width: auto; border-collapse: collapse; font-size: 13px; }
+    .meta-table td { padding: 4px 16px 4px 0; color: #57606a; }
+    .meta-table td:first-child { color: #8b949e; }
+    .meta-table .mono { font-family: ui-monospace, Consolas, monospace; color: #1e1e1e; }
+
+    .piece-list {
+        list-style: none; padding: 0; margin: 0;
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 12px;
+    }
+    .piece-list li {
+        display: flex; justify-content: space-between; gap: 10px;
+        padding: 5px 9px;
+        border-bottom: 1px solid #e1e4e8;
+        color: #57606a;
+    }
+    .piece-list li:last-child { border-bottom: none; }
+    .piece-list .st { white-space: nowrap; }
+    .st.wait { color: #8b949e; }
+    .st.doing { color: #bf8700; }
+    .st.done { color: #1a7f37; font-weight: 600; }
+    .st.fail { color: #cf222e; font-weight: 600; }
+
+    button {
+        font: inherit;
+        font-size: 13px;
+        color: #24292f;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        padding: 6px 14px;
+        cursor: pointer;
+        border-radius: 0;
+    }
+    button:hover { background: #eef1f4; }
+    button:disabled { color: #8b949e; cursor: default; background: #f6f8fa; }
+    button.primary { background: #2da44e; border-color: #2da44e; color: #ffffff; }
+    button.primary:hover { background: #2c974b; }
+    button.primary:disabled { background: #94d3a2; border-color: #94d3a2; color: #ffffff; }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+
+    .bar { height: 6px; background: #e1e4e8; margin: 14px 0 6px; }
+    .bar-fill { height: 100%; background: #0969da; width: 0; }
+    .bar-multi { display: flex; gap: 2px; height: 8px; margin: 14px 0 6px; }
+    .seg { flex: 1 1 0; background: #e1e4e8; position: relative; }
+    .seg-fill { position: absolute; inset: 0; width: 0; background: #0969da; }
+
+    .status { font-size: 13px; color: #57606a; font-family: ui-monospace, Consolas, monospace; }
+    .log {
+        background: #f6f8fa;
+        border: 1px solid #e1e4e8;
+        padding: 10px 12px;
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.7;
+        color: #57606a;
+        max-height: 190px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        margin-top: 12px;
+    }
+    .log .ok { color: #1a7f37; }
+    .log .er { color: #cf222e; }
+    .log .hi { color: #0969da; }
+
+    .hidden { display: none; }
+
+    .footer {
+        text-align: center;
+        font-size: 14px;
+        color: #8b949e;
+        border-top: 1px solid #d0d7de;
+        padding-top: 18px;
+        margin-top: 26px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .sub { color: #8b949e; }
+        .card { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        .card h2 { border-bottom-color: #30363d; }
+        .note { background: rgba(22, 27, 34, 0.7); border-left-color: #58a6ff; color: #8b949e; }
+        .note b { color: #c9d1d9; }
+        .meta-table .mono { color: #c9d1d9; }
+        .piece-list li { border-bottom-color: #30363d; }
+        button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        button:hover { background: #30363d; }
+        .bar { background: #30363d; }
+        .bar-fill { background: #58a6ff; }
+        .seg { background: #30363d; }
+        .seg-fill { background: #58a6ff; }
+        .log { background: #161b22; border-color: #30363d; color: #8b949e; }
+        .log .ok { color: #3fb950; }
+        .log .er { color: #f85149; }
+        .log .hi { color: #58a6ff; }
+        .footer { border-top-color: #30363d; }
+    }
+</style>
+</head>
+<body>
+    <a href="index.html" class="back-link">&larr; 返回主页</a>
+    <h1>分片下载合并</h1>
+    <div class="sub">把大文件切成多个小分片，浏览器并发下载后在本地内存里拼回原文件</div>
+
+    <div class="note">
+        <b>为什么要这么做：</b>单个大文件走国内网络经常下载到一半断流，慢且不稳。
+        这里把文件切成若干 <b>500 KB</b> 左右的分片，<b>多个连接同时拉</b>，
+        全部拿齐后在浏览器内存里按顺序拼成一个完整文件再保存到本地。
+        <br><br>
+        全程在你自己浏览器里完成，<span class="hl">不经过任何第三方服务器</span>，
+        也不会上传你的任何数据。
+        <br><br>
+        合成后的文件请自行核对下方显示的 <b>SHA-256</b> 值。如果和发布页给的不一致，
+        说明分片在传输中损坏了，重新点一次「开始下载」即可。
+    </div>
+
+    <div class="card">
+        <h2>文件信息</h2>
+        <table class="meta-table">
+            <tr><td>文件名</td><td class="mono" id="mName">—</td></tr>
+            <tr><td>大小</td><td class="mono" id="mSize">—</td></tr>
+            <tr><td>分片数</td><td class="mono" id="mParts">—</td></tr>
+            <tr><td>并发数</td><td class="mono" id="mConc">—</td></tr>
+            <tr><td>原件 SHA-256</td><td class="mono" id="mSha" style="word-break:break-all;">—</td></tr>
+        </table>
+        <p style="font-size:13px;color:#57606a;margin:12px 0 0;line-height:1.7;" id="mDesc"></p>
+    </div>
+
+    <div class="card">
+        <h2>分片状态 <span id="cDone" style="font-weight:400;color:#8b949e;font-size:13px;"></span></h2>
+        <div class="bar-multi" id="segBar"></div>
+        <ul class="piece-list" id="pieceList"></ul>
+    </div>
+
+    <div class="card">
+        <h2>下载与合成</h2>
+        <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+        <div class="status" id="status">等待开始</div>
+
+        <div class="btn-row">
+            <button type="button" class="primary" id="btnStart">开始下载</button>
+            <button type="button" id="btnCancel" disabled>取消</button>
+            <button type="button" id="btnRetry" class="hidden">重试失败分片</button>
+            <button type="button" id="btnSave" class="hidden">保存合成文件</button>
+        </div>
+
+        <div class="log" id="log">就绪。</div>
+    </div>
+
+    <div class="footer">4444442.xyz · ZYHS</div>
+
+<script>
+/* =========================================================================
+   分片下载 + 浏览器端合成
+   -------------------------------------------------------------------------
+   原理：
+     1. 原始大文件被切成 N 个 .partNN 分片，和 manifest.json 一起放在 parts/ 目录
+     2. 浏览器按并发数同时 fetch 这些分片，拿到的 ArrayBuffer 存在内存里
+     3. 全部到齐后 new Blob([...buffers]) 拼成完整文件，触发保存
+
+   注意：
+     - 分片是按字节精确切的，顺序不能乱，manifest 里的 order 决定拼接顺序
+     - 不支持 Range 请求也不要紧，因为根本没用 Range，是整片下载
+     - 内存占用约为文件大小，几十 MB 的文件没问题，上 G 的要慎重
+   ========================================================================= */
+
+var MANIFEST = "parts/manifest.json";
+
+var state = {
+    manifest: null,
+    buffers: [],     // 每个分片的 ArrayBuffer，null 表示还没到
+    status: [],      // 'wait' | 'doing' | 'done' | 'fail'
+    running: false,
+    cancelled: false
+};
+
+function $(id) { return document.getElementById(id); }
+
+function fmtSize(b) {
+    if (!b) return "0 B";
+    var u = ["B", "KB", "MB", "GB"], i = 0, n = b;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : 2)) + " " + u[i];
+}
+
+function log(msg, cls) {
+    var el = $("log");
+    var span = cls ? '<span class="' + cls + '">' + msg + '</span>' : msg;
+    el.innerHTML += "\n" + span;
+    el.scrollTop = el.scrollHeight;
+}
+
+/* ---------- 载入清单 ---------- */
+function loadManifest() {
+    return fetch(MANIFEST, { cache: "no-store" })
+        .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        })
+        .then(function (m) {
+            state.manifest = m;
+            state.buffers = m.parts.map(function () { return null; });
+            state.status = m.parts.map(function () { return "wait"; });
+
+            $("mName").textContent = m.name;
+            $("mSize").textContent = fmtSize(m.size) + "  (" + m.size.toLocaleString() + " 字节)";
+            $("mParts").textContent = m.parts.length + " 个";
+            $("mConc").textContent = m.concurrency + " 个";
+            $("mSha").textContent = m.sha256 || "未提供";
+            $("mDesc").textContent = m.desc || "";
+
+            renderPieces();
+            renderSegBar();
+            return m;
+        });
+}
+
+function renderPieces() {
+    var ul = $("pieceList");
+    ul.innerHTML = "";
+    state.manifest.parts.forEach(function (p, i) {
+        var li = document.createElement("li");
+        var left = document.createElement("span");
+        left.textContent = p.name + "　" + fmtSize(p.size);
+        var right = document.createElement("span");
+        right.className = "st " + state.status[i];
+        right.textContent = ({
+            wait: "等待", doing: "下载中", done: "完成", fail: "失败"
+        })[state.status[i]];
+        right.id = "st" + i;
+        li.appendChild(left);
+        li.appendChild(right);
+        ul.appendChild(li);
+    });
+}
+
+function renderSegBar() {
+    var bar = $("segBar");
+    if (!bar) return;
+    if (bar.children.length !== state.manifest.parts.length) {
+        bar.innerHTML = "";
+        state.manifest.parts.forEach(function () {
+            var d = document.createElement("div");
+            d.className = "seg";
+            d.innerHTML = '<div class="seg-fill"></div>';
+            bar.appendChild(d);
+        });
+    }
+    state.status.forEach(function (s, i) {
+        var fill = bar.children[i].firstChild;
+        fill.style.width = (s === "done" ? "100%" : s === "doing" ? "45%" : "0");
+        fill.style.background = s === "fail" ? "#cf222e"
+                              : s === "done" ? "" : "";
+        bar.children[i].title = state.manifest.parts[i].name + " — " + s;
+    });
+}
+
+function updateProgress() {
+    var done = state.status.filter(function (s) { return s === "done"; }).length;
+    var total = state.status.length;
+    $("cDone").textContent = "（" + done + " / " + total + "）";
+    $("barFill").style.width = (total ? Math.round(done / total * 100) : 0) + "%";
+    renderSegBar();
+}
+
+/* ---------- 下载单个分片（带重试） ---------- */
+function fetchPart(i, attempt) {
+    attempt = attempt || 0;
+    var p = state.manifest.parts[i];
+    var url = "parts/" + p.name;
+
+    return fetch(url, { cache: "no-store" })
+        .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.arrayBuffer();
+        })
+        .then(function (buf) {
+            if (buf.byteLength !== p.size) {
+                throw new Error("大小不符 期望 " + p.size + " 实际 " + buf.byteLength);
+            }
+            // 校验分片哈希，防止半截数据混进来
+            if (p.sha256) {
+                return sha256(buf).then(function (h) {
+                    if (h !== p.sha256) throw new Error("哈希不符");
+                    return buf;
+                });
+            }
+            return buf;
+        })
+        .then(function (buf) {
+            state.buffers[i] = buf;
+            state.status[i] = "done";
+            var st = $("st" + i);
+            if (st) { st.className = "st done"; st.textContent = "完成"; }
+            updateProgress();
+            return true;
+        })
+        .catch(function (e) {
+            if (state.cancelled) return false;
+            if (attempt < 2) {
+                log(p.name + " 出错（" + e.message + "），重试 " + (attempt + 1) + "/2", "hi");
+                return new Promise(function (res) {
+                    setTimeout(function () { res(fetchPart(i, attempt + 1)); }, 700);
+                });
+            }
+            state.status[i] = "fail";
+            var st = $("st" + i);
+            if (st) { st.className = "st fail"; st.textContent = "失败"; }
+            updateProgress();
+            log(p.name + " 最终失败：" + e.message, "er");
+            return false;
+        });
+}
+
+/* ---------- SHA-256 ---------- */
+function sha256(arrayBuffer) {
+    if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+        return window.crypto.subtle.digest("SHA-256", arrayBuffer).then(function (h) {
+            var b = new Uint8Array(h), s = "";
+            for (var i = 0; i < b.length; i++) s += ("0" + b[i].toString(16)).slice(-2);
+            return s;
+        }).catch(function () { return null; });
+    }
+    return Promise.resolve(null);   // file:// 下没有 subtle，跳过校验
+}
+
+/* ---------- 并发调度 ---------- */
+function runPool() {
+    var conc = state.manifest.concurrency || 4;
+    var next = 0;
+
+    function worker() {
+        if (state.cancelled) return Promise.resolve();
+        if (next >= state.manifest.parts.length) return Promise.resolve();
+        var i = next++;
+        if (state.status[i] === "done") return worker();   // 已完成的跳过（重试场景）
+        state.status[i] = "doing";
+        var st = $("st" + i);
+        if (st) { st.className = "st doing"; st.textContent = "下载中"; }
+        renderSegBar();
+        return fetchPart(i).then(worker);
+    }
+
+    var runners = [];
+    for (var k = 0; k < conc; k++) runners.push(worker());
+    return Promise.all(runners);
+}
+
+/* ---------- 合成 ---------- */
+function assemble() {
+    var parts = [];
+    for (var i = 0; i < state.buffers.length; i++) {
+        if (!state.buffers[i]) return null;
+        parts.push(state.buffers[i]);
+    }
+    var blob = new Blob(parts, { type: state.manifest.mime || "application/octet-stream" });
+    return blob;
+}
+
+function doSave(blob) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = state.manifest.name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+    }, 4000);
+}
+
+/* ---------- 主流程 ---------- */
+$("btnStart").addEventListener("click", function () {
+    if (state.running) return;
+    state.running = true;
+    state.cancelled = false;
+    state.buffers = state.manifest.parts.map(function () { return null; });
+    state.status = state.manifest.parts.map(function () { return "wait"; });
+    renderPieces();
+    updateProgress();
+    $("btnStart").disabled = true;
+    $("btnCancel").disabled = false;
+    $("btnRetry").classList.add("hidden");
+    $("btnSave").classList.add("hidden");
+    $("status").textContent = "正在下载…";
+    log("开始下载 " + state.manifest.parts.length + " 个分片，并发 "
+        + state.manifest.concurrency + " 个", "hi");
+
+    var t0 = performance.now();
+    runPool().then(function () {
+        state.running = false;
+        $("btnCancel").disabled = true;
+        if (state.cancelled) {
+            $("status").textContent = "已取消";
+            log("已取消。", "er");
+            $("btnStart").disabled = false;
+            return;
+        }
+        var failed = state.status.filter(function (s) { return s === "fail"; }).length;
+        if (failed) {
+            $("status").textContent = failed + " 个分片失败";
+            log("有 " + failed + " 个分片失败，点「重试失败分片」再试。", "er");
+            $("btnStart").disabled = false;
+            $("btnRetry").classList.remove("hidden");
+            return;
+        }
+        var secs = ((performance.now() - t0) / 1000).toFixed(1);
+        log("全部分片到齐，用时 " + secs + " 秒，开始合成…", "ok");
+
+        var blob = assemble();
+        if (!blob) { log("合成失败：有分片缺失。", "er"); $("btnStart").disabled = false; return; }
+
+        $("status").textContent = "合成完成：" + fmtSize(blob.size);
+        log("合成完成，大小 " + fmtSize(blob.size) + "（" + blob.size.toLocaleString() + " 字节）", "ok");
+
+        // 校验整文件哈希
+        blob.arrayBuffer().then(function (ab) {
+            return sha256(ab);
+        }).then(function (h) {
+            if (!h) {
+                log("当前环境无法计算 SHA-256（本地打开时正常），跳过校验。", "hi");
+            } else if (state.manifest.sha256 && h !== state.manifest.sha256) {
+                log("⚠ 整文件哈希不符！期望 " + state.manifest.sha256.slice(0, 16) +
+                    "… 实际 " + h.slice(0, 16) + "…  建议重下。", "er");
+                $("status").textContent = "哈希校验失败，建议重下";
+            } else {
+                log("SHA-256 " + h + "　校验通过", "ok");
+            }
+            $("btnSave").classList.remove("hidden");
+            $("btnStart").disabled = false;
+            log("点「保存合成文件」即可存到本地。", "ok");
+        });
+    });
+});
+
+$("btnCancel").addEventListener("click", function () {
+    state.cancelled = true;
+    $("status").textContent = "正在取消…";
+});
+
+$("btnRetry").addEventListener("click", function () {
+    // 只重试失败的那些
+    state.status.forEach(function (s, i) {
+        if (s === "fail") { state.status[i] = "wait"; state.buffers[i] = null; }
+    });
+    renderPieces();
+    updateProgress();
+    state.running = true;
+    state.cancelled = false;
+    $("btnRetry").classList.add("hidden");
+    $("btnStart").disabled = true;
+    $("btnCancel").disabled = false;
+    log("重试失败分片…", "hi");
+    runPool().then(function () {
+        state.running = false;
+        $("btnCancel").disabled = true;
+        var failed = state.status.filter(function (s) { return s === "fail"; }).length;
+        if (failed) {
+            $("btnRetry").classList.remove("hidden");
+            $("status").textContent = failed + " 个分片仍失败";
+            $("btnStart").disabled = false;
+        } else {
+            var blob = assemble();
+            $("status").textContent = "合成完成：" + fmtSize(blob.size);
+            log("补齐后再合成完成。", "ok");
+            $("btnSave").classList.remove("hidden");
+            $("btnStart").disabled = false;
+        }
+    });
+});
+
+$("btnSave").addEventListener("click", function () {
+    var blob = assemble();
+    if (blob) { doSave(blob); log("已触发保存：" + state.manifest.name, "ok"); }
+});
+
+/* ---------- 初始化 ---------- */
+loadManifest().catch(function (e) {
+    $("status").textContent = "清单读取失败";
+    log("读不到 " + MANIFEST + "：" + e.message, "er");
+    log("如果你是在本地双击打开的，浏览器会禁止读取同目录文件——放到网站上访问即可。", "hi");
+    $("btnStart").disabled = true;
+});
+</script>
+</body>
+</html>
