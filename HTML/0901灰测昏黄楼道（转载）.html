@@ -1,0 +1,1464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Golden Hour Corridor</title>
+<style>
+  :root{ --fg:#e8dfd2; --dim:#9a8f80; --line:rgba(255,225,180,.16); }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:#050403; overflow:hidden;
+    font-family:"Inter","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif; color:var(--fg); }
+  #glcanvas{ position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  .ui{ position:fixed; z-index:5; pointer-events:none; user-select:none; transition:opacity .5s ease; }
+  .ui.hide{ opacity:0 !important; }
+  #title{ left:34px; top:30px; }
+  #title h1{ margin:0; font-size:23px; font-weight:600; letter-spacing:.42em; text-shadow:0 2px 26px rgba(0,0,0,.85); }
+  #title p{ margin:9px 0 0; font-size:10.5px; letter-spacing:.30em; text-transform:uppercase; color:var(--dim);
+    text-shadow:0 2px 18px rgba(0,0,0,.9); }
+  #hint{ left:34px; bottom:26px; font-size:10.5px; letter-spacing:.16em; color:var(--dim); line-height:1.9;
+    text-shadow:0 2px 16px rgba(0,0,0,.9); }
+  #hint b{ color:var(--fg); font-weight:500; }
+  #stats{ right:34px; bottom:26px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px;
+    letter-spacing:.1em; color:var(--dim); text-align:right; line-height:1.8; text-shadow:0 2px 16px rgba(0,0,0,.9); }
+  #panel{ right:26px; top:26px; width:232px; pointer-events:auto;
+    background:linear-gradient(180deg,rgba(20,14,9,.72),rgba(10,7,5,.66)); backdrop-filter:blur(14px) saturate(120%);
+    border:1px solid var(--line); border-radius:13px; padding:15px 16px 13px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  #panel h2{ margin:0 0 12px; font-size:9.5px; letter-spacing:.34em; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .row{ margin:0 0 11px; }
+  .row label{ display:flex; justify-content:space-between; font-size:10.5px; letter-spacing:.08em; color:#cbbca8; margin-bottom:5px; }
+  .row label span{ font-family:ui-monospace,Menlo,monospace; color:#f0c98a; font-size:10px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:2px; background:rgba(255,220,170,.22);
+    border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:11px; height:11px; border-radius:50%;
+    background:#f2c07a; box-shadow:0 0 10px rgba(242,192,122,.75); cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:11px; height:11px; border:0; border-radius:50%; background:#f2c07a; cursor:pointer; }
+  select,button{ width:100%; font-family:inherit; font-size:10.5px; letter-spacing:.1em; color:var(--fg);
+    background:rgba(255,230,190,.07); border:1px solid var(--line); border-radius:7px; padding:6px 8px; cursor:pointer; }
+  button:hover,select:hover{ background:rgba(255,230,190,.14); }
+  .btns{ display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }
+  #shots{ position:fixed; inset:0; pointer-events:none; }
+  #fade{ position:fixed; inset:0; background:#000; z-index:9; pointer-events:none; transition:opacity 1.6s ease; }
+  #status{ position:fixed; left:34px; bottom:96px; z-index:6; font-size:11px; letter-spacing:.2em;
+    color:#9a8f80; line-height:2; text-shadow:0 2px 16px rgba(0,0,0,.9); transition:opacity .6s; }
+  #status button{ width:auto; margin-top:6px; pointer-events:auto; }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<div id="fade"></div>
+<div id="status">Compiling shaders · warming up…</div>
+
+<div class="ui" id="title">
+  <h1>Golden Hour Corridor</h1>
+  <p>Golden Hour Corridor · realtime raymarched render</p>
+</div>
+
+<div class="ui" id="hint">
+  <b>Drag</b> look &nbsp;·&nbsp; <b>W A S D</b> walk &nbsp;·&nbsp; <b>Wheel</b> zoom<br>
+  <b>1-4</b> camera &nbsp;·&nbsp; <b>Space</b> dolly &nbsp;·&nbsp; <b>H</b> hide UI &nbsp;·&nbsp; <b>P</b> save PNG<br>
+  <span style="opacity:.72">Idle: frames accumulate samples; noise clears in seconds</span>
+</div>
+
+<div class="ui" id="stats">--</div>
+
+<div class="ui" id="panel">
+  <h2>Cinematography</h2>
+  <div class="row"><label>Sun elevation <span id="v_elev"></span></label><input id="s_elev" type="range" min="4" max="46" step="0.5" value="17"></div>
+  <div class="row"><label>Sun azimuth <span id="v_azim"></span></label><input id="s_azim" type="range" min="18" max="80" step="0.5" value="54"></div>
+  <div class="row"><label>Exposure <span id="v_exp"></span></label><input id="s_exp" type="range" min="0.25" max="2.2" step="0.01" value="1.12"></div>
+  <div class="row"><label>Air dust <span id="v_fog"></span></label><input id="s_fog" type="range" min="0" max="2.0" step="0.02" value="0.55"></div>
+  <div class="row"><label>Aperture & DOF <span id="v_ap"></span></label><input id="s_ap" type="range" min="0" max="0.05" step="0.001" value="0.007"></div>
+  <div class="row"><label>Render quality</label>
+    <select id="s_q"><option value="0">Fast</option><option value="1" selected>Standard</option><option value="2">High</option><option value="3">Cinematic</option></select>
+  </div>
+  <div class="btns"><button id="b_shot">Save PNG</button><button id="b_reset">Reset Camera</button></div>
+</div>
+
+<script type="x-shader/x-vertex" id="vs">
+#version 300 es
+precision highp float;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_scene">
+#version 300 es
+precision highp float;
+precision highp int;
+out vec4 fragColor;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform int   uFrame;
+uniform vec3  uCamPos;
+uniform mat3  uCam;
+uniform float uFocal;
+uniform float uAperture;
+uniform float uFocus;
+uniform vec3  uSun;
+uniform vec3  uSunCol;
+uniform vec3  uSkyCol;
+uniform float uFog;
+uniform int   uMaxSteps;
+uniform int   uVolSteps;
+uniform int   uAOTaps;
+uniform int   uGI;
+uniform int   uLocalSh;
+uniform int   uDbg;
+uniform float uAmb;
+uniform float uDetail;
+
+const float PI = 3.141592653589793;
+
+#define CW   1.5
+#define CH   3.05
+#define ZEND 26.0
+#define PITCH 4.6
+#define WCY  1.74
+#define WHH  0.80
+#define WHW  1.16
+#define WOFF 0.6
+#define DOFF 2.9
+#define GLX  (-CW - 0.085)
+
+#define M_FLOOR 1.0
+#define M_WALL  2.0
+#define M_CEIL  3.0
+#define M_FRAME 4.0
+#define M_SILL  5.0
+#define M_DOOR  6.0
+#define M_TRIM  7.0
+#define M_METAL 8.0
+#define M_MAT   9.0
+#define M_PIPE  10.0
+#define M_LAMP  11.0
+
+// ---------------------------------------------------------------- rng
+uint rngState;
+void seedRng(){
+  rngState = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u + uint(uFrame) * 26699u | 1u;
+}
+float rnd(){
+  rngState = rngState * 747796405u + 2891336453u;
+  uint w = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
+  return float((w >> 22u) ^ w) * (1.0 / 4294967296.0);
+}
+
+// ---------------------------------------------------------------- noise
+float hash12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float hash13(vec3 p3){
+  p3 = fract(p3 * 0.1031);
+  p3 += dot(p3, p3.zyx + 31.32);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 x){
+  vec2 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x),
+             mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
+}
+float vnoise3(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), f.x), mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), f.x), f.y);
+  float b = mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), f.x), mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), f.x), f.y);
+  return mix(a, b, f.z);
+}
+float fbm2(vec2 p){
+  float s = 0.0, a = 0.5;
+  for(int i = 0; i < 4; i++){ s += a * vnoise(p); p = p * 2.03 + 11.7; a *= 0.5; }
+  return s;
+}
+float fbm3(vec3 p){
+  float s = 0.0, a = 0.5;
+  for(int i = 0; i < 3; i++){ s += a * vnoise3(p); p = p * 2.07 + 7.3; a *= 0.5; }
+  return s;
+}
+float band(float x, float lim, float w){ return 1.0 - smoothstep(lim - w, lim + w, x); }
+
+// per-pixel rotated R2 low-discrepancy sequence advanced by the accumulation index
+vec2 seqR2(float dim){
+  vec2 o = vec2(hash12(gl_FragCoord.xy + vec2(dim * 17.31, dim * 11.73)),
+                hash12(gl_FragCoord.yx + vec2(dim * 7.19, dim * 3.37)));
+  return fract(o + vec2(0.7548776662466927, 0.5698402909980532) * float(uFrame));
+}
+vec3 sampleCone(vec3 dir, float radius, vec2 u){
+  vec3 t1 = normalize(cross(dir, abs(dir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 t2 = cross(dir, t1);
+  float r = radius * sqrt(u.x);
+  float ph = 6.2831853 * u.y;
+  return normalize(dir + (t1 * cos(ph) + t2 * sin(ph)) * r);
+}
+
+// ---------------------------------------------------------------- sdf
+float sdBox(vec3 p, vec3 b){
+  vec3 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+vec2 opU(vec2 a, vec2 b){ return (a.x < b.x) ? a : b; }
+
+vec2 map(vec3 p){
+  float zw = mod(p.z - WOFF, PITCH) - PITCH * 0.5;
+  float zd = mod(p.z - DOFF, PITCH) - PITCH * 0.5;
+  float zb = mod(p.z - 1.9,  PITCH) - PITCH * 0.5;
+
+  float fl = max(p.y, max(abs(p.x) - CW, p.z - ZEND));
+  vec2 res = vec2(fl, M_FLOOR);
+
+  float ce = max(CH - p.y, max(abs(p.x) - CW, p.z - ZEND));
+  float beam = max(sdBox(vec3(0.0, p.y - (CH - 0.05), zb), vec3(CW, 0.05, 0.115)), p.z - ZEND);
+  res = opU(res, vec2(min(ce, beam), M_CEIL));
+
+  // left wall pierced by windows
+  float hole = sdBox(vec3(p.x + CW + 19.85, p.y - WCY, zw), vec3(20.0, WHH, WHW));
+  float wl = max(max(p.x + CW, -hole), p.z - ZEND);
+  res = opU(res, vec2(wl, M_WALL));
+
+  // window joinery
+  vec3 fp = vec3(p.x - GLX, p.y - WCY, zw);
+  float fr = max(sdBox(fp, vec3(0.042, WHH + 0.032, WHW + 0.032)), -sdBox(fp, vec3(0.09, WHH - 0.048, WHW - 0.048)));
+  fr = min(fr, sdBox(fp, vec3(0.034, WHH, 0.024)));
+  fr = min(fr, sdBox(fp - vec3(0.0, 0.34, 0.0), vec3(0.034, 0.022, WHW)));
+  res = opU(res, vec2(max(fr, p.z - ZEND), M_FRAME));
+
+  // stone sill
+  float sill = max(sdBox(vec3(p.x + CW + 0.045, p.y - (WCY - WHH - 0.027), zw), vec3(0.215, 0.03, WHW + 0.08)), p.z - ZEND);
+  res = opU(res, vec2(sill, M_SILL));
+
+  // right wall with doorways
+  float recess = sdBox(vec3(p.x - CW - 0.06, p.y - 1.06, zd), vec3(0.2, 1.06, 0.47));
+  float wr = max(max(CW - p.x, -recess), p.z - ZEND);
+  res = opU(res, vec2(wr, M_WALL));
+
+  float door = sdBox(vec3(p.x - (CW + 0.05), p.y - 1.02, zd), vec3(0.026, 1.02, 0.44));
+  float pnA = sdBox(vec3(p.x - (CW + 0.026), p.y - 1.50, zd), vec3(0.02, 0.40, 0.29));
+  float pnB = sdBox(vec3(p.x - (CW + 0.026), p.y - 0.55, zd), vec3(0.02, 0.32, 0.29));
+  door = max(door, -min(pnA, pnB));
+  res = opU(res, vec2(door, M_DOOR));
+
+  float cas = max(sdBox(vec3(p.x - (CW - 0.014), p.y - 1.11, zd), vec3(0.014, 1.11, 0.535)),
+                 -sdBox(vec3(p.x - (CW - 0.014), p.y - 1.06, zd), vec3(0.06, 1.06, 0.47)));
+  res = opU(res, vec2(cas, M_TRIM));
+
+  float hdl = sdBox(vec3(p.x - (CW + 0.008), p.y - 1.02, zd - 0.33), vec3(0.036, 0.019, 0.05));
+  res = opU(res, vec2(hdl, M_METAL));
+
+  // doormat in front of every flat
+  float mat0 = sdBox(vec3(p.x - (CW - 0.34), p.y - 0.007, zd), vec3(0.26, 0.007, 0.33)) - 0.010;
+  res = opU(res, vec2(max(mat0, p.z - ZEND), M_MAT));
+
+  // conduit running the length of the corridor, with brackets
+  float pipe = length(vec2(p.x - (CW - 0.055), p.y - 2.58)) - 0.019;
+  float zbr = mod(p.z - 0.4, 1.55) - 0.775;
+  float brk = sdBox(vec3(p.x - (CW - 0.03), p.y - 2.58, zbr), vec3(0.03, 0.032, 0.016));
+  res = opU(res, vec2(max(min(pipe, brk), p.z - ZEND), M_PIPE));
+
+  // meter box between doors
+  float mbz = mod(p.z - WOFF - 1.1, PITCH * 2.0) - PITCH;
+  float mbox = sdBox(vec3(p.x - (CW - 0.052), p.y - 1.62, mbz), vec3(0.052, 0.155, 0.105)) - 0.006;
+  res = opU(res, vec2(max(mbox, p.z - ZEND), M_METAL));
+
+  // flush ceiling fitting
+  vec3 lp = vec3(p.x - 0.05, (p.y - (CH + 0.055)) * 2.3, zw);
+  float lamp = length(lp) - 0.145;
+  res = opU(res, vec2(max(lamp, p.z - ZEND), M_LAMP));
+
+  float skL = max(sdBox(vec3(p.x + CW - 0.014, p.y - 0.075, 0.0), vec3(0.014, 0.075, 9000.0)), p.z - ZEND);
+  float skR = max(max(sdBox(vec3(p.x - CW + 0.014, p.y - 0.075, 0.0), vec3(0.014, 0.075, 9000.0)), -recess), p.z - ZEND);
+  res = opU(res, vec2(min(skL, skR), M_TRIM));
+
+  // far end wall + stair window
+  float ewh = sdBox(vec3(p.x, p.y - 1.62, p.z - ZEND - 19.9), vec3(1.02, 1.0, 20.0));
+  float we = max(max(ZEND - p.z, -ewh), abs(p.x) - CW - 0.5);
+  res = opU(res, vec2(we, M_WALL));
+  vec3 ep = vec3(p.x, p.y - 1.62, p.z - (ZEND + 0.05));
+  float efr = max(sdBox(ep, vec3(1.05, 1.03, 0.038)), -sdBox(ep, vec3(1.0, 0.98, 0.1)));
+  efr = min(efr, sdBox(ep, vec3(0.026, 1.0, 0.033)));
+  efr = min(efr, sdBox(ep - vec3(0.0, 0.32, 0.0), vec3(1.0, 0.024, 0.033)));
+  res = opU(res, vec2(efr, M_FRAME));
+
+  return res;
+}
+
+vec3 calcNormal(vec3 p){
+  vec2 e = vec2(1.0, -1.0) * 0.0009;
+  return normalize(e.xyy * map(p + e.xyy).x + e.yyx * map(p + e.yyx).x +
+                   e.yxy * map(p + e.yxy).x + e.xxx * map(p + e.xxx).x);
+}
+
+vec2 trace(vec3 ro, vec3 rd, float tmax, int steps){
+  float t = 0.015, m = -1.0;
+  for(int i = 0; i < 320; i++){
+    if(i >= steps) break;
+    vec3 p = ro + rd * t;
+    vec2 h = map(p);
+    if(h.x < 0.0007 * t + 0.0005){ m = h.y; break; }
+    t += h.x * 0.86;
+    if(t > tmax){ m = -1.0; break; }
+  }
+  return vec2(t, m);
+}
+
+float calcAO(vec3 p, vec3 n){
+  float occ = 0.0, sca = 1.0;
+  for(int i = 0; i < 8; i++){
+    if(i >= uAOTaps) break;
+    float h = 0.015 + 0.16 * float(i) / float(max(uAOTaps - 1, 1));
+    float d = map(p + n * h).x;
+    occ += (h - d) * sca;
+    sca *= 0.80;
+  }
+  return clamp(1.0 - 1.5 * occ, 0.0, 1.0);
+}
+
+float softShadowLocal(vec3 ro, vec3 rd, float tmax){
+  float res = 1.0, t = 0.012;
+  for(int i = 0; i < 28; i++){
+    float h = map(ro + rd * t).x;
+    if(h < 0.0006) return 0.0;
+    res = min(res, 12.0 * h / t);
+    t += clamp(h, 0.01, 0.22);
+    if(t > tmax) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------- glazing
+float glassGrime(vec2 yz){
+  float streak = fbm2(vec2(yz.y * 3.1, yz.x * 17.0));
+  float film   = fbm2(yz * 2.3);
+  float g = 0.80 + 0.20 * film - 0.20 * smoothstep(0.45, 0.85, streak);
+  return clamp(g, 0.45, 1.0);
+}
+float paneMask(float y, float zf, float w){
+  float m = band(abs(y - WCY), WHH - 0.010, w) * band(abs(zf), WHW - 0.010, w);
+  m *= 1.0 - band(abs(zf), 0.030, w);
+  m *= 1.0 - band(abs(y - (WCY + 0.34)), 0.028, w);
+  return m;
+}
+float openMask(float y, float zf, float w){
+  return band(abs(y - WCY), WHH - 0.004, w) * band(abs(zf), WHW - 0.004, w);
+}
+
+// analytic visibility of the sun through the glazing
+float sunWindowVis(vec3 p){
+  vec3 L = uSun;
+  float vis = 0.0;
+  float tCe  = (L.y > 0.0001) ? (CH - p.y) / L.y : 1e9;
+  float tEnd = (L.z > 0.0001) ? (ZEND - p.z) / L.z : 1e9;
+  float tIn  = (L.x < -0.0001) ? (-CW - p.x) / L.x : 1e9;
+  float tOut = (L.x < -0.0001) ? (-CW - 0.24 - p.x) / L.x : 1e9;
+  if(tIn > 0.0 && tIn < tCe && tIn < tEnd){
+    vec3 a = p + L * tIn;
+    vec3 b = p + L * tOut;
+    float za = mod(a.z - WOFF, PITCH) - PITCH * 0.5;
+    float zb = mod(b.z - WOFF, PITCH) - PITCH * 0.5;
+    float m = paneMask(a.y, za, 0.003 + 0.008 * tIn) * openMask(b.y, zb, 0.003 + 0.008 * tOut);
+    vis = m * glassGrime(vec2(a.y, a.z));
+  } else if(tEnd > 0.0 && tEnd < tCe && tEnd < tIn){
+    vec3 a = p + L * tEnd;
+    float w = 0.004 + 0.010 * tEnd;
+    float m = band(abs(a.x), 0.99, w) * band(abs(a.y - 1.62), 0.97, w);
+    m *= 1.0 - band(abs(a.x), 0.028, w);
+    m *= 1.0 - band(abs(a.y - 1.94), 0.026, w);
+    vis = m * 0.92;
+  }
+  return vis;
+}
+float sunVis(vec3 p, vec3 n){
+  float v = sunWindowVis(p);
+  if(v <= 0.002) return 0.0;
+  if(uLocalSh == 1) v *= softShadowLocal(p + n * 0.008, uSun, 2.6);
+  return v;
+}
+
+// ---------------------------------------------------------------- sky
+vec3 skyCol(vec3 rd){
+  float h = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 zen = vec3(0.42, 0.60, 1.00);
+  vec3 hor = vec3(1.55, 1.02, 0.62);
+  vec3 c = mix(hor, zen, smoothstep(0.48, 0.92, h));
+  float s = max(dot(rd, uSun), 0.0);
+  c += vec3(1.0, 0.72, 0.42) * (pow(s, 6.0) * 0.55 + pow(s, 260.0) * 26.0);
+  c = mix(vec3(1.35, 0.96, 0.60), c, smoothstep(-0.24, 0.06, rd.y));
+  float ground = band(rd.y, -0.03, 0.05);
+  c = mix(c, vec3(0.55, 0.42, 0.32) * 1.6, ground * 0.35);
+  return c * 3.3;
+}
+
+// ---------------------------------------------------------------- materials
+struct Surf { vec3 alb; float rough; float metal; };
+
+// world-space pixel footprint of the currently shaded point (texture LOD)
+float gFoot = 0.001;
+float gFootMin = 0.001;   // footprint across the view direction (anisotropic detail)
+float gPx = 0.002;   // angular size of one pixel
+vec3 gRefl = vec3(0.0);
+float gFres = 0.0;
+// 1 -> keep detail of the given spatial frequency (cycles/m), 0 -> it is sub-pixel
+float dfade(float freq){ return 1.0 - smoothstep(0.28, 0.92, gFoot * freq); }
+float dfadeX(float freq){ return 1.0 - smoothstep(0.28, 0.92, gFootMin * freq); }
+
+Surf getSurf(vec3 p, inout vec3 n, float mat){
+  Surf s;
+  s.alb = vec3(0.5); s.rough = 0.6; s.metal = 0.0;
+
+  if(mat == M_FLOOR){
+    const float TS = 0.60;      // 60 cm porcelain tiles
+    const float GW = 0.0040;    // half grout width
+    vec2 uv = p.xz / TS;
+    vec2 id = floor(uv);
+    vec2 f = fract(uv) - 0.5;
+    vec2 d = (0.5 - abs(f)) * TS;
+    float e = min(d.x, d.y);
+    float aa = max(gFoot * 0.45, 0.0007);
+    float tile = smoothstep(GW - aa, GW + aa * 1.6, e);
+    float r1 = hash12(id + 3.1);
+    float r2 = hash12(id * 1.7 + 9.4);
+    float r3 = hash12(id * 2.9 + 21.3);
+    // fired ceramic body: warm cream with faint clouding
+    vec3 base = mix(vec3(0.400, 0.360, 0.302), vec3(0.545, 0.500, 0.428), r1);
+    base *= 0.93 + 0.14 * fbm2(p.xz * 2.2 + id * 5.7);
+    float vein = fbm2(p.xz * 7.0 + id * 3.1) * dfade(7.0);
+    base = mix(base, base * vec3(0.90, 0.88, 0.86), smoothstep(0.55, 0.85, vein) * 0.45);
+    float speck = fbm2(p.xz * 55.0);
+    base = mix(base, base * 0.86, smoothstep(0.58, 0.88, speck) * 0.34 * dfade(55.0) * uDetail);
+    vec3 grout = vec3(0.215, 0.196, 0.176) * (0.85 + 0.30 * fbm2(p.xz * 30.0) * dfade(30.0));
+    s.alb = mix(grout, base, tile);
+    // glaze: glossy, with drier smudged patches and a worn walking lane
+    float smudge = fbm2(p.xz * 1.25 + 4.0);
+    float lane = smoothstep(1.30, 0.30, abs(p.x - 0.15));
+    float rr = mix(0.040, 0.135, smoothstep(0.30, 0.74, smudge));
+    rr = mix(rr, rr + 0.065, lane * 0.6);
+    rr += 0.035 * r3;
+    s.rough = mix(0.80, rr, tile);
+    // pressed-edge bevel, per-tile warp, micro relief - all footprint aware
+    float bf = dfade(42.0);
+    vec2 tilt = sign(f) * vec2(smoothstep(0.017, 0.0, d.x), smoothstep(0.017, 0.0, d.y)) * 0.55 * bf;
+    tilt += f * (r2 - 0.5) * 0.085;
+    float mf = dfade(60.0);
+    if(mf > 0.01){
+      float mb = fbm2(p.xz * 60.0);
+      tilt += vec2(fbm2(p.xz * 60.0 + 13.0) - mb, fbm2(p.xz * 60.0 + 51.0) - mb) * 0.10 * mf * uDetail;
+    }
+    s.rough = min(s.rough + 0.16 * (1.0 - mf) * tile, 0.9);
+    // ageing: dried mop stains, an odd discoloured tile, dust drifted against the skirting
+    float stain = fbm2(p.xz * 0.85 + 17.0);
+    float st = smoothstep(0.60, 0.80, stain) * tile;
+    s.alb = mix(s.alb, s.alb * vec3(0.80, 0.775, 0.735), st * 0.55);
+    s.rough = mix(s.rough, 0.40, st * 0.5);
+    float aged = smoothstep(0.90, 0.97, r3);
+    s.alb = mix(s.alb, s.alb * vec3(0.86, 0.83, 0.79), aged * 0.8);
+    // grime creeping out of the grout lines
+    float halo = 1.0 - smoothstep(GW, GW + 0.045, e);
+    s.alb *= 1.0 - 0.20 * halo * tile * (0.5 + 0.5 * fbm2(p.xz * 3.0));
+    s.rough = mix(s.rough, min(s.rough + 0.18, 0.9), halo * tile * 0.6);
+    // chipped tile corners
+    float dc = length((0.5 - abs(f)) * TS);
+    float chipR = 0.010 + 0.022 * hash12(id + 5.5);
+    float aaC = max(gFoot * 0.6, 0.001);
+    float chip = step(0.885, hash12(id + 8.8)) * (1.0 - smoothstep(chipR - aaC, chipR + aaC, dc));
+    s.alb = mix(s.alb, vec3(0.325, 0.300, 0.265), chip * 0.85);
+    s.rough = mix(s.rough, 0.78, chip);
+    float dust = smoothstep(1.16, 1.45, abs(p.x));
+    s.alb = mix(s.alb, s.alb * 0.92 + vec3(0.045, 0.041, 0.035), dust * 0.75);
+    s.rough = mix(s.rough, 0.62, dust * 0.7);
+    float scuffF = fbm2(p.xz * 6.5) * dfade(6.5);
+    s.rough = mix(s.rough, min(s.rough + 0.12, 0.9), smoothstep(0.55, 0.85, scuffF) * 0.6 * tile);
+    // polish scratches drawn out along the walking direction - roughness only
+    float scf = dfadeX(70.0) * uDetail;
+    if(scf > 0.01){
+      float s1 = fbm2(vec2(p.x * 70.0, p.z * 1.6));
+      float s2 = fbm2(vec2(p.x * 26.0 + 9.0, p.z * 0.7));
+      float scr = smoothstep(0.60, 0.92, s1 * 0.65 + s2 * 0.45);
+      s.rough = min(s.rough + 0.20 * scr * scf * tile, 0.9);
+    }
+    n = normalize(n + vec3(tilt.x, 0.0, tilt.y) * mix(0.30, 1.0, tile));
+  }
+  else if(mat == M_WALL){
+    bool endw = p.z > ZEND - 0.03;
+    float dado = smoothstep(1.19, 1.16, p.y);
+    vec3 up = vec3(0.605, 0.565, 0.505);
+    vec3 lo = vec3(0.255, 0.285, 0.245);
+    float grime = fbm2(p.zy * 1.6) * 0.5 + fbm2(p.zy * 0.42) * 0.5;
+    up *= 0.82 + 0.30 * grime;
+    lo *= 0.80 + 0.34 * grime;
+    s.alb = mix(up, lo, dado);
+    // trim line
+    float ln = band(abs(p.y - 1.175), 0.006, 0.004);
+    s.alb = mix(s.alb, vec3(0.20, 0.22, 0.19), ln * 0.8);
+    // patchy repaint + scuffs + hand grime around waist height
+    float paintPatch = fbm2(p.zy * 0.55 + 31.0);
+    s.alb *= 0.93 + 0.14 * smoothstep(0.35, 0.75, paintPatch);
+    float scuff = fbm2(vec2(p.z * 2.6, p.y * 2.2) + 5.0) * dfade(2.6);
+    s.alb *= 1.0 - 0.20 * smoothstep(0.58, 0.86, scuff) * (1.0 - smoothstep(0.15, 1.5, p.y));
+    float hand = fbm2(vec2(p.z * 1.4, p.y * 6.0)) ;
+    s.alb *= 1.0 - 0.13 * smoothstep(0.55, 0.85, hand) * exp(-abs(p.y - 1.0) * 2.2);
+    // hairline cracks and damp blotches in the plaster
+    float ck = dfade(9.0) * uDetail;
+    if(ck > 0.01 && dado < 0.5){
+      float cn = fbm2(p.zy * 1.15 + 41.0);
+      float cw = 0.012 + 0.02 * gFoot * 60.0;
+      float crack = (1.0 - smoothstep(0.0, cw, abs(cn - 0.5))) * smoothstep(0.35, 0.6, fbm2(p.zy * 0.35 + 3.0));
+      s.alb *= 1.0 - 0.55 * crack * ck;
+    }
+    float damp = smoothstep(0.55, 0.80, fbm2(p.zy * 0.8 + 61.0)) * (1.0 - smoothstep(0.05, 1.05, p.y));
+    s.alb *= 1.0 - 0.22 * damp;
+    s.rough = min(s.rough + 0.10 * damp, 0.98);
+    // roller texture: faint vertical streaks in the paint sheen
+    float rf = dfade(30.0) * uDetail;
+    if(rf > 0.01){
+      float roll = fbm2(vec2(p.z * 30.0, p.y * 1.3));
+      s.rough = clamp(s.rough + 0.10 * (roll - 0.5) * rf, 0.05, 0.98);
+      s.alb *= 1.0 + 0.05 * (roll - 0.5) * rf;
+    }
+    // floor grime + rain streaks under the sills
+    s.alb *= mix(0.55, 1.0, smoothstep(0.0, 0.55, p.y));
+    if(p.x < 0.0 && !endw){
+      float zf = mod(p.z - WOFF, PITCH) - PITCH * 0.5;
+      float below = smoothstep(WCY - WHH, WCY - WHH - 0.75, p.y) * band(abs(zf), WHW, 0.25);
+      float st = fbm2(vec2(p.z * 26.0, p.y * 1.1));
+      s.alb *= 1.0 - 0.30 * below * smoothstep(0.42, 0.85, st);
+    }
+    s.rough = mix(0.92, 0.42, dado);
+    s.rough *= 0.9 + 0.2 * grime;
+    float wf2 = dfade(22.0);
+    if(wf2 > 0.01){
+      float h0 = fbm2(p.zy * 22.0);
+      vec2 gg = vec2(fbm2(p.zy * 22.0 + 7.0) - h0, fbm2(p.zy * 22.0 + 21.0) - h0) * wf2;
+      vec3 t1 = normalize(cross(n, vec3(0.0, 1.0, 0.0)) + vec3(0.0001));
+      vec3 t2 = cross(n, t1);
+      n = normalize(n + (t1 * gg.x + t2 * gg.y) * mix(0.34, 0.12, dado) * uDetail);
+      s.rough = min(s.rough + 0.10 * (1.0 - wf2), 0.95);
+    }
+  }
+  else if(mat == M_CEIL){
+    float g = fbm2(p.xz * 1.3);
+    s.alb = vec3(0.60, 0.575, 0.545) * (0.80 + 0.28 * g);
+    s.alb *= mix(0.72, 1.0, smoothstep(0.9, 1.45, CW - abs(p.x)) * 0.5 + 0.5);
+    // old leak stains
+    float leak = smoothstep(0.56, 0.78, fbm2(p.xz * 0.75 + 3.3));
+    s.alb = mix(s.alb, vec3(0.44, 0.375, 0.295), leak * 0.55);
+    s.rough = 0.95;
+    float cf = dfade(24.0);
+    if(cf > 0.01){
+      float h0 = fbm2(p.xz * 24.0);
+      n = normalize(n + vec3(fbm2(p.xz * 24.0 + 5.0) - h0, 0.0, fbm2(p.xz * 24.0 + 17.0) - h0) * 0.24 * cf * uDetail);
+    }
+  }
+  else if(mat == M_FRAME){
+    float chip = fbm2(p.zy * 12.0);
+    s.alb = vec3(0.48, 0.47, 0.435) * (0.78 + 0.34 * chip);
+    s.rough = mix(0.30, 0.62, smoothstep(0.4, 0.75, chip));
+  }
+  else if(mat == M_SILL){
+    float v = fbm2(p.zx * 5.0) * 0.6 + fbm2(p.zx * 17.0) * 0.4;
+    s.alb = vec3(0.60, 0.575, 0.53) * (0.80 + 0.30 * v);
+    s.rough = mix(0.20, 0.45, smoothstep(0.35, 0.75, v));
+  }
+  else if(mat == M_DOOR){
+    float gfd = dfade(20.0);
+    float grain = fbm2(vec2(p.z * 3.0, p.y * 20.0)) * gfd + 0.5 * (1.0 - gfd);
+    float wear = fbm2(p.zy * 1.7);
+    s.alb = vec3(0.215, 0.120, 0.080) * (0.72 + 0.28 * grain + 0.40 * wear);
+    s.rough = mix(0.20, 0.42, smoothstep(0.3, 0.8, wear)) + 0.10 * (1.0 - gfd);
+    float zdd = mod(p.z - DOFF, PITCH) - PITCH * 0.5;
+    float aaD = max(gFoot * 0.7, 0.0012);
+    float plate = band(abs(zdd), 0.085, aaD) * band(abs(p.y - 1.90), 0.038, aaD);
+    s.alb = mix(s.alb, vec3(0.40, 0.375, 0.335), plate * 0.92);
+    s.rough = mix(s.rough, 0.24, plate);
+    float peep = band(length(vec2(zdd, p.y - 1.63)), 0.013, aaD);
+    s.alb = mix(s.alb, vec3(0.32, 0.29, 0.24), peep);
+    s.metal = max(s.metal, peep * 0.85);
+    s.rough = mix(s.rough, 0.18, peep);
+    if(gfd > 0.01){
+      float h0 = fbm2(vec2(p.z * 3.0, p.y * 20.0));
+      n = normalize(n + vec3(0.0, (fbm2(vec2(p.z * 3.0, p.y * 20.0 + 3.0)) - h0) * 0.3 * gfd,
+                                  (fbm2(vec2(p.z * 3.0 + 3.0, p.y * 20.0)) - h0) * 0.3 * gfd));
+    }
+  }
+  else if(mat == M_TRIM){
+    float w = fbm2(p.zy * 8.0);
+    s.alb = vec3(0.175, 0.135, 0.105) * (0.75 + 0.5 * w);
+    s.rough = 0.34;
+  }
+  else if(mat == M_METAL){
+    s.alb = vec3(0.62, 0.58, 0.52);
+    s.metal = 1.0;
+    s.rough = 0.28 + 0.22 * fbm2(p.zy * 9.0);
+  }
+  else if(mat == M_MAT){
+    float fib = fbm2(vec2(p.z * 150.0, p.x * 150.0)) * dfade(150.0);
+    float we = fbm2(p.xz * 5.0);
+    s.alb = vec3(0.085, 0.070, 0.058) * (0.75 + 0.7 * we + 0.5 * fib);
+    s.rough = 0.94;
+    float ff = dfade(90.0);
+    if(ff > 0.01){
+      float h0 = fbm2(p.xz * 90.0);
+      n = normalize(n + vec3(fbm2(p.xz * 90.0 + 4.0) - h0, 0.0, fbm2(p.xz * 90.0 + 12.0) - h0) * 0.8 * ff * uDetail);
+    }
+  }
+  else if(mat == M_PIPE){
+    float pw = fbm2(p.zy * 6.0);
+    s.alb = vec3(0.52, 0.505, 0.475) * (0.8 + 0.35 * pw);
+    s.rough = 0.42;
+  }
+  else if(mat == M_LAMP){
+    s.alb = vec3(0.66, 0.63, 0.58);
+    s.rough = 0.24;
+  }
+  return s;
+}
+
+vec3 ggxSpec(vec3 n, vec3 v, vec3 l, float rough, vec3 F0){
+  vec3 h = normalize(v + l);
+  float ndl = max(dot(n, l), 0.0);
+  float ndv = max(dot(n, v), 1e-4);
+  float ndh = max(dot(n, h), 0.0);
+  float vdh = max(dot(v, h), 0.0);
+  float a = max(rough * rough, 0.0025);
+  float a2 = a * a;
+  float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+  float D = a2 / (PI * dd * dd);
+  float k = a * 0.5;
+  float G = (ndl / (ndl * (1.0 - k) + k)) * (ndv / (ndv * (1.0 - k) + k));
+  vec3 F = F0 + (1.0 - F0) * pow(1.0 - vdh, 5.0);
+  return D * G * F / (4.0 * ndv * max(ndl, 1e-4)) * ndl;
+}
+
+float windowProx(vec3 p){
+  float zf = mod(p.z - WOFF, PITCH) - PITCH * 0.5;
+  float along = 0.50 + 0.50 * band(abs(zf), WHW + 0.35, 1.15);
+  float lat = clamp(1.0 - (p.x + CW) / (2.0 * CW + 1.2), 0.3, 1.0);
+  float endw = 0.35 * smoothstep(10.0, ZEND, p.z);
+  return clamp(along * mix(0.6, 1.0, lat) + endw, 0.0, 1.35);
+}
+
+// daylight arriving straight from the glazing - analytic, noise free
+vec3 ambSky(vec3 p, vec3 n, float ao){
+  float wf = clamp(dot(n, normalize(vec3(-1.0, 0.32, 0.10))), 0.0, 1.0);
+  return uSkyCol * (0.40 + 1.15 * wf) * windowProx(p) * 1.35 * ao * uAmb;
+}
+// light already bounced around inside the corridor
+vec3 ambBounce(vec3 p, vec3 n, float ao){
+  float upness = clamp(0.5 - 0.5 * n.y, 0.0, 1.0);
+  return uSunCol * 0.105 * (0.30 + 0.70 * upness) * windowProx(p) * (0.55 + 0.45 * exp(-p.y * 0.4)) * ao * uAmb;
+}
+vec3 ambientTerm(vec3 p, vec3 n, Surf s, float ao){
+  return ambSky(p, n, ao) + ambBounce(p, n, ao);
+}
+
+// direct-only shading, used for secondary rays
+vec3 shadeCheap(vec3 p, vec3 rd, vec3 n, float mat, bool withSpec){
+  Surf s = getSurf(p, n, mat);
+  float ao = calcAO(p, n);
+  float ndl = max(dot(n, uSun), 0.0);
+  float vis = (ndl > 0.0) ? sunWindowVis(p) : 0.0;
+  vec3 col = s.alb * (1.0 - s.metal) * uSunCol * vis * ndl;
+  if(withSpec){
+    vec3 F0 = mix(vec3(0.045), s.alb, s.metal);
+    col += min(ggxSpec(n, -rd, uSun, s.rough, F0), vec3(4.0)) * uSunCol * vis;
+  }
+  col += s.alb * ambientTerm(p, n, s, ao);
+  return col;
+}
+
+vec3 cosineDir(vec3 n, float u1, float u2){
+  float r = sqrt(u1);
+  float a = 6.2831853 * u2;
+  vec3 t = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 b = cross(n, t);
+  return normalize(t * (r * cos(a)) + b * (r * sin(a)) + n * sqrt(max(0.0, 1.0 - u1)));
+}
+
+vec3 shadeFull(vec3 p, vec3 rd, vec3 n, float mat){
+  Surf s = getSurf(p, n, mat);
+  float ao = calcAO(p, n);
+  vec3 V = -rd;
+  float ndl = max(dot(n, uSun), 0.0);
+  float vis = (ndl > 0.0) ? sunVis(p, n) : 0.0;
+  vec3 F0 = mix(vec3(0.048 + 0.030 * (1.0 - smoothstep(0.05, 0.35, s.rough))), s.alb, s.metal);
+
+  vec3 col = s.alb * (1.0 - s.metal) * uSunCol * vis * ndl;
+  col += min(ggxSpec(n, V, uSun, s.rough, F0), vec3(24.0)) * uSunCol * vis;
+
+  float footSave = gFoot;
+  // indirect
+#ifdef ANGLE_D3D11
+  {
+    // D3D11 compact: analytic sky bounce + cheap tint, no secondary ray.
+    // (The full GI ray is what pushes ANGLE-D3D11 link time to ~60s; kept compact
+    //  so first load is ~35s and stable on Windows.)
+    vec3 gi = uSkyCol * 0.12;
+    col += s.alb * (1.0 - s.metal) * (ambSky(p, n, ao) + gi * mix(0.6, 1.0, ao) * 1.05);
+  }
+#else
+  if(uGI == 1){
+    // sky through the windows stays analytic; the ray only gathers interior bounce
+    vec2 gu = seqR2(2.0);
+    vec3 gd = cosineDir(n, gu.x, gu.y);
+    gFoot = max(footSave, 0.06);
+    vec2 gh = trace(p + n * 0.01, gd, 30.0, uMaxSteps / 2);
+    vec3 gi = vec3(0.0);
+    if(gh.y > 0.0){
+      vec3 gp = p + n * 0.01 + gd * gh.x;
+      vec3 gn = calcNormal(gp);
+      gi = min(shadeCheap(gp, gd, gn, gh.y, false), vec3(2.6));
+    }
+    gFoot = footSave;
+    col += s.alb * (1.0 - s.metal) * (ambSky(p, n, ao) + gi * mix(0.6, 1.0, ao) * 1.05);
+  } else {
+    col += s.alb * (1.0 - s.metal) * ambientTerm(p, n, s, ao);
+  }
+#endif
+
+  // glossy reflection
+#ifdef ANGLE_D3D11
+  {
+    // D3D11 compact: analytic Fresnel sheen only, no secondary ray (links cleanly)
+    float fres = clamp(0.052 + 0.948 * pow(1.0 - max(dot(n, V), 0.0), 5.0), 0.0, 1.0);
+    fres = mix(fres, 1.0, s.metal);
+    fres *= mix(1.0, 0.35, smoothstep(0.08, 0.46, s.rough));
+    vec3 rc = uSkyCol * 0.30 + uSunCol * 0.10;
+    gRefl = rc * mix(vec3(1.0), s.alb, s.metal);
+    gFres = clamp(fres, 0.0, 0.92) * ao;
+    col = mix(col, gRefl, gFres);
+  }
+#else
+  if(s.rough < 0.46){
+    vec3 rdir = reflect(rd, n);
+    float rr = s.rough * s.rough;
+    rdir = sampleCone(rdir, rr * 0.85, seqR2(3.0));
+    if(dot(rdir, n) < 0.02) rdir = normalize(rdir + n * 0.3);
+    vec2 rh = trace(p + n * 0.012, rdir, 42.0, uMaxSteps);
+    vec3 rc;
+    if(rh.y > 0.0){
+      vec3 rp = p + n * 0.012 + rdir * rh.x;
+      vec3 rn = calcNormal(rp);
+      float fmSave = gFootMin;
+      gFoot = footSave + rh.x * gPx * (1.0 + s.rough * 14.0);
+      gFootMin = fmSave + rh.x * gPx * (1.0 + s.rough * 14.0);
+      rc = shadeCheap(rp, rdir, rn, rh.y, true);
+      gFoot = footSave; gFootMin = fmSave;
+      rc = mix(rc, uSunCol * 0.045 + uSkyCol * 0.55, 1.0 - exp(-rh.x * 0.018));
+    } else {
+      rc = skyCol(rdir);
+    }
+    rc = min(rc, vec3(9.0));
+    float fres = clamp(0.052 + 0.948 * pow(1.0 - max(dot(n, V), 0.0), 5.0), 0.0, 1.0);
+    fres = mix(fres, 1.0, s.metal);
+    fres *= mix(1.0, 0.35, smoothstep(0.08, 0.46, s.rough));
+    gRefl = rc * mix(vec3(1.0), s.alb, s.metal);
+    gFres = clamp(fres, 0.0, 0.92) * ao;
+    col = mix(col, gRefl, gFres);
+  }
+#endif
+  return col;
+}
+
+// dust-laden air, lit through the glazing
+vec3 volumetric(vec3 ro, vec3 rd, float tmax, out float trans){
+  trans = 1.0;
+  vec3 acc = vec3(0.0);
+  int N = uVolSteps;
+  float far = min(tmax, 44.0);
+  float g = 0.70;
+  float cosA = dot(rd, uSun);
+  float ph = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * cosA, 1.5));
+  float jit = seqR2(4.0).x;
+  float tPrev = 0.0;
+  for(int i = 0; i < 96; i++){
+    if(i >= N) break;
+    float u = (float(i) + jit) / float(N);
+    float t = far * pow(u, 1.55);
+    float dt = max(t - tPrev, 1e-4);
+    tPrev = t;
+    vec3 p = ro + rd * t;
+    float lodT = exp(-dt * 0.55);
+    float lodM = exp(-dt * 1.7);
+    float turb = mix(0.95, 0.55 + 0.80 * fbm3(p * 0.5 + vec3(0.0, uTime * 0.013, uTime * 0.02)), lodT);
+    float mote = mix(0.30, smoothstep(0.50, 0.97, fbm3(p * 2.4 + vec3(uTime * 0.03, uTime * 0.05, 0.0))), lodM);
+    float sigmaE = uFog * 0.0115 * turb * (1.0 + 0.35 * exp(-p.y * 0.7));
+    float sigmaS = uFog * 0.0155 * turb * (1.0 + 1.5 * mote);
+    float v = sunWindowVis(p);
+    vec3 inl = uSunCol * v * ph * 10.0 + (uSkyCol * 1.15 + uSunCol * 0.03) * windowProx(p);
+    acc += trans * inl * sigmaS * dt;
+    trans *= exp(-sigmaE * dt);
+    if(trans < 0.015) break;
+  }
+  return acc;
+}
+
+void main(){
+  seedRng();
+  gPx = 2.0 / (uRes.y * uFocal);
+  vec2 jit = seqR2(0.0) - 0.5;
+  vec2 uv = (gl_FragCoord.xy + jit - 0.5 * uRes) / uRes.y;
+  vec3 rd = normalize(uCam * vec3(uv, uFocal));
+  vec3 ro = uCamPos;
+  if(uAperture > 0.0001){
+    float fd = uFocus / max(dot(rd, uCam[2]), 0.2);
+    vec3 fp = ro + rd * fd;
+    vec2 au = seqR2(1.0);
+    float a = 6.2831853 * au.x;
+    float r = uAperture * sqrt(au.y);
+    ro += uCam * vec3(cos(a) * r, sin(a) * r, 0.0);
+    rd = normalize(fp - ro);
+  }
+
+  vec2 h = trace(ro, rd, 70.0, uMaxSteps);
+  vec3 col;
+  if(h.y > 0.0){
+    vec3 p = ro + rd * h.x;
+    vec3 n = calcNormal(p);
+    float dofBlur = uAperture * abs(1.0 - uFocus / max(h.x, 0.05)) * 0.45;
+    gFootMin = h.x * gPx + dofBlur;
+    gFoot = h.x * gPx / clamp(abs(dot(n, rd)), 0.10, 1.0) + dofBlur;
+    col = shadeFull(p, rd, n, h.y);
+    if(uDbg > 0){
+      vec3 nn = n;
+      Surf sd = getSurf(p, nn, h.y);
+      if(uDbg == 1) col = vec3(sunWindowVis(p));
+      else if(uDbg == 2) col = sd.alb;
+      else if(uDbg == 3) col = n * 0.5 + 0.5;
+      else if(uDbg == 4) col = sd.alb * uSunCol * sunWindowVis(p) * max(dot(n, uSun), 0.0);
+      else if(uDbg == 5) col = vec3(h.y / 9.0);
+      else if(uDbg == 6) col = vec3(calcAO(p, n));
+      else if(uDbg == 7) col = vec3(sd.rough);
+      else if(uDbg == 8) col = gRefl * gFres;
+      else if(uDbg == 9) col = vec3(gFres);
+      fragColor = vec4(col, 1.0); return;
+    }
+  } else {
+    col = skyCol(rd);
+    if(uDbg > 0){ fragColor = vec4(uDbg == 1 || uDbg == 4 ? col * 0.05 : vec3(0.0), 1.0); return; }
+  }
+
+  // dirty glazing seen head on
+  if(rd.x < -0.001){
+    float tg = (GLX - ro.x) / rd.x;
+    if(tg > 0.02 && tg < h.x){
+      vec3 q = ro + rd * tg;
+      float zf = mod(q.z - WOFF, PITCH) - PITCH * 0.5;
+      float m = openMask(q.y, zf, 0.006) * (1.0 - band(abs(zf), 0.032, 0.006)) * (1.0 - band(abs(q.y - (WCY + 0.34)), 0.03, 0.006));
+      if(m > 0.001){
+        float grime = glassGrime(vec2(q.y, q.z));
+        float fres = 0.04 + 0.96 * pow(1.0 - abs(rd.x), 5.0);
+        col *= mix(vec3(1.0), vec3(0.93, 0.965, 0.925) * mix(0.75, 1.0, grime), m);
+        vec3 sheen = uSkyCol * 2.2 * fres + uSunCol * 0.16 * (1.0 - grime) * max(dot(rd, uSun), 0.0);
+        col += sheen * m;
+      }
+    }
+  }
+
+  float trans;
+  vec3 inscat = volumetric(ro, rd, min(h.x, 70.0), trans);
+  col = col * trans + inscat;
+
+  col = max(col, vec3(0.0));
+  col = min(col, vec3(120.0));
+  fragColor = vec4(col, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_accum">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uPrev, uCur;
+uniform float uBlend;
+void main(){
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  vec4 a = texelFetch(uPrev, c, 0);
+  vec4 b = texelFetch(uCur, c, 0);
+  fragColor = mix(a, b, uBlend);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_denoise">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uStrength;   // 0 = passthrough
+uniform float uStep;
+float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+void main(){
+  vec2 uv = gl_FragCoord.xy * uTexel;
+  vec3 c0 = texture(uTex, uv).rgb;
+  if(uStrength <= 0.001){ fragColor = vec4(c0, 1.0); return; }
+  float l0 = lum(c0);
+  float sigma = mix(0.55, 0.10, clamp(uStrength, 0.0, 1.0)) * (l0 + 0.06);
+  vec3 sum = c0; float wsum = 1.0;
+  const float k[3] = float[3](1.0, 0.65, 0.22);
+  for(int y = -2; y <= 2; y++){
+    for(int x = -2; x <= 2; x++){
+      if(x == 0 && y == 0) continue;
+      vec2 o = vec2(float(x), float(y)) * uStep * uTexel;
+      vec3 c = texture(uTex, uv + o).rgb;
+      float w = k[abs(x)] * k[abs(y)];
+      w *= exp(-abs(lum(c) - l0) / max(sigma, 1e-4));
+      sum += c * w; wsum += w;
+    }
+  }
+  fragColor = vec4(mix(c0, sum / wsum, clamp(uStrength, 0.0, 1.0)), 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_down">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uThreshold;
+uniform int uBright;
+void main(){
+  vec2 uv = gl_FragCoord.xy * uTexel * 2.0;
+  vec2 t = uTexel;
+  vec3 a = texture(uTex, uv + vec2(-2, 2) * t).rgb;
+  vec3 b = texture(uTex, uv + vec2( 0, 2) * t).rgb;
+  vec3 c = texture(uTex, uv + vec2( 2, 2) * t).rgb;
+  vec3 d = texture(uTex, uv + vec2(-2, 0) * t).rgb;
+  vec3 e = texture(uTex, uv).rgb;
+  vec3 f = texture(uTex, uv + vec2( 2, 0) * t).rgb;
+  vec3 g = texture(uTex, uv + vec2(-2,-2) * t).rgb;
+  vec3 hh= texture(uTex, uv + vec2( 0,-2) * t).rgb;
+  vec3 i = texture(uTex, uv + vec2( 2,-2) * t).rgb;
+  vec3 j = texture(uTex, uv + vec2(-1, 1) * t).rgb;
+  vec3 k = texture(uTex, uv + vec2( 1, 1) * t).rgb;
+  vec3 l = texture(uTex, uv + vec2(-1,-1) * t).rgb;
+  vec3 m = texture(uTex, uv + vec2( 1,-1) * t).rgb;
+  vec3 col = e * 0.125;
+  col += (a + c + g + i) * 0.03125;
+  col += (b + d + f + hh) * 0.0625;
+  col += (j + k + l + m) * 0.125;
+  if(uBright == 1){
+    float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    float k2 = max(lum - uThreshold, 0.0) / max(lum, 1e-4);
+    col *= k2 * smoothstep(0.0, 1.0, k2);
+  }
+  fragColor = vec4(col, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_up">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uScale;
+void main(){
+  vec2 uv = gl_FragCoord.xy * uTexel * 0.5;
+  vec2 t = uTexel * 1.0;
+  vec3 col = texture(uTex, uv).rgb * 4.0;
+  col += (texture(uTex, uv + vec2( 1, 0) * t).rgb + texture(uTex, uv + vec2(-1, 0) * t).rgb +
+          texture(uTex, uv + vec2( 0, 1) * t).rgb + texture(uTex, uv + vec2( 0,-1) * t).rgb) * 2.0;
+  col += texture(uTex, uv + vec2( 1, 1) * t).rgb + texture(uTex, uv + vec2(-1, 1) * t).rgb +
+         texture(uTex, uv + vec2( 1,-1) * t).rgb + texture(uTex, uv + vec2(-1,-1) * t).rgb;
+  fragColor = vec4(col / 16.0 * uScale, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_streak">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uStep;
+void main(){
+  vec2 uv = gl_FragCoord.xy * uTexel;
+  vec3 col = vec3(0.0);
+  float wsum = 0.0;
+  for(int i = -6; i <= 6; i++){
+    float w = exp(-float(i * i) / 18.0);
+    col += texture(uTex, uv + vec2(float(i) * uStep * uTexel.x, 0.0)).rgb * w;
+    wsum += w;
+  }
+  fragColor = vec4(col / wsum, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs_comp">
+#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform sampler2D uScene, uBloom, uStreak;
+uniform vec2 uRes;
+uniform float uExposure, uBloomAmt, uStreakAmt, uGrain, uTime, uCA, uVig, uSharp;
+
+vec3 aces(vec3 x){
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float h12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+vec3 sampleHDR(vec2 uv){
+  vec3 c = texture(uScene, uv).rgb;
+  c += texture(uBloom, uv).rgb * uBloomAmt;
+  c += texture(uStreak, uv).rgb * vec3(1.0, 0.72, 0.42) * uStreakAmt;
+  return c;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 d = uv - 0.5;
+  float r2 = dot(d, d);
+  vec3 col;
+  vec2 off = d * r2 * uCA * 0.0035;
+  col.r = sampleHDR(uv + off).r;
+  col.g = sampleHDR(uv).g;
+  col.b = sampleHDR(uv - off).b;
+
+  if(uSharp > 0.001){
+    vec2 t = 1.0 / uRes;
+    vec3 blur = (texture(uScene, uv + vec2(t.x, 0.0)).rgb + texture(uScene, uv - vec2(t.x, 0.0)).rgb +
+                 texture(uScene, uv + vec2(0.0, t.y)).rgb + texture(uScene, uv - vec2(0.0, t.y)).rgb) * 0.25;
+    col += (texture(uScene, uv).rgb - blur) * uSharp;
+    col = max(col, vec3(0.0));
+  }
+  col *= uExposure;
+  float l = luma(col);
+  col = mix(col, col * vec3(0.86, 0.97, 1.20), smoothstep(0.22, 0.0, l) * 0.55);
+  col = mix(col, col * vec3(1.07, 1.00, 0.90), smoothstep(0.30, 1.4, l) * 0.45);
+  col = mix(col, vec3(l), -0.10);
+  col = mix(col, vec3(luma(col)), smoothstep(2.0, 9.0, l) * 0.55);
+  col = aces(col * 1.05);
+  col *= 1.0 - uVig * pow(clamp(r2 * 2.1, 0.0, 1.0), 1.35);
+  float g = h12(gl_FragCoord.xy + fract(uTime) * 137.0);
+  col += (g - 0.5) * uGrain * (1.2 - luma(col) * 0.7);
+  col += (h12(gl_FragCoord.xy * 1.7) - 0.5) / 255.0;
+  fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}
+</script>
+
+<script>
+(function(){
+  "use strict";
+  var Q = new URLSearchParams(location.search);
+  var canvas = document.getElementById("glcanvas");
+  var gl = canvas.getContext("webgl2", { antialias:false, alpha:false, depth:false,
+    preserveDrawingBuffer:true, powerPreference:"high-performance" });
+  if(!gl){ document.body.innerHTML = "<p style='color:#fff;padding:40px'>WebGL2 required</p>"; return; }
+  var HDR = !!gl.getExtension("EXT_color_buffer_float");
+  gl.getExtension("OES_texture_float_linear");
+  if(!HDR) console.warn("EXT_color_buffer_float missing - falling back to 8 bit buffers");
+
+  // Detect the ANGLE D3D11 path: it hangs in linkProgram for the full
+  // secondary-ray shadeFull (GI + glossy reflection). We compile a compacted
+  // variant there so the page actually loads on Windows/NVIDIA-ANGLE.
+  var dbgInfo = gl.getExtension("WEBGL_debug_renderer_info");
+  var GPU_NAME = gl.getParameter(dbgInfo ? dbgInfo.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || "";
+  var IS_D3D11 = GPU_NAME.indexOf("D3D11") >= 0 || GPU_NAME.indexOf("Direct3D11") >= 0;
+  function src(id){
+    var s = document.getElementById(id).textContent.trim();
+    if(id === "fs_scene" && IS_D3D11){
+      s = s.replace("#version 300 es", "#version 300 es\n#define ANGLE_D3D11 1");
+    }
+    return s;
+  }
+  function compile(type, source, name){
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, source); gl.compileShader(sh);
+    if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+      console.error("SHADER " + name + ": " + gl.getShaderInfoLog(sh));
+      window.__SHADER_ERR = name + " :: " + gl.getShaderInfoLog(sh);
+    }
+    return sh;
+  }
+  var VS = compile(gl.VERTEX_SHADER, src("vs"), "vs");
+  function prog(fsId){
+    var p = gl.createProgram();
+    gl.attachShader(p, VS);
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, src(fsId), fsId));
+    gl.linkProgram(p);
+    if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+      console.error("LINK " + fsId + ": " + gl.getProgramInfoLog(p));
+      window.__SHADER_ERR = (window.__SHADER_ERR || "") + " LINK:" + fsId;
+    }
+    var u = {}, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for(var i = 0; i < n; i++){ var info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+    return { p:p, u:u };
+  }
+  var P = { scene:prog("fs_scene"), acc:prog("fs_accum"), down:prog("fs_down"), den:prog("fs_denoise"),
+            up:prog("fs_up"), streak:prog("fs_streak"), comp:prog("fs_comp") };
+  var vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+
+  function target(w, h){
+    var tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, HDR ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA,
+                  HDR ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    var fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return { tex:tex, fb:fb, w:w, h:h };
+  }
+  var RT = null;
+  function freeRT(){
+    if(!RT) return;
+    var all = [RT.scene, RT.accA, RT.accB, RT.den, RT.denB, RT.streakA, RT.streakB].concat(RT.mips);
+    for(var i = 0; i < all.length; i++){
+      if(!all[i]) continue;
+      gl.deleteTexture(all[i].tex); gl.deleteFramebuffer(all[i].fb);
+    }
+  }
+  function allocate(w, h){
+    freeRT();
+    RT = { scene:target(w, h), accA:target(w, h), accB:target(w, h), den:target(w, h), denB:target(w, h),
+           mips:[], streakA:null, streakB:null, w:w, h:h };
+    var mw = Math.max(2, w >> 1), mh = Math.max(2, h >> 1);
+    for(var i = 0; i < 5; i++){
+      RT.mips.push(target(mw, mh));
+      mw = Math.max(2, mw >> 1); mh = Math.max(2, mh >> 1);
+    }
+    RT.streakA = target(RT.mips[1].w, RT.mips[1].h);
+    RT.streakB = target(RT.mips[1].w, RT.mips[1].h);
+  }
+  function bind(t){
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
+    gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height);
+  }
+  function tex(unit, t){ gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); }
+  function draw(){ gl.drawArrays(gl.TRIANGLES, 0, 3); }
+
+  // ---------------------------------------------------------------- state
+  var CAMS = [
+    { pos:[0.55, 1.50, -2.20], yaw:-0.045, pitch:-0.055, fov:54, focus:8.0 },
+    { pos:[0.70, 1.40,  0.10], yaw:-0.30, pitch:-0.085, fov:56, focus:4.2 },
+    { pos:[0.85, 0.42,  1.20], yaw:-0.16, pitch:-0.02, fov:46, focus:6.0 },
+    { pos:[0.10, 1.62, 10.60], yaw:0.02, pitch:-0.02, fov:38, focus:12.0 }
+  ];
+  var S = {
+    pos:[0, 0, 0], yaw:0, pitch:0, fov:44, focus:9.5,
+    elev:parseFloat(Q.get("elev") || 17), azim:parseFloat(Q.get("azim") || 54),
+    exposure:parseFloat(Q.get("exp") || 1.12), fog:parseFloat(Q.get("fog") || 0.55),
+    aperture:parseFloat(Q.get("ap") || 0.007),
+    denoise:Q.get("denoise") !== "0", moved:0, sharp:parseFloat(Q.get("sharp") || "0.28"),
+    detail:parseFloat(Q.get("detail") || "1.0"),
+    quality:parseInt(Q.get("q") || "1", 10) || 1,
+    dbg:parseInt(Q.get("dbg") || "0", 10),
+    bloom:parseFloat(Q.get("bloom") || "0.36"), streak:parseFloat(Q.get("streak") || "0.09"),
+    grain:parseFloat(Q.get("grain") || "0.006"), ca:parseFloat(Q.get("ca") || "1.0"),
+    vig:parseFloat(Q.get("vig") || "0.42"), thr:parseFloat(Q.get("thr") || "1.4"),
+    amb:parseFloat(Q.get("amb") || "0.85"),
+    motion:Q.get("motion") === "1",
+    scale:parseFloat(Q.get("scale") || "0"),
+    samples:0, targetSamples:parseInt(Q.get("samples") || "0", 10),
+    t0:performance.now(), lastFrame:performance.now(), frameMs:16, keys:{}, dirty:true,
+    dynScale:0.4, lastAdapt:0, lastUp:0, auto:Q.get("auto") !== "0"
+  };
+  function applyCam(i){
+    var c = CAMS[i];
+    S.pos = c.pos.slice(); S.yaw = c.yaw; S.pitch = c.pitch; S.fov = c.fov; S.focus = c.focus;
+    S.dirty = true;
+  }
+  applyCam(parseInt(Q.get("cam") || "0", 10) % CAMS.length);
+
+  var QP = [
+    { steps:80,  vol:14, ao:3, gi:0, sh:0, scale:0.70 },
+    { steps:120, vol:22, ao:4, gi:0, sh:1, scale:0.85 },
+    { steps:150, vol:48, ao:5, gi:1, sh:1, scale:1.0 },
+    { steps:220, vol:80, ao:6, gi:1, sh:1, scale:1.0 }
+  ];
+  // while the camera is moving, drop the expensive terms and lean on the denoiser
+  var QMOVE = { steps:110, vol:18, ao:3, gi:0, sh:1 };
+
+  function resize(){
+    var q = QP[S.quality];
+    var sc = (S.scale > 0 ? S.scale : q.scale) * (S.scale > 0 ? 1.0 : S.dynScale);
+    var dpr = Math.min(window.devicePixelRatio || 1, 1.0);
+    var cw = Math.round(window.innerWidth * dpr), ch = Math.round(window.innerHeight * dpr);
+    if(Q.get("w")) cw = parseInt(Q.get("w"), 10);
+    if(Q.get("h")) ch = parseInt(Q.get("h"), 10);
+    canvas.width = cw; canvas.height = ch;
+    canvas.style.width = "100vw"; canvas.style.height = "100vh";
+    var rw = Math.max(64, Math.round(cw * sc)), rh = Math.max(64, Math.round(ch * sc));
+    var maxPix = parseInt(Q.get("maxres") || "1300000", 10) || 1300000;
+    if(rw * rh > maxPix){
+      var kk = Math.sqrt(maxPix / (rw * rh));
+      rw = Math.max(64, Math.round(rw * kk)); rh = Math.max(64, Math.round(rh * kk));
+    }
+    if(!RT || RT.w !== rw || RT.h !== rh){ allocate(rw, rh); S.dirty = true; }
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------------------------------------------------------------- input
+  var drag = false, lx = 0, ly = 0;
+  canvas.addEventListener("pointerdown", function(e){ drag = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointerup", function(e){ drag = false; });
+  canvas.addEventListener("pointermove", function(e){
+    if(!drag) return;
+    S.yaw += (e.clientX - lx) * 0.0022; S.pitch -= (e.clientY - ly) * 0.0022;
+    S.pitch = Math.max(-0.6, Math.min(0.6, S.pitch));
+    lx = e.clientX; ly = e.clientY; S.dirty = true;
+  });
+  canvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    S.fov = Math.max(20, Math.min(70, S.fov + e.deltaY * 0.02)); S.dirty = true;
+  }, { passive:false });
+  window.addEventListener("keydown", function(e){
+    S.keys[e.key.toLowerCase()] = true;
+    if(e.key === " "){ S.motion = !S.motion; e.preventDefault(); }
+    if(e.key.toLowerCase() === "h"){ document.querySelectorAll(".ui").forEach(function(n){ n.classList.toggle("hide"); }); }
+    if(e.key.toLowerCase() === "p"){ savePNG(); }
+    if("1234".indexOf(e.key) >= 0){ applyCam(parseInt(e.key, 10) - 1); }
+  });
+  window.addEventListener("keyup", function(e){ S.keys[e.key.toLowerCase()] = false; });
+
+  function savePNG(){
+    var a = document.createElement("a");
+    a.download = "golden_corridor_" + Date.now() + ".png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+  document.getElementById("b_shot").onclick = savePNG;
+  document.getElementById("b_reset").onclick = function(){ applyCam(0); };
+
+  function slider(id, key, fmt, post){
+    var el = document.getElementById("s_" + id), out = document.getElementById("v_" + id);
+    function upd(){
+      S[key] = parseFloat(el.value); out.textContent = fmt(S[key]); S.dirty = true; if(post) post();
+    }
+    el.addEventListener("input", upd); el.value = S[key]; upd();
+  }
+  slider("elev", "elev", function(v){ return v.toFixed(1) + "°"; });
+  slider("azim", "azim", function(v){ return v.toFixed(0) + "°"; });
+  slider("exp", "exposure", function(v){ return v.toFixed(2); });
+  slider("fog", "fog", function(v){ return v.toFixed(2); });
+  slider("ap", "aperture", function(v){ return v.toFixed(3); });
+  document.getElementById("s_q").value = String(S.quality);
+  document.getElementById("s_q").addEventListener("change", function(e){
+    S.quality = parseInt(e.target.value, 10); resize();
+  });
+  if(Q.get("ui") === "0"){ document.querySelectorAll(".ui").forEach(function(n){ n.classList.add("hide"); }); }
+
+  // ---------------------------------------------------------------- math
+  function camMatrix(yaw, pitch){
+    var cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var f = [sy * cp, sp, cy * cp];
+    var r = [cy, 0, -sy];
+    var u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+    return new Float32Array([r[0], r[1], r[2], -u[0], -u[1], -u[2], f[0], f[1], f[2]]);
+  }
+  var animT = 0, firstFrame = false;
+
+  function render(now){
+    var q = QP[S.quality];
+    var dt = Math.min(0.05, (now - S.t0) / 1000); S.t0 = now;
+    // walk
+    var sp = (S.keys["shift"] ? 2.4 : 1.1) * dt;
+    var mv = [0, 0];
+    if(S.keys["w"]) mv[1] += 1; if(S.keys["s"]) mv[1] -= 1;
+    if(S.keys["d"]) mv[0] += 1; if(S.keys["a"]) mv[0] -= 1;
+    if(mv[0] || mv[1]){
+      var cy = Math.cos(S.yaw), sy = Math.sin(S.yaw);
+      S.pos[0] += (sy * mv[1] + cy * mv[0]) * sp;
+      S.pos[2] += (cy * mv[1] - sy * mv[0]) * sp;
+      S.pos[0] = Math.max(-1.25, Math.min(1.25, S.pos[0]));
+      S.dirty = true;
+    }
+    if(S.motion){ animT += dt; S.dirty = true; }
+
+    if(S.dirty){ S.samples = 0; S.dirty = false; S.moved = now; }
+    var moving = (now - S.moved) < 240 || S.motion;
+    var qe = moving ? QMOVE : q;
+
+    var driftX = S.motion ? Math.sin(animT * 0.21) * 0.055 + Math.sin(animT * 0.73) * 0.008 : 0;
+    var driftY = S.motion ? Math.sin(animT * 0.31 + 1.3) * 0.022 + Math.sin(animT * 0.91) * 0.005 : 0;
+    var driftZ = S.motion ? Math.sin(animT * 0.13) * 0.30 : 0;
+    var pos = [S.pos[0] + driftX, S.pos[1] + driftY, S.pos[2] + driftZ];
+    var cm = camMatrix(S.yaw + (S.motion ? Math.sin(animT * 0.17) * 0.012 : 0), S.pitch + driftY * 0.1);
+    var focal = 1.0 / Math.tan(S.fov * Math.PI / 360);
+
+    var el = S.elev * Math.PI / 180, az = S.azim * Math.PI / 180;
+    var sun = [-Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)];
+    var warm = Math.max(0.0, 1.0 - S.elev / 60);
+    var sunCol = [6.6, 6.6 * (0.44 + 0.30 * (1 - warm)), 6.6 * (0.16 + 0.30 * (1 - warm))];
+    var skyC = [0.30 * 0.62, 0.44 * 0.62, 0.78 * 0.62];
+
+    // ---- scene pass
+    var sc = P.scene;
+    gl.useProgram(sc.p);
+    bind(RT.scene);
+    gl.uniform2f(sc.u.uRes, RT.w, RT.h);
+    gl.uniform1f(sc.u.uTime, animT);
+    gl.uniform1i(sc.u.uFrame, S.samples + 1);
+    gl.uniform3f(sc.u.uCamPos, pos[0], pos[1], pos[2]);
+    gl.uniformMatrix3fv(sc.u.uCam, false, cm);
+    gl.uniform1f(sc.u.uFocal, focal);
+    gl.uniform1f(sc.u.uAperture, S.aperture);
+    gl.uniform1f(sc.u.uFocus, S.focus);
+    gl.uniform3f(sc.u.uSun, sun[0], sun[1], sun[2]);
+    gl.uniform3f(sc.u.uSunCol, sunCol[0], sunCol[1], sunCol[2]);
+    gl.uniform3f(sc.u.uSkyCol, skyC[0], skyC[1], skyC[2]);
+    gl.uniform1f(sc.u.uFog, S.fog);
+    gl.uniform1i(sc.u.uMaxSteps, qe.steps);
+    gl.uniform1i(sc.u.uVolSteps, qe.vol);
+    gl.uniform1i(sc.u.uAOTaps, qe.ao);
+    gl.uniform1i(sc.u.uGI, S.quality >= 2 ? qe.gi : 0);
+    gl.uniform1i(sc.u.uLocalSh, qe.sh);
+    gl.uniform1i(sc.u.uDbg, S.dbg);
+    gl.uniform1f(sc.u.uAmb, S.amb);
+    gl.uniform1f(sc.u.uDetail, S.detail);
+    draw();
+
+    // ---- temporal accumulation
+    var ac = P.acc;
+    gl.useProgram(ac.p);
+    bind(RT.accB);
+    tex(0, RT.accA.tex); tex(1, RT.scene.tex);
+    gl.uniform1i(ac.u.uPrev, 0); gl.uniform1i(ac.u.uCur, 1);
+    var blend = S.samples === 0 ? 1.0 : Math.max(1.0 / (S.samples + 1), S.motion ? 0.14 : 0.0);
+    gl.uniform1f(ac.u.uBlend, blend);
+    draw();
+    var tmp = RT.accA; RT.accA = RT.accB; RT.accB = tmp;
+    S.samples++;
+
+    // ---- edge aware denoise, only while the estimate is still noisy
+    var strength = Math.max(0.0, Math.min(0.92, 3.2 / Math.max(S.samples, 1) - 0.05));
+    var lit = RT.accA;
+    if(strength > 0.02 && S.denoise){
+      var dnp = P.den;
+      gl.useProgram(dnp.p);
+      bind(RT.den);
+      tex(0, RT.accA.tex);
+      gl.uniform1i(dnp.u.uTex, 0);
+      gl.uniform2f(dnp.u.uTexel, 1 / RT.w, 1 / RT.h);
+      gl.uniform1f(dnp.u.uStrength, strength);
+      gl.uniform1f(dnp.u.uStep, 1.0);
+      draw();
+      lit = RT.den;
+      if(strength > 0.45){
+        bind(RT.denB);
+        tex(0, RT.den.tex);
+        gl.uniform1f(dnp.u.uStrength, strength * 0.75);
+        gl.uniform1f(dnp.u.uStep, 2.0);
+        draw();
+        lit = RT.denB;
+      }
+    }
+
+    // ---- bloom chain
+    var dn = P.down;
+    gl.useProgram(dn.p);
+    for(var i = 0; i < RT.mips.length; i++){
+      var srcT = i === 0 ? lit : RT.mips[i - 1];
+      bind(RT.mips[i]);
+      tex(0, srcT.tex);
+      gl.uniform1i(dn.u.uTex, 0);
+      gl.uniform2f(dn.u.uTexel, 1 / srcT.w, 1 / srcT.h);
+      gl.uniform1f(dn.u.uThreshold, S.thr);
+      gl.uniform1i(dn.u.uBright, i === 0 ? 1 : 0);
+      draw();
+    }
+    var up = P.up;
+    gl.useProgram(up.p);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    for(var j = RT.mips.length - 1; j > 0; j--){
+      bind(RT.mips[j - 1]);
+      tex(0, RT.mips[j].tex);
+      gl.uniform1i(up.u.uTex, 0);
+      gl.uniform2f(up.u.uTexel, 1 / RT.mips[j].w, 1 / RT.mips[j].h);
+      gl.uniform1f(up.u.uScale, 0.82);
+      draw();
+    }
+    gl.disable(gl.BLEND);
+
+    // ---- anamorphic streak
+    var st = P.streak;
+    gl.useProgram(st.p);
+    bind(RT.streakA);
+    tex(0, RT.mips[1].tex); gl.uniform1i(st.u.uTex, 0);
+    gl.uniform2f(st.u.uTexel, 1 / RT.mips[1].w, 1 / RT.mips[1].h);
+    gl.uniform1f(st.u.uStep, 2.0); draw();
+    bind(RT.streakB);
+    tex(0, RT.streakA.tex);
+    gl.uniform2f(st.u.uTexel, 1 / RT.streakA.w, 1 / RT.streakA.h);
+    gl.uniform1f(st.u.uStep, 10.0); draw();
+
+    // ---- composite
+    var cp = P.comp;
+    gl.useProgram(cp.p);
+    bind(null);
+    tex(0, lit.tex); tex(1, RT.mips[0].tex); tex(2, RT.streakB.tex);
+    gl.uniform1i(cp.u.uScene, 0); gl.uniform1i(cp.u.uBloom, 1); gl.uniform1i(cp.u.uStreak, 2);
+    gl.uniform2f(cp.u.uRes, canvas.width, canvas.height);
+    gl.uniform1f(cp.u.uExposure, S.exposure);
+    gl.uniform1f(cp.u.uBloomAmt, S.bloom);
+    gl.uniform1f(cp.u.uStreakAmt, S.streak);
+    gl.uniform1f(cp.u.uGrain, S.grain);
+    gl.uniform1f(cp.u.uCA, S.ca);
+    gl.uniform1f(cp.u.uVig, S.vig);
+    gl.uniform1f(cp.u.uSharp, S.sharp);
+    gl.uniform1f(cp.u.uTime, S.motion ? animT : 0.5);
+    draw();
+
+    var rawMs = now - S.lastFrame;
+    S.frameMs = S.frameMs * 0.88 + rawMs * 0.12;
+    S.lastFrame = now;
+    // keep it interactive: react to the very first full frame, then keep adapting
+    function adapt(){
+      var slow = Math.max(rawMs, S.frameMs);
+      if(slow > 900 && S.quality > 0){ S.quality = 0; S.dynScale = Math.min(S.dynScale, 0.32); resize(); }
+      else if(slow > 260 && S.quality > 0){ S.quality--; S.dynScale = Math.min(S.dynScale, 0.5); resize(); }
+      else if(slow > 62 && S.dynScale > 0.3){ S.dynScale = Math.max(0.3, S.dynScale - 0.12); resize(); }
+      else if(slow < 24 && S.dynScale < 1.0){ S.dynScale = Math.min(1.0, S.dynScale + 0.08); resize(); }
+      else if(slow < 14 && S.dynScale >= 0.95 && S.quality < 2 && now - S.lastUp > 6000){
+        S.quality++; S.lastUp = now; S.dynScale = 0.8; resize();
+      }
+    }
+    if(S.auto && S.scale <= 0){
+      if(S.samples === 2){ adapt(); S.lastAdapt = now; }
+      else if(S.samples > 3 && now - S.lastAdapt > 1400){ adapt(); S.lastAdapt = now; }
+    }
+    if(!firstFrame){
+      firstFrame = true;
+      var stEl = document.getElementById("status");
+      if(stEl){ stEl.style.opacity = "0"; setTimeout(function(){ stEl.style.display = "none"; }, 700); }
+    }
+    document.getElementById("stats").innerHTML =
+      RT.w + "×" + RT.h + " &nbsp;·&nbsp; " + S.samples + " spp &nbsp;·&nbsp; " + Math.round(S.frameMs) + " ms" +
+      (S.samples > 40 ? " &nbsp;·&nbsp; <span style='color:#f0c98a'>converged</span>" : "");
+
+    if(S.targetSamples > 0 && S.samples >= S.targetSamples){ window.__READY = true; return; }
+    requestAnimationFrame(render);
+  }
+
+  window.__INFO = function(){
+    return { samples:S.samples, ms:Math.round(S.frameMs), rw:RT.w, rh:RT.h,
+             cw:canvas.width, ch:canvas.height, err:window.__SHADER_ERR || null };
+  };
+  canvas.addEventListener("webglcontextlost", function(e){
+    e.preventDefault();
+    var stEl = document.getElementById("status");
+    if(stEl){
+      stEl.style.display = "block"; stEl.style.opacity = "1"; stEl.style.pointerEvents = "auto";
+      stEl.innerHTML = "GPU was overwhelmed; driver reset.<br><button onclick='location.href=location.pathname+\"?q=0&scale=0.4\"'>Reload in safe mode</button>";
+    }
+  });
+  resize();
+  setTimeout(function(){ document.getElementById("fade").style.opacity = "0"; }, 60);
+  requestAnimationFrame(function(t){ S.t0 = t; render(t); });
+  if(S.targetSamples <= 0){ setTimeout(function(){ window.__READY = true; }, 4000); }
+})();
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d142a04d6ff45b',t:'MTc4OTc0NDA0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>学校封闭走廊 · 实时路径追踪</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0a0b0d;overflow:hidden;
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#e8e8ea;}
+  #c{display:block;width:100vw;height:100vh;cursor:crosshair;}
+  .card{position:fixed;background:rgba(14,16,20,.76);border:1px solid rgba(255,255,255,.12);
+    border-radius:10px;backdrop-filter:blur(8px);box-shadow:0 6px 24px rgba(0,0,0,.45);z-index:5;}
+  #hud{left:14px;top:14px;padding:10px 14px;font-size:12.5px;line-height:1.65;min-width:190px;}
+  #hud b{color:#8ecbff;font-weight:600;}
+  #hud .k{display:inline-block;min-width:78px;color:#9aa3ad;}
+  #panel{right:14px;top:14px;padding:12px 14px;font-size:12.5px;width:236px;}
+  #panel h3{margin:0 0 6px;font-size:13px;color:#8ecbff;font-weight:600;letter-spacing:.6px;}
+  #panel label{display:block;margin:8px 0 1px;color:#9aa3ad;}
+  #panel label span{float:right;color:#dbe4ee;}
+  #panel input[type=range]{width:100%;accent-color:#4b9fea;margin:0;}
+  #panel .row{display:flex;gap:8px;margin-top:10px;}
+  #panel button{flex:1;background:#1c242e;color:#dce6f2;border:1px solid rgba(255,255,255,.14);
+    border-radius:6px;padding:5px 6px;font-size:12px;cursor:pointer;}
+  #panel button:hover{background:#26313d;}
+  #panel button.on{background:#2b6cb0;border-color:#6cb2f0;}
+  #help{left:14px;bottom:14px;padding:9px 13px;font-size:12px;color:#b7bec7;line-height:1.7;}
+  #help b{color:#dbe4ee;}
+  #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(6,8,11,.74);z-index:20;cursor:pointer;text-align:center;}
+  #overlay div{font-size:21px;letter-spacing:2px;}
+  #overlay small{display:block;margin-top:12px;font-size:13px;color:#98a1ab;letter-spacing:0;}
+  #err{position:fixed;left:0;top:0;right:0;max-height:70%;overflow:auto;margin:0;padding:12px;
+    background:#2a0d0d;color:#ffb4b4;font:12px/1.5 Consolas,monospace;white-space:pre-wrap;z-index:99;display:none;}
+  #status{position:fixed;right:4px;bottom:2px;font-size:10px;color:#555c66;z-index:4;}
+  .hide{display:none!important;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="card">
+  <div><span class="k">累积采样</span><b id="s_spp">0</b></div>
+  <div><span class="k">帧率</span><b id="s_fps">--</b></div>
+  <div><span class="k">追踪分辨率</span><b id="s_res">--</b></div>
+  <div><span class="k">场景盒体</span><b id="s_box">--</b></div>
+  <div><span class="k">坐标</span><b id="s_pos">--</b></div>
+</div>
+
+<div id="panel" class="card">
+  <h3>光线追踪 / 光照</h3>
+  <label>时刻 清晨→正午→黄昏<span id="v_tm"></span></label>
+  <input id="i_tm" type="range" min="5" max="19" step="0.05" value="8.5">
+  <label>太阳方位微调<span id="v_az"></span></label>
+  <input id="i_az" type="range" min="-45" max="45" step="1" value="0">
+  <label>曝光<span id="v_ex"></span></label>
+  <input id="i_ex" type="range" min="0.2" max="3" step="0.05" value="1.1">
+  <label>最大反弹次数<span id="v_bo"></span></label>
+  <input id="i_bo" type="range" min="1" max="8" step="1" value="4">
+  <label>渲染缩放<span id="v_sc"></span></label>
+  <input id="i_sc" type="range" min="0.25" max="1" step="0.05" value="0.6">
+  <div class="row">
+    <button id="b_lamp" class="on">吸顶灯</button>
+    <button id="b_auto" class="on">自动降载</button>
+  </div>
+</div>
+
+<div id="help" class="card">
+  <b>W/A/S/D</b> 前后左右 · <b>Shift</b> 加速 · <b>鼠标</b> 转头 · <b>Esc</b> 解锁<br>
+  <b>L</b> 开关灯 · <b>R</b> 回到起点 · <b>H</b> 隐藏界面 · 站住不动画面会持续降噪
+</div>
+
+<div id="overlay"><div>学校封闭走廊 · 实时路径追踪<small>点击进入 · 视角只能在走廊内移动</small></div></div>
+<pre id="err"></pre>
+<div id="status">init</div>
+
+<script id="vs" type="x-shader/x-vertex">#version 300 es
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+</script>
+
+<script id="fs_pt" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outGA;
+layout(location = 2) out vec4 outGB;
+
+uniform sampler2D uScene;
+uniform sampler2D uMats;
+uniform sampler2D uPrev;
+uniform vec2  uRes;
+uniform vec3  uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform float uTanHalf;
+uniform float uSeed;
+uniform int   uSPP, uMaxB, uReset, uDebug;
+uniform int   uNumCells, uCellBase, uIdxBase;
+uniform float uCellSize, uGridMin;
+uniform vec3  uSunDir, uSunE;
+uniform float uSunCos, uSunDisk;
+uniform vec3  uSkyZen, uSkyHor, uSunGlow;
+uniform float uGlowPow;
+uniform float uGroundY;
+uniform int   uNumPortals;
+uniform vec4  uPortals[8];
+uniform float uPortalZ;
+uniform int   uNumLamps;
+uniform vec4  uLampA[12], uLampB[12];
+uniform vec3  uLampE;
+
+const float PI = 3.14159265;
+const int TEXW = 512;
+
+uint rngState;
+uint pcg(uint v){ v = v*747796405u + 2891336453u; uint w = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u; return (w >> 22u) ^ w; }
+float rnd(){
+  rngState = rngState*747796405u + 2891336453u;
+  uint w = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
+  w = (w >> 22u) ^ w;
+  return float(w) * (1.0/4294967296.0);
+}
+float lum(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
+float maxc(vec3 c){ return max(c.x, max(c.y, c.z)); }
+void basis(vec3 n, out vec3 t1, out vec3 t2){
+  float s = n.z >= 0.0 ? 1.0 : -1.0;
+  float a = -1.0/(s + n.z);
+  float b = n.x*n.y*a;
+  t1 = vec3(1.0 + s*n.x*n.x*a, s*b, -s*n.x);
+  t2 = vec3(b, s + n.y*n.y*a, -n.y);
+}
+float hash21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float a = hash21(i), b = hash21(i+vec2(1.0,0.0)), c = hash21(i+vec2(0.0,1.0)), d = hash21(i+vec2(1.0,1.0));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+
+vec4 fetchScene(int i){ return texelFetch(uScene, ivec2(i % TEXW, i / TEXW), 0); }
+
+struct Mat { vec3 albedo; float rough; vec3 emis; vec3 f0; int kind; int proc; };
+struct Hit { float t; vec3 p; vec3 n; vec3 bmin; vec3 bmax; int mat; };
+
+Mat getMat(int id){
+  vec4 a = texelFetch(uMats, ivec2(id*3,   0), 0);
+  vec4 b = texelFetch(uMats, ivec2(id*3+1, 0), 0);
+  vec4 c = texelFetch(uMats, ivec2(id*3+2, 0), 0);
+  Mat m;
+  m.albedo = a.rgb; m.rough = max(a.w, 0.012);
+  m.emis = b.rgb; m.f0 = c.rgb;
+  int packed = int(b.w + 0.5);
+  m.kind = packed & 15;
+  m.proc = packed / 16;
+  return m;
+}
+int matKind(int id){
+  return int(texelFetch(uMats, ivec2(id*3+1, 0), 0).w + 0.5) & 15;
+}
+
+bool hitBox(vec3 ro, vec3 invD, vec3 bmin, vec3 bmax, float tmin, float tmax, out float th){
+  vec3 t0 = (bmin - ro) * invD;
+  vec3 t1 = (bmax - ro) * invD;
+  vec3 ts = min(t0, t1), tb = max(t0, t1);
+  float tn = max(max(ts.x, ts.y), max(ts.z, tmin));
+  float tf = min(min(tb.x, tb.y), min(tb.z, tmax));
+  if (tn > tf) return false;
+  th = tn > tmin ? tn : tf;
+  return th > tmin && th < tmax;
+}
+vec3 boxNormal(vec3 p, vec3 bmin, vec3 bmax){
+  vec3 c = 0.5*(bmin+bmax), d = max(0.5*(bmax-bmin), vec3(1e-6));
+  vec3 q = (p - c)/d, aq = abs(q);
+  if (aq.x >= aq.y && aq.x >= aq.z) return vec3(q.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+  if (aq.y >= aq.z) return vec3(0.0, q.y >= 0.0 ? 1.0 : -1.0, 0.0);
+  return vec3(0.0, 0.0, q.z >= 0.0 ? 1.0 : -1.0);
+}
+
+bool traceGrid(vec3 ro, vec3 rd, float tmax, bool anyHit, out Hit h){
+  vec3 sg = vec3(rd.x >= 0.0 ? 1.0 : -1.0, rd.y >= 0.0 ? 1.0 : -1.0, rd.z >= 0.0 ? 1.0 : -1.0);
+  vec3 srd = sg * max(abs(rd), vec3(1e-9));
+  vec3 invD = 1.0 / srd;
+  float gLo = uGridMin, gHi = uGridMin + uCellSize*float(uNumCells);
+  float ta = (gLo - ro.x)*invD.x, tb2 = (gHi - ro.x)*invD.x;
+  float tEnter = max(min(ta, tb2), 2e-4);
+  float tExit  = min(max(ta, tb2), tmax);
+  h.t = tmax; h.mat = -1; h.p = ro; h.n = vec3(0.0,1.0,0.0); h.bmin = vec3(0.0); h.bmax = vec3(1.0);
+  if (tEnter > tExit) return false;
+
+  int cell = int(clamp(floor((ro.x + srd.x*(tEnter + 1e-4) - gLo)/uCellSize), 0.0, float(uNumCells-1)));
+  int stp = srd.x > 0.0 ? 1 : -1;
+  float tDelta = abs(uCellSize * invD.x);
+  float bound = gLo + float(cell + (stp > 0 ? 1 : 0))*uCellSize;
+  float tNext = (bound - ro.x)*invD.x;
+
+  for (int iter = 0; iter < 96; iter++){
+    float tCellExit = min(tNext, tExit) + 1e-4;
+    vec4 rg = fetchScene(uCellBase + cell);
+    int start = int(rg.x + 0.5), cnt = int(rg.y + 0.5);
+    float best = tCellExit;
+    bool found = false;
+    for (int k = 0; k < cnt; k++){
+      int bi = int(fetchScene(uIdxBase + start + k).x + 0.5);
+      vec4 b0 = fetchScene(bi*2), b1 = fetchScene(bi*2 + 1);
+      float t;
+      if (hitBox(ro, invD, b0.xyz, b1.xyz, 2e-4, best, t)){
+        int mid = int(b0.w + 0.5);
+        if (anyHit){
+          if (matKind(mid) != 1){ h.t = t; h.mat = mid; return true; }
+        } else {
+          best = t; found = true;
+          h.t = t; h.mat = mid; h.bmin = b0.xyz; h.bmax = b1.xyz;
+        }
+      }
+    }
+    if (found){
+      h.p = ro + rd*h.t;
+      h.n = boxNormal(h.p, h.bmin, h.bmax);
+      return true;
+    }
+    if (tNext >= tExit) break;
+    cell += stp;
+    if (cell < 0 || cell >= uNumCells) break;
+    tNext += tDelta;
+  }
+  return false;
+}
+
+void applyProc(inout Mat m, vec3 p, vec3 n, vec3 bmin, vec3 bmax){
+  if (m.proc == 1){
+    vec2 tp = p.xz / 0.60;
+    vec2 f  = fract(tp);
+    vec2 g  = smoothstep(vec2(0.0), vec2(0.032), f) * smoothstep(vec2(0.0), vec2(0.032), 1.0 - f);
+    float grout = min(g.x, g.y);
+    vec2 id = floor(tp);
+    float chk = mod(id.x + id.y, 2.0);
+    vec3 base = mix(vec3(0.740,0.725,0.690), vec3(0.645,0.640,0.628), chk);
+    base *= 0.94 + 0.12*hash21(id);
+    base += (vnoise(p.xz*52.0) - 0.5)*0.05;
+    m.albedo = mix(vec3(0.30,0.295,0.285), base, grout);
+    m.rough  = mix(0.45, 0.135, grout);
+  } else if (m.proc == 2){
+    float y = p.y;
+    vec3 col;
+    if (y < 0.12)       col = vec3(0.185,0.195,0.205);
+    else if (y < 1.24)  col = vec3(0.620,0.678,0.652);
+    else if (y < 1.285) col = vec3(0.385,0.432,0.418);
+    else                col = vec3(0.880,0.880,0.855);
+    col *= 0.97 + 0.055*vnoise(vec2(p.x*3.0 + p.z*7.0, p.y*4.0)*3.0);
+    m.albedo = col;
+    m.rough = y < 1.285 ? 0.55 : 0.88;
+  } else if (m.proc == 3){
+    vec2 f = fract(p.xz/0.60);
+    vec2 g = smoothstep(vec2(0.0), vec2(0.018), f) * smoothstep(vec2(0.0), vec2(0.018), 1.0-f);
+    m.albedo = mix(vec3(0.62,0.62,0.61), vec3(0.900,0.895,0.880), min(g.x,g.y));
+  } else if (m.proc == 4){
+    vec3 s = max(bmax - bmin, vec3(1e-4));
+    float u = (p.x - bmin.x)/s.x, v = (p.y - bmin.y)/s.y;
+    float grain = 0.5*vnoise(vec2(p.y*2.0, p.x*30.0)) + 0.5*vnoise(vec2(p.y*11.0, p.x*80.0));
+    vec3 col = mix(vec3(0.415,0.272,0.158), vec3(0.575,0.408,0.252), grain);
+    float d = min(min(u, 1.0-u)*2.2, min(v, 1.0-v)*0.9);
+    col *= 0.80 + 0.20*smoothstep(0.05, 0.075, d);
+    col *= 0.93 + 0.09*smoothstep(0.115, 0.14, d);
+    m.albedo = col;
+  } else if (m.proc == 5){
+    vec3 s = max(bmax - bmin, vec3(1e-4));
+    vec2 uv = vec2((p.x - bmin.x)/s.x, (p.y - bmin.y)/s.y);
+    vec2 cellf = floor(uv*vec2(4.0,2.0));
+    vec2 g = fract(uv*vec2(4.0,2.0));
+    float pick = hash21(cellf);
+    float paper = step(0.13,g.x)*step(g.x,0.87)*step(0.14,g.y)*step(g.y,0.86)*step(0.22,pick);
+    vec3 col = mix(vec3(0.075,0.215,0.170),
+                   mix(vec3(0.870,0.855,0.810), vec3(0.800,0.860,0.900), step(0.55,pick)), paper);
+    m.albedo = col;
+  }
+}
+
+vec3 skyRadiance(vec3 d, bool withSun){
+  vec3 sky = mix(uSkyHor, uSkyZen, pow(clamp(d.y, 0.0, 1.0), 0.42));
+  float c = dot(d, uSunDir);
+  sky += uSunGlow * pow(max(c, 0.0), uGlowPow);
+  sky += uSunGlow * 0.30 * max(c, 0.0) * pow(max(1.0 - abs(d.y)*2.6, 0.0), 2.0);
+  if (withSun && c > uSunCos) sky += uSunE * uSunDisk;
+  return sky;
+}
+vec3 groundRadiance(vec3 p){
+  float z = p.z;
+  vec3 grass = mix(vec3(0.110,0.235,0.090), vec3(0.180,0.315,0.120), vnoise(p.xz*1.6));
+  grass *= 0.85 + 0.30*vnoise(p.xz*8.0);
+  vec3 walk = vec3(0.555,0.545,0.515)*(0.90 + 0.16*vnoise(p.xz*6.0));
+  float isWalk = smoothstep(3.55,3.75,z)*(1.0-smoothstep(6.35,6.55,z));
+  vec3 track = vec3(0.430,0.175,0.135)*(0.90 + 0.18*vnoise(p.xz*4.0));
+  float isTrack = smoothstep(12.0,12.4,z)*(1.0-smoothstep(19.0,19.4,z));
+  vec3 col = mix(mix(grass, walk, isWalk), track, isTrack);
+  vec3 irr = uSunE*max(uSunDir.y,0.0) + (uSkyHor + uSkyZen)*1.3;
+  return col*irr/PI;
+}
+vec3 envRadiance(vec3 ro, vec3 rd, bool withSun){
+  if (rd.y < -0.0015){
+    float t = (uGroundY - ro.y)/rd.y;
+    if (t > 0.0 && t < 900.0){
+      vec3 p = ro + rd*t;
+      float f = 1.0 - exp(-t*0.0075);
+      return mix(groundRadiance(p), uSkyHor*0.9, f);
+    }
+  }
+  return skyRadiance(rd, withSun);
+}
+
+vec3 bsdfEval(Mat m, vec3 n, vec3 wo, vec3 wi){
+  float ndl = dot(n, wi), ndv = dot(n, wo);
+  if (ndl <= 0.0 || ndv <= 0.0) return vec3(0.0);
+  vec3 hv = normalize(wo + wi);
+  float ndh = max(dot(n,hv), 0.0), vdh = max(dot(wo,hv), 1e-4);
+  float a = max(m.rough*m.rough, 1e-4);
+  float a2 = a*a;
+  float dd = ndh*ndh*(a2-1.0)+1.0;
+  float D = a2/(PI*dd*dd);
+  float k = a*0.5;
+  float G = (ndl/(ndl*(1.0-k)+k)) * (ndv/(ndv*(1.0-k)+k));
+  vec3 F = m.f0 + (1.0-m.f0)*pow(1.0-vdh, 5.0);
+  vec3 spec = D*G*F/max(4.0*ndl*ndv, 1e-5);
+  vec3 diff = m.albedo*(1.0/PI)*(1.0 - F);
+  return diff + spec;
+}
+float specProb(Mat m, vec3 n, vec3 wo){
+  float ndv = max(dot(n, wo), 1e-4);
+  vec3 F = m.f0 + (1.0-m.f0)*pow(1.0-ndv, 5.0);
+  return clamp(lum(F)*(1.7 - 0.9*m.rough)*1.7, 0.04, 0.88);
+}
+float bsdfPdf(Mat m, vec3 n, vec3 wo, vec3 wi, float pS){
+  float ndl = max(dot(n, wi), 0.0);
+  vec3 hv = normalize(wo + wi);
+  float ndh = max(dot(n,hv),0.0), vdh = max(dot(wo,hv),1e-4);
+  float a = max(m.rough*m.rough, 1e-4);
+  float a2 = a*a;
+  float dd = ndh*ndh*(a2-1.0)+1.0;
+  float D = a2/(PI*dd*dd);
+  return pS*(D*ndh/(4.0*vdh)) + (1.0-pS)*(ndl/PI);
+}
+bool sampleBSDF(Mat m, vec3 n, vec3 wo, out vec3 wi, out vec3 weight){
+  float pS = specProb(m, n, wo);
+  vec3 t1, t2; basis(n, t1, t2);
+  if (rnd() < pS){
+    float a = max(m.rough*m.rough, 1e-4);
+    float u1 = rnd(), u2 = rnd();
+    float phi = 2.0*PI*u1;
+    float ct = sqrt(max(0.0, (1.0-u2)/(1.0+(a*a-1.0)*u2)));
+    float st = sqrt(max(0.0, 1.0-ct*ct));
+    vec3 hv = normalize(t1*(st*cos(phi)) + t2*(st*sin(phi)) + n*ct);
+    wi = reflect(-wo, hv);
+  } else {
+    float u1 = rnd(), u2 = rnd();
+    float r = sqrt(u1), phi = 2.0*PI*u2;
+    wi = normalize(t1*(r*cos(phi)) + t2*(r*sin(phi)) + n*sqrt(max(0.0, 1.0-u1)));
+  }
+  if (dot(n, wi) <= 0.0) return false;
+  vec3 f = bsdfEval(m, n, wo, wi);
+  float pdf = bsdfPdf(m, n, wo, wi, pS);
+  if (pdf <= 1e-6) return false;
+  weight = f*dot(n,wi)/pdf;
+  return true;
+}
+
+vec3 directLight(vec3 p, vec3 n, vec3 wo, Mat m, float clampL){
+  vec3 sum = vec3(0.0);
+  Hit sh;
+  // ---- 太阳：圆锥采样 ----
+  {
+    vec3 t1,t2; basis(uSunDir, t1, t2);
+    float u1 = rnd(), u2 = rnd();
+    float ct = mix(uSunCos, 1.0, u1), st = sqrt(max(0.0,1.0-ct*ct)), ph = 2.0*PI*u2;
+    vec3 d = normalize(t1*(st*cos(ph)) + t2*(st*sin(ph)) + uSunDir*ct);
+    if (dot(n, d) > 0.0 && !traceGrid(p, d, 900.0, true, sh))
+      sum += bsdfEval(m,n,wo,d) * dot(n,d) * uSunE;
+  }
+  // ---- 窗洞天光：按投影立体角重要性选窗（大幅降噪）----
+  if (uNumPortals > 0){
+    float wt[8];
+    float wsum = 0.0;
+    for (int i = 0; i < 8; i++){
+      if (i >= uNumPortals) break;
+      vec4 pr = uPortals[i];
+      vec3 c = vec3((pr.x + pr.z)*0.5, (pr.y + pr.w)*0.5, uPortalZ);
+      vec3 dv = c - p;
+      float d2 = max(dot(dv,dv), 0.06);
+      vec3 dir = dv * inversesqrt(d2);
+      float w = (pr.z-pr.x)*(pr.w-pr.y)*abs(dir.z)*(0.10 + max(dot(n,dir), 0.0))/d2;
+      wt[i] = w; wsum += w;
+    }
+    if (wsum > 1e-8){
+      float u = rnd()*wsum, run = 0.0;
+      int pi = 0;
+      for (int i = 0; i < 8; i++){
+        if (i >= uNumPortals) break;
+        pi = i; run += wt[i];
+        if (u <= run) break;
+      }
+      float pPick = wt[pi]/wsum;
+      vec4 pr = uPortals[pi];
+      vec3 lp = vec3(mix(pr.x,pr.z,rnd()), mix(pr.y,pr.w,rnd()), uPortalZ);
+      vec3 dv = lp - p;
+      float d2 = dot(dv,dv), dist = sqrt(d2);
+      vec3 d = dv/dist;
+      float ndl = dot(n,d), cosP = abs(d.z);
+      if (ndl > 0.0 && cosP > 1e-3 && !traceGrid(p, d, dist*0.997, true, sh)){
+        float area = (pr.z-pr.x)*(pr.w-pr.y);
+        float pdf = d2*pPick/(area*cosP);
+        sum += bsdfEval(m,n,wo,d) * ndl * envRadiance(lp, d, false) / max(pdf, 1e-5);
+      }
+    }
+  }
+  // ---- 吸顶灯：同样按重要性选灯 ----
+  if (uNumLamps > 0 && maxc(uLampE) > 0.0){
+    float wt2[12];
+    float wsum2 = 0.0;
+    for (int i = 0; i < 12; i++){
+      if (i >= uNumLamps) break;
+      vec3 a = uLampA[i].xyz, b = uLampB[i].xyz;
+      vec3 c = vec3((a.x+b.x)*0.5, a.y, (a.z+b.z)*0.5);
+      vec3 dv = c - p;
+      float d2 = max(dot(dv,dv), 0.06);
+      vec3 dir = dv * inversesqrt(d2);
+      float w = (b.x-a.x)*(b.z-a.z)*max(dir.y, 0.0)*(0.08 + max(dot(n,dir), 0.0))/d2;
+      wt2[i] = w; wsum2 += w;
+    }
+    if (wsum2 > 1e-8){
+      float u = rnd()*wsum2, run = 0.0;
+      int li = 0;
+      for (int i = 0; i < 12; i++){
+        if (i >= uNumLamps) break;
+        li = i; run += wt2[i];
+        if (u <= run) break;
+      }
+      float pPick = wt2[li]/wsum2;
+      vec3 a = uLampA[li].xyz, b = uLampB[li].xyz;
+      vec3 lp = vec3(mix(a.x,b.x,rnd()), a.y, mix(a.z,b.z,rnd()));
+      vec3 dv = lp - p;
+      float d2 = dot(dv,dv), dist = sqrt(d2);
+      vec3 d = dv/dist;
+      float ndl = dot(n,d), cosL = max(d.y, 0.0);
+      if (ndl > 0.0 && cosL > 1e-3 && !traceGrid(p, d, dist*0.997, true, sh)){
+        float area = (b.x-a.x)*(b.z-a.z);
+        sum += bsdfEval(m,n,wo,d) * ndl * uLampE * cosL * area / max(d2*pPick, 1e-5);
+      }
+    }
+  }
+  return min(sum, vec3(clampL));
+}
+
+vec3 radiance(vec3 ro, vec3 rd){
+  vec3 L = vec3(0.0), thr = vec3(1.0);
+  bool spec = true;
+  for (int b = 0; b < 8; b++){
+    if (b >= uMaxB) break;
+    Hit h;
+    if (!traceGrid(ro, rd, 900.0, false, h)){
+      if (spec) L += thr * envRadiance(ro, rd, true);
+      break;
+    }
+    Mat m = getMat(h.mat);
+    applyProc(m, h.p, h.n, h.bmin, h.bmax);
+    vec3 n = dot(h.n, rd) > 0.0 ? -h.n : h.n;
+    vec3 wo = -rd;
+    if (m.kind == 1){
+      float F = 0.04 + 0.96*pow(1.0 - max(dot(n,wo),0.0), 5.0);
+      if (rnd() < F){ rd = reflect(rd, n); ro = h.p + n*0.0015; }
+      else { thr *= m.albedo; ro = h.p + rd*0.0015; }
+      spec = true;
+      continue;
+    }
+    if (m.kind == 3){
+      float ndl = max(dot(n, uSunDir), 0.0);
+      float vis = 1.0;
+      if (ndl > 0.0){ Hit s2; if (traceGrid(h.p + n*0.002, uSunDir, 900.0, true, s2)) vis = 0.0; }
+      vec3 amb = uSkyHor*(0.55 + 0.45*max(n.y,0.0)) + uSkyZen*0.30;
+      L += thr * m.albedo * (uSunE*ndl*vis/PI + amb*0.55);
+      break;
+    }
+    if (m.kind == 2 && spec) L += thr * m.emis * uLampE;
+    vec3 p = h.p + n*0.0018;
+    L += thr * directLight(p, n, wo, m, b == 0 ? 60.0 : 9.0);
+    vec3 wi, w;
+    if (!sampleBSDF(m, n, wo, wi, w)) break;
+    thr *= w;
+    spec = false;
+    ro = p; rd = wi;
+    if (b >= 1){
+      float q = clamp(maxc(thr), 0.04, 0.96);
+      if (rnd() > q) break;
+      thr /= q;
+    }
+  }
+  return L;
+}
+
+void main(){
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  rngState = pcg(uint(px.x) + 1973u*uint(px.y) + 9277u*uint(uSeed));
+  float aspect = uRes.x/uRes.y;
+
+  // ---- G-Buffer：像素中心射线（确定性、无噪点），供空间降噪与反照率解调使用 ----
+  vec2 uvc = (gl_FragCoord.xy + 0.5)/uRes * 2.0 - 1.0;
+  vec3 rdc = normalize(uCamFwd + uCamRight*(uvc.x*uTanHalf*aspect) + uCamUp*(uvc.y*uTanHalf));
+  vec3 gAlb = vec3(1.0), gNrm = -rdc;
+  float gDep = 900.0;
+  Mat gm;
+  bool gHit = false;
+  {
+    Hit h;
+    if (traceGrid(uCamPos, rdc, 900.0, false, h)){
+      gm = getMat(h.mat);
+      applyProc(gm, h.p, h.n, h.bmin, h.bmax);
+      gDep = h.t;
+      gNrm = dot(h.n, rdc) > 0.0 ? -h.n : h.n;
+      if (gm.kind == 0) gAlb = max(gm.albedo, vec3(0.12));
+      gHit = true;
+    }
+  }
+  outGA = vec4(gAlb, gDep);
+  outGB = vec4(gNrm, gHit ? 1.0 : 0.0);
+
+  if (uDebug == 1){
+    vec3 col = vec3(0.05, 0.10, 0.20);
+    if (gHit){
+      col = gm.albedo * (0.30 + 0.70*max(dot(gNrm, normalize(vec3(0.35,0.85,-0.40))), 0.0));
+      if (gm.kind == 2) col = vec3(1.0, 0.85, 0.2);
+      if (gm.kind == 1) col = vec3(0.25, 0.55, 0.85);
+    }
+    outColor = vec4(col, 1.0);
+    return;
+  }
+
+  vec3 acc = vec3(0.0);
+  for (int s = 0; s < 16; s++){
+    if (s >= uSPP) break;
+    vec2 uv = (gl_FragCoord.xy + vec2(rnd(), rnd()))/uRes * 2.0 - 1.0;
+    vec3 rd = normalize(uCamFwd + uCamRight*(uv.x*uTanHalf*aspect) + uCamUp*(uv.y*uTanHalf));
+    acc += min(radiance(uCamPos, rd), vec3(60.0));
+  }
+  vec4 prev = uReset == 1 ? vec4(0.0) : texelFetch(uPrev, px, 0);
+  outColor = vec4(prev.rgb + acc, prev.a + float(uSPP));
+}
+</script>
+
+<script id="fs_flt" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+precision highp sampler2D;
+out vec4 outCol;
+uniform sampler2D uAcc, uGA, uGB;
+uniform vec2 uRes;
+uniform int uRadius, uStep;
+
+void main(){
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 a0  = texelFetch(uAcc, p, 0);
+  vec4 ga0 = texelFetch(uGA, p, 0);
+  vec4 gb0 = texelFetch(uGB, p, 0);
+  vec3 alb0 = max(ga0.rgb, vec3(0.02));
+  vec3 c0 = a0.rgb / max(a0.a, 1.0) / alb0;      // 解调反照率：只对"光照"降噪，保留瓷砖等纹理
+  if (uRadius <= 0){ outCol = vec4(c0*alb0, 1.0); return; }
+  vec3 sum = vec3(0.0);
+  float wsum = 0.0;
+  for (int j = -2; j <= 2; j++){
+    for (int i = -2; i <= 2; i++){
+      if (abs(i) > uRadius || abs(j) > uRadius) continue;
+      ivec2 q = clamp(p + ivec2(i,j)*uStep, ivec2(0), ivec2(uRes) - ivec2(1));
+      vec4 a  = texelFetch(uAcc, q, 0);
+      vec4 ga = texelFetch(uGA, q, 0);
+      vec4 gb = texelFetch(uGB, q, 0);
+      vec3 alb = max(ga.rgb, vec3(0.02));
+      vec3 c = a.rgb / max(a.a, 1.0) / alb;
+      float wN = pow(max(dot(gb.xyz, gb0.xyz), 0.0), 32.0);
+      float wZ = exp(-abs(ga.a - ga0.a)/(0.05*ga0.a + 0.04));
+      float wA = exp(-dot(abs(alb - alb0), vec3(1.0))*3.0);
+      float wS = exp(-float(i*i + j*j)*0.32);
+      float w = wN*wZ*wA*wS;
+      sum += c*w; wsum += w;
+    }
+  }
+  vec3 c = wsum > 1e-5 ? sum/wsum : c0;
+  outCol = vec4(c*alb0, 1.0);
+}
+</script>
+
+<script id="fs_tm" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+precision highp sampler2D;
+out vec4 outColor;
+uniform sampler2D uAcc;
+uniform vec2 uAccRes, uDstRes;
+uniform float uExposure, uBlur;
+
+vec3 aces(vec3 x){
+  const float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+vec3 fetchAcc(ivec2 p){
+  p = clamp(p, ivec2(0), ivec2(uAccRes) - ivec2(1));
+  vec4 v = texelFetch(uAcc, p, 0);
+  return v.rgb / max(v.a, 1.0);
+}
+void main(){
+  vec2 srcF = gl_FragCoord.xy / uDstRes * uAccRes;
+  vec3 c;
+  if (uBlur > 0.5){
+    ivec2 p = ivec2(srcF);
+    c = vec3(0.0);
+    float ws = 0.0;
+    for (int j = -1; j <= 1; j++){
+      for (int i = -1; i <= 1; i++){
+        float w = (i == 0 && j == 0) ? 4.0 : ((i == 0 || j == 0) ? 2.0 : 1.0);
+        c += fetchAcc(p + ivec2(i,j))*w;
+        ws += w;
+      }
+    }
+    c /= ws;
+  } else {
+    vec2 f = fract(srcF - 0.5);
+    ivec2 b = ivec2(floor(srcF - 0.5));
+    c = mix(mix(fetchAcc(b), fetchAcc(b+ivec2(1,0)), f.x),
+            mix(fetchAcc(b+ivec2(0,1)), fetchAcc(b+ivec2(1,1)), f.x), f.y);
+  }
+  outColor = vec4(pow(aces(c*uExposure), vec3(1.0/2.2)), 1.0);
+}
+</script>
+<script>
+"use strict";
+/* ============================================================
+   学校封闭走廊 · WebGL2 实时路径追踪（无任何外部依赖）
+   北侧 4 间教室 / 共 8 樘门，南侧连续外窗，阳光穿窗入廊
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+function fail(msg){
+  const e = $('err'); e.style.display = 'block';
+  e.textContent += msg + "\n";
+  $('status').textContent = 'ERROR: ' + msg.slice(0,200);
+  console.log('DSH_FAIL ' + msg);
+  console.error(msg);
+}
+addEventListener('error', function(e){ fail('运行时错误: ' + (e && e.message ? e.message : e)); });
+const Q = new URLSearchParams(location.search);
+const SHOT = Q.get('shot') === '1';
+
+/* ===================== 1. 场景建模 ===================== */
+const L = 30.0, W = 3.0, H = 3.3, T = 0.25;    // 走廊 长 / 净宽 / 净高 / 墙厚
+const MOD = L / 4;                              // 每间教室开间 = 7.5m
+const DH = 2.15;                                // 门洞高
+const SILL = 0.95, HEAD = 2.65;                 // 窗台高 / 窗顶高
+const GY = -0.60;                               // 室外地坪标高
+
+const mats = [];
+function mat(o){
+  mats.push(Object.assign({albedo:[.8,.8,.8], rough:.8, emis:[0,0,0], f0:[.04,.04,.04], kind:0, proc:0}, o));
+  return mats.length - 1;
+}
+// kind: 0=不透明PBR 1=薄玻璃 2=自发光 3=室外简化着色
+const M_FLOOR  = mat({proc:1, rough:.14, f0:[.05,.05,.05]});
+const M_WALL   = mat({proc:2, rough:.85});
+const M_CEIL   = mat({proc:3, rough:.92, albedo:[.89,.89,.87]});
+const M_DOOR   = mat({proc:4, rough:.33, f0:[.045,.045,.045]});
+const M_FRAME  = mat({albedo:[.855,.845,.815], rough:.45, f0:[.045,.045,.045]});
+const M_DGLASS = mat({albedo:[.035,.045,.05], rough:.055, f0:[.09,.09,.09]});
+const M_WFRAME = mat({albedo:[.60,.615,.63], rough:.30, f0:[.42,.43,.45]});
+const M_GLASS  = mat({albedo:[.93,.96,.95], rough:.02, kind:1});
+const M_LAMP   = mat({albedo:[.85,.85,.85], rough:.6, emis:[1,.97,.90], kind:2});
+const M_BOARD  = mat({proc:5, rough:.72});
+const M_SILLM  = mat({albedo:[.78,.775,.755], rough:.22, f0:[.06,.06,.06]});
+const M_METAL  = mat({albedo:[.72,.72,.74], rough:.20, f0:[.62,.62,.63]});
+const M_EXT    = mat({albedo:[.60,.595,.57], rough:.9, kind:3});
+const M_TRUNK  = mat({albedo:[.24,.185,.13], rough:.9, kind:3});
+const M_LEAF   = mat({albedo:[.17,.33,.13], rough:.85, kind:3});
+
+const boxes = [];
+function box(mn, mx, m){ boxes.push({mn: mn, mx: mx, m: m}); }
+
+// ---- 地面 / 吊顶 / 两端封闭端墙 ----
+box([-T, -0.35, -T], [L+T, 0, W+T], M_FLOOR);
+box([-T, H, -T], [L+T, H+0.30, W+T], M_CEIL);
+box([-T, 0, -T], [0, H, W+T], M_WALL);
+box([L, 0, -T], [L+T, H, W+T], M_WALL);
+
+// ---- 北墙：4 间教室 × 2 樘门 = 8 樘门 ----
+const doors = [];
+for (let i = 0; i < 4; i++){
+  const m0 = i*MOD;
+  doors.push([m0+1.80, m0+2.80]);
+  doors.push([m0+5.70, m0+6.70]);
+}
+let cx = 0;
+for (const d of doors){
+  if (d[0] > cx + 1e-4) box([cx, 0, -T], [d[0], H, 0], M_WALL);
+  box([d[0], DH, -T], [d[1], H, 0], M_WALL);
+  cx = d[1];
+}
+if (cx < L) box([cx, 0, -T], [L, H, 0], M_WALL);
+
+for (const d of doors){
+  const x0 = d[0], x1 = d[1], mid = (x0 + x1)/2;
+  box([x0+0.02, 0.012, -0.212], [x1-0.02, DH-0.025, -0.162], M_DOOR);
+  box([mid-0.19, 1.32, -0.216], [mid+0.19, 1.86, -0.150], M_DGLASS);
+  box([x1-0.235, 1.02, -0.152], [x1-0.105, 1.095, -0.075], M_METAL);
+  box([x0-0.09, 0, -0.02], [x0, DH+0.09, 0.032], M_FRAME);
+  box([x1, 0, -0.02], [x1+0.09, DH+0.09, 0.032], M_FRAME);
+  box([x0-0.09, DH, -0.02], [x1+0.09, DH+0.09, 0.032], M_FRAME);
+  box([x0-0.045, DH+0.10, -0.035], [x1+0.045, DH+0.66, 0.008], M_FRAME);
+  box([x0+0.02, DH+0.14, -0.03], [x1-0.02, DH+0.62, 0.016], M_DGLASS);
+  box([mid-0.115, DH+0.70, -0.012], [mid+0.115, DH+0.86, 0.006], M_FRAME);
+}
+for (let i = 1; i < 4; i++){          // 教室之间的结构壁柱（把北墙分成 4 个开间）
+  const xp = i*MOD;
+  box([xp-0.17, 0, -T], [xp+0.17, H, 0.09], M_WALL);
+}
+for (let i = 0; i < 4; i++){
+  const a = i*MOD + 3.30, b = i*MOD + 5.20;
+  box([a-0.06, 0.99, -0.05], [b+0.06, 2.11, -0.004], M_FRAME);
+  box([a, 1.05, -0.045], [b, 2.05, 0.002], M_BOARD);
+}
+
+// ---- 南墙：连续外窗 ----
+const wins = [];
+for (let i = 0; i < 4; i++) wins.push([i*MOD + 0.80, i*MOD + 6.70]);
+box([-T, 0, W], [L+T, SILL, W+T], M_WALL);
+box([-T, HEAD, W], [L+T, H, W+T], M_WALL);
+let pxw = -T;
+for (const wd of wins){ if (wd[0] > pxw + 1e-4) box([pxw, SILL, W], [wd[0], HEAD, W+T], M_WALL); pxw = wd[1]; }
+box([pxw, SILL, W], [L+T, HEAD, W+T], M_WALL);
+
+const portals = [];
+for (const wd of wins){
+  const x0 = wd[0], x1 = wd[1], wdt = x1 - x0;
+  for (let k = 1; k < 4; k++){
+    const mx = x0 + wdt*k/4;
+    box([mx-0.045, SILL, W-0.006], [mx+0.045, HEAD, W+T+0.006], M_WFRAME);
+  }
+  box([x0, 2.14, W-0.006], [x1, 2.225, W+T+0.006], M_WFRAME);
+  box([x0, SILL, W-0.006], [x1, SILL+0.065, W+T+0.006], M_WFRAME);
+  box([x0, HEAD-0.065, W-0.006], [x1, HEAD, W+T+0.006], M_WFRAME);
+  box([x0, SILL, W-0.006], [x0+0.065, HEAD, W+T+0.006], M_WFRAME);
+  box([x1-0.065, SILL, W-0.006], [x1, HEAD, W+T+0.006], M_WFRAME);
+  box([x0+0.05, SILL+0.05, W+0.105], [x1-0.05, HEAD-0.05, W+0.135], M_GLASS);
+  box([x0-0.10, SILL-0.065, W-0.17], [x1+0.10, SILL, W], M_SILLM);
+  box([x0-0.13, SILL-0.11, W+T], [x1+0.13, SILL-0.025, W+T+0.15], M_EXT);
+  portals.push([x0, SILL, x1, HEAD]);
+}
+
+// ---- 吸顶灯 ----
+const lamps = [];
+for (let i = 0; i < 8; i++){
+  const c = 1.875 + i*3.75;
+  const a = [c-0.62, H-0.10, W*0.5-0.19], b = [c+0.62, H-0.02, W*0.5+0.19];
+  box(a, b, M_LAMP);
+  lamps.push([a, b]);
+}
+
+// ---- 室外环境（透过窗户可见）----
+box([-6.5, GY, 21.0], [36.5, 9.2, 27.0], M_EXT);
+box([-6.5, GY, 10.4], [36.5, GY+0.95, 10.75], M_EXT);
+for (const tx of [2.5, 11.0, 19.5, 28.0]){
+  box([tx-0.13, GY, 7.4], [tx+0.13, GY+2.1, 7.66], M_TRUNK);
+  box([tx-1.15, GY+2.0, 6.45], [tx+1.15, GY+3.5, 8.75], M_LEAF);
+  box([tx-0.80, GY+3.3, 6.85], [tx+0.80, GY+4.25, 8.35], M_LEAF);
+}
+
+/* ===================== 2. X 轴均匀网格加速结构 ===================== */
+let gLo = Infinity, gHi = -Infinity;
+for (const b of boxes){ gLo = Math.min(gLo, b.mn[0]); gHi = Math.max(gHi, b.mx[0]); }
+gLo -= 0.5; gHi += 0.5;
+const CELL = 1.5;
+const NCELL = Math.max(1, Math.ceil((gHi - gLo)/CELL));
+const cells = [];
+for (let i = 0; i < NCELL; i++) cells.push([]);
+boxes.forEach(function(b, i){
+  let c0 = Math.floor((b.mn[0]-gLo)/CELL), c1 = Math.floor((b.mx[0]-gLo)/CELL);
+  c0 = Math.max(0, Math.min(NCELL-1, c0));
+  c1 = Math.max(0, Math.min(NCELL-1, c1));
+  for (let c = c0; c <= c1; c++) cells[c].push(i);
+});
+
+const texels = [];
+for (const b of boxes){
+  texels.push([b.mn[0], b.mn[1], b.mn[2], b.m]);
+  texels.push([b.mx[0], b.mx[1], b.mx[2], 0]);
+}
+const CELL_BASE = texels.length;
+const idxList = [];
+for (const c of cells){ texels.push([idxList.length, c.length, 0, 0]); for (const i of c) idxList.push(i); }
+const IDX_BASE = texels.length;
+for (const i of idxList) texels.push([i, 0, 0, 0]);
+
+const TEXW = 512;
+const texH = Math.ceil(texels.length / TEXW);
+const sceneData = new Float32Array(TEXW*texH*4);
+texels.forEach(function(t, i){ sceneData.set(t, i*4); });
+
+const matData = new Float32Array(mats.length*3*4);
+mats.forEach(function(m, i){
+  matData.set([m.albedo[0], m.albedo[1], m.albedo[2], m.rough], i*12);
+  matData.set([m.emis[0], m.emis[1], m.emis[2], m.kind + m.proc*16], i*12+4);
+  matData.set([m.f0[0], m.f0[1], m.f0[2], 0], i*12+8);
+});
+
+/* ===================== 3. WebGL2 初始化 ===================== */
+const canvas = $('c');
+const gl = canvas.getContext('webgl2', {antialias:false, alpha:false, depth:false,
+  preserveDrawingBuffer: SHOT, powerPreference:'high-performance'});
+if (!gl){ fail('当前浏览器不支持 WebGL2，无法运行路径追踪。'); throw new Error('no webgl2'); }
+let accumFmt = gl.RGBA32F, accumType = gl.FLOAT;
+if (!gl.getExtension('EXT_color_buffer_float')){
+  if (gl.getExtension('EXT_color_buffer_half_float')){ accumFmt = gl.RGBA16F; accumType = gl.HALF_FLOAT; }
+  else fail('缺少浮点渲染扩展(EXT_color_buffer_float)，累积降噪可能失效。');
+}
+
+function sh(type, src, name){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) fail('[' + name + '] shader compile failed:\n' + gl.getShaderInfoLog(s));
+  return s;
+}
+function prog(fsSrc, name){
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, $('vs').textContent, 'vs'));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsSrc, name));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) fail('[' + name + '] link failed:\n' + gl.getProgramInfoLog(p));
+  return p;
+}
+const ptProg = prog($('fs_pt').textContent, 'path-tracer');
+const fltProg = prog($('fs_flt').textContent, 'denoise');
+const tmProg = prog($('fs_tm').textContent, 'tonemap');
+
+function dataTex(data, w, h){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+const sceneTex = dataTex(sceneData, TEXW, texH);
+const matTex = dataTex(matData, mats.length*3, 1);
+
+let accTex = [null, null], accFbo = [null, null], cur = 0;
+let rw = 0, rh = 0;
+const PIXEL_CAP = 1000000;
+let gbufA = null, gbufB = null, filtTex = null, filtFbo = null;
+function mkTarget(w, h){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, accumFmt, w, h, 0, gl.RGBA, accumType, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function allocAccum(w, h){
+  let k = 1;
+  if (w*h > PIXEL_CAP) k = Math.sqrt(PIXEL_CAP/(w*h));
+  rw = Math.max(8, Math.floor(w*k)); rh = Math.max(8, Math.floor(h*k));
+  if (gbufA) gl.deleteTexture(gbufA);
+  if (gbufB) gl.deleteTexture(gbufB);
+  if (filtTex) gl.deleteTexture(filtTex);
+  if (filtFbo) gl.deleteFramebuffer(filtFbo);
+  gbufA = mkTarget(rw, rh); gbufB = mkTarget(rw, rh); filtTex = mkTarget(rw, rh);
+  for (let i = 0; i < 2; i++){
+    if (accTex[i]) gl.deleteTexture(accTex[i]);
+    if (accFbo[i]) gl.deleteFramebuffer(accFbo[i]);
+    accTex[i] = mkTarget(rw, rh);
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accTex[i], 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, gbufA, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, gbufB, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+    accFbo[i] = f;
+  }
+  filtFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, filtFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, filtTex, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  reset();
+}
+
+/* ===================== 4. 相机与漫游 ===================== */
+const START = {x:1.35, y:1.62, z:1.45, yaw:78*Math.PI/180, pitch:-0.03};
+const cam = Object.assign({}, START);
+const keys = Object.create(null);
+let accW = 0, needReset = true;
+let lampOn = true;
+function reset(){ needReset = true; accW = 0; }
+
+const XMIN = 0.45, XMAX = L - 0.45, ZMIN = 0.42, ZMAX = W - 0.58;
+function camBasis(){
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const f = [cp*sy, sp, cp*cy];
+  const r = [-cy, 0, sy];
+  const u = [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+  return {f:f, r:r, u:u};
+}
+function move(dt){
+  const sp = ((keys['shiftleft']||keys['shiftright']) ? 4.6 : 2.1)*dt;
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  let dx = 0, dz = 0;
+  if (keys['keyw']||keys['arrowup'])    { dx += sy; dz += cy; }
+  if (keys['keys']||keys['arrowdown'])  { dx -= sy; dz -= cy; }
+  if (keys['keyd']||keys['arrowright']) { dx -= cy; dz += sy; }
+  if (keys['keya']||keys['arrowleft'])  { dx += cy; dz -= sy; }
+  const len = Math.hypot(dx, dz);
+  if (len > 1e-5){
+    cam.x = Math.min(XMAX, Math.max(XMIN, cam.x + dx/len*sp));
+    cam.z = Math.min(ZMAX, Math.max(ZMIN, cam.z + dz/len*sp));
+    reset();
+  }
+}
+addEventListener('keydown', function(e){
+  const k = e.code.toLowerCase();
+  keys[k] = true;
+  if (k === 'keyl'){ lampOn = !lampOn; $('b_lamp').classList.toggle('on', lampOn); reset(); }
+  if (k === 'keyr'){ Object.assign(cam, START); reset(); }
+  if (k === 'keyh'){ ['hud','panel','help'].forEach(function(id){ $(id).classList.toggle('hide'); }); }
+  if (['keyw','keya','keys','keyd','space'].indexOf(k) >= 0) e.preventDefault();
+});
+addEventListener('keyup', function(e){ keys[e.code.toLowerCase()] = false; });
+
+let dragging = false, lastX = 0, lastY = 0;
+function look(dx, dy){
+  cam.yaw -= dx*0.0026;
+  cam.pitch = Math.max(-1.35, Math.min(1.35, cam.pitch - dy*0.0026));
+  reset();
+}
+canvas.addEventListener('mousedown', function(e){ dragging = true; lastX = e.clientX; lastY = e.clientY; });
+addEventListener('mouseup', function(){ dragging = false; });
+addEventListener('mousemove', function(e){
+  if (document.pointerLockElement === canvas) look(e.movementX, e.movementY);
+  else if (dragging){ look(e.clientX-lastX, e.clientY-lastY); lastX = e.clientX; lastY = e.clientY; }
+});
+$('overlay').addEventListener('click', function(){
+  $('overlay').classList.add('hide');
+  if (canvas.requestPointerLock) canvas.requestPointerLock();
+});
+canvas.addEventListener('click', function(){
+  if (!SHOT && document.pointerLockElement !== canvas && canvas.requestPointerLock) canvas.requestPointerLock();
+});
+
+/* ===================== 5. 界面参数 ===================== */
+let hour = 8.5, azOff = 0, exposure = 1.1, maxB = 4, uiScale = 0.6, autoScale = true;
+let elOverride = null, azOverride = null;
+function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+function mix3(a, b, t){ return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+function fmtTime(v){
+  const hh = Math.floor(v), mm = Math.round((v - hh)*60);
+  const s = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+  let ph = '正午';
+  if (v < 6.6) ph = '拂晓'; else if (v < 8.3) ph = '清晨'; else if (v < 11) ph = '上午';
+  else if (v < 13.3) ph = '正午'; else if (v < 16.4) ph = '下午'; else if (v < 18.1) ph = '黄昏'; else ph = '暮色';
+  return s + ' · ' + ph;
+}
+// 由时刻推出太阳位置、日光色温与天空渐变（大气消光近似）
+function sunSky(){
+  const t = clamp01((hour - 5)/14);
+  let el = 58*Math.sin(Math.PI*t) - 2.0;
+  let az = 62*(1 - 2*t) + azOff;
+  if (elOverride !== null) el = elOverride;
+  if (azOverride !== null) az = azOverride;
+  const elr = el*Math.PI/180, azr = az*Math.PI/180;
+  const s = Math.sin(elr);
+  const m = 1/(Math.max(s, 0) + 0.15*Math.pow(Math.max(el, -1.4) + 3.885, -1.253));  // 大气质量
+  const ex = [Math.exp(-0.075*m), Math.exp(-0.190*m), Math.exp(-0.430*m)];           // 瑞利消光 -> 日出日落变红
+  const above = clamp01((el + 1.2)/4.0);
+  const I = 7.6*above;
+  const sunE = [I*ex[0], I*ex[1], I*ex[2]];
+  const day = clamp01((el + 4)/22), ds = day*day*(3 - 2*day);
+  const dawn = 1 - clamp01((el - 1)/30);          // 太阳越低 -> 暖色权重越高
+  const skyI = 0.06 + 1.14*clamp01((el + 5)/30);
+  let zen = mix3([0.070,0.085,0.190], [0.240,0.420,0.920], ds);
+  let hor = mix3([0.360,0.230,0.220], [0.620,0.720,0.880], ds);
+  hor = mix3(hor, [0.99,0.44,0.13], dawn*0.80*above);   // 朝霞 / 晚霞
+  zen = mix3(zen, [0.32,0.20,0.40], dawn*0.50*above);
+  const glowK = 0.012 + 0.30*dawn*dawn;
+  return {
+    el: el,
+    dir: [Math.cos(elr)*Math.sin(azr), s, Math.cos(elr)*Math.cos(azr)],
+    E: sunE,
+    zen: [zen[0]*skyI, zen[1]*skyI, zen[2]*skyI],
+    hor: [hor[0]*skyI, hor[1]*skyI, hor[2]*skyI],
+    glow: [sunE[0]*glowK, sunE[1]*glowK, sunE[2]*glowK],
+    glowPow: Math.max(4, 60 - 54*dawn)
+  };
+}
+let effScale = 0.6;
+function resize(){
+  const w = SHOT ? canvas.width : Math.max(320, Math.floor(innerWidth));
+  const h = SHOT ? canvas.height : Math.max(240, Math.floor(innerHeight));
+  if (!SHOT){ canvas.width = w; canvas.height = h; }
+  allocAccum(Math.floor(w*effScale), Math.floor(h*effScale));
+}
+function bindRange(id, vid, setter, fmt){
+  const el = $(id);
+  const upd = function(){ const v = parseFloat(el.value); setter(v); $(vid).textContent = fmt(v); reset(); };
+  el.addEventListener('input', upd);
+  const v0 = parseFloat(el.value); setter(v0); $(vid).textContent = fmt(v0);
+}
+bindRange('i_tm','v_tm', function(v){ hour = v; }, fmtTime);
+bindRange('i_az','v_az', function(v){ azOff = v; }, function(v){ return (v > 0 ? '+' : '') + v + '°'; });
+bindRange('i_ex','v_ex', function(v){ exposure = v; }, function(v){ return v.toFixed(2); });
+bindRange('i_bo','v_bo', function(v){ maxB = v; }, function(v){ return v + ' 次'; });
+bindRange('i_sc','v_sc', function(v){ uiScale = v; effScale = v; if (rw) resize(); }, function(v){ return Math.round(v*100) + '%'; });
+$('b_lamp').addEventListener('click', function(){ lampOn = !lampOn; $('b_lamp').classList.toggle('on', lampOn); reset(); });
+$('b_auto').addEventListener('click', function(){ autoScale = !autoScale; $('b_auto').classList.toggle('on', autoScale); });
+addEventListener('resize', function(){ effScale = uiScale; resize(); });
+
+/* ===================== 6. 渲染循环 ===================== */
+const uPT = {}, uTM = {};
+['uScene','uMats','uPrev','uRes','uCamPos','uCamRight','uCamUp','uCamFwd','uTanHalf','uSeed',
+ 'uSPP','uMaxB','uReset','uDebug','uNumCells','uCellBase','uIdxBase','uCellSize','uGridMin','uSunDir','uSunE','uSunCos',
+ 'uSunDisk','uSkyZen','uSkyHor','uSunGlow','uGlowPow','uGroundY','uNumPortals','uPortals','uPortalZ','uNumLamps','uLampA','uLampB','uLampE']
+ .forEach(function(n){ uPT[n] = gl.getUniformLocation(ptProg, n); });
+['uAcc','uAccRes','uDstRes','uExposure','uBlur'].forEach(function(n){ uTM[n] = gl.getUniformLocation(tmProg, n); });
+const uFL = {};
+['uAcc','uGA','uGB','uRes','uRadius','uStep'].forEach(function(n){ uFL[n] = gl.getUniformLocation(fltProg, n); });
+
+const portalArr = new Float32Array(32);
+portals.slice(0,8).forEach(function(p,i){ portalArr.set(p, i*4); });
+const lampA = new Float32Array(48), lampB = new Float32Array(48);
+lamps.slice(0,12).forEach(function(lp,i){
+  lampA.set([lp[0][0], lp[0][1], lp[0][2], 0], i*4);
+  lampB.set([lp[1][0], lp[1][1], lp[1][2], 0], i*4);
+});
+
+const SUN_ANG = 0.6*Math.PI/180;
+let frameIdx = 0, spp = 1, dbgMode = 0, filtOff = false;
+function tracePass(){
+  const S = sunSky();
+  const b = camBasis();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, accFbo[cur]);
+  gl.viewport(0, 0, rw, rh);
+  gl.useProgram(ptProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneTex); gl.uniform1i(uPT.uScene, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, matTex);   gl.uniform1i(uPT.uMats, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, accTex[1-cur]); gl.uniform1i(uPT.uPrev, 2);
+  gl.uniform2f(uPT.uRes, rw, rh);
+  gl.uniform3f(uPT.uCamPos, cam.x, cam.y, cam.z);
+  gl.uniform3f(uPT.uCamFwd, b.f[0], b.f[1], b.f[2]);
+  gl.uniform3f(uPT.uCamRight, b.r[0], b.r[1], b.r[2]);
+  gl.uniform3f(uPT.uCamUp, b.u[0], b.u[1], b.u[2]);
+  gl.uniform1f(uPT.uTanHalf, Math.tan(0.5*70*Math.PI/180));
+  gl.uniform1f(uPT.uSeed, frameIdx % 65536);
+  gl.uniform1i(uPT.uSPP, spp);
+  gl.uniform1i(uPT.uMaxB, maxB);
+  gl.uniform1i(uPT.uReset, needReset ? 1 : 0);
+  gl.uniform1i(uPT.uDebug, dbgMode);
+  gl.uniform1i(uPT.uNumCells, NCELL);
+  gl.uniform1i(uPT.uCellBase, CELL_BASE);
+  gl.uniform1i(uPT.uIdxBase, IDX_BASE);
+  gl.uniform1f(uPT.uCellSize, CELL);
+  gl.uniform1f(uPT.uGridMin, gLo);
+  gl.uniform3f(uPT.uSunDir, S.dir[0], S.dir[1], S.dir[2]);
+  gl.uniform3f(uPT.uSunE, S.E[0], S.E[1], S.E[2]);
+  gl.uniform1f(uPT.uSunCos, Math.cos(SUN_ANG));
+  gl.uniform1f(uPT.uSunDisk, Math.min(1.0/(2*Math.PI*(1-Math.cos(SUN_ANG))), 320));
+  gl.uniform3f(uPT.uSkyZen, S.zen[0], S.zen[1], S.zen[2]);
+  gl.uniform3f(uPT.uSkyHor, S.hor[0], S.hor[1], S.hor[2]);
+  gl.uniform3f(uPT.uSunGlow, S.glow[0], S.glow[1], S.glow[2]);
+  gl.uniform1f(uPT.uGlowPow, S.glowPow);
+  gl.uniform1f(uPT.uGroundY, GY);
+  gl.uniform1i(uPT.uNumPortals, Math.min(portals.length, 8));
+  gl.uniform4fv(uPT.uPortals, portalArr);
+  gl.uniform1f(uPT.uPortalZ, W);
+  gl.uniform1i(uPT.uNumLamps, Math.min(lamps.length, 12));
+  gl.uniform4fv(uPT.uLampA, lampA);
+  gl.uniform4fv(uPT.uLampB, lampB);
+  const le = lampOn ? 7.5 : 0.0;
+  gl.uniform3f(uPT.uLampE, le, le*0.97, le*0.90);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  accW = (needReset ? 0 : accW) + spp;
+  needReset = false;
+  cur = 1 - cur;
+  frameIdx++;
+}
+// 反照率解调 + 法线/深度引导的联合双边滤波：低采样时抹掉噪点，纹理与边缘保留
+function filterPass(){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, filtFbo);
+  gl.viewport(0, 0, rw, rh);
+  gl.useProgram(fltProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, accTex[1-cur]); gl.uniform1i(uFL.uAcc, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, gbufA); gl.uniform1i(uFL.uGA, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, gbufB); gl.uniform1i(uFL.uGB, 2);
+  gl.uniform2f(uFL.uRes, rw, rh);
+  let radius = 0, stp = 1;
+  if (filtOff){ radius = 0; stp = 1; }
+  else if (accW <= 2){ radius = 2; stp = 2; }
+  else if (accW <= 8){ radius = 2; stp = 1; }
+  else if (accW <= 28){ radius = 1; stp = 1; }
+  gl.uniform1i(uFL.uRadius, radius);
+  gl.uniform1i(uFL.uStep, stp);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function present(){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(tmProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, filtTex); gl.uniform1i(uTM.uAcc, 0);
+  gl.uniform2f(uTM.uAccRes, rw, rh);
+  gl.uniform2f(uTM.uDstRes, canvas.width, canvas.height);
+  gl.uniform1f(uTM.uExposure, exposure);
+  gl.uniform1f(uTM.uBlur, 0.0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+let last = performance.now(), fpsT = last, fpsN = 0, avgMs = 16, tuneN = 0;
+function loop(now){
+  const dt = Math.min(0.05, (now - last)/1000);
+  last = now;
+  move(dt);
+  const t0 = performance.now();
+  tracePass();
+  filterPass();
+  present();
+  avgMs = avgMs*0.9 + (performance.now() - t0)*0.1;
+  if (autoScale && ++tuneN > 22){
+    tuneN = 0;
+    let s = effScale;
+    if (avgMs > 40){
+      if (spp > 1) spp--;
+      else if (s > 0.25) s = Math.max(0.25, s - 0.08);
+    } else if (avgMs < 13){
+      if (s < uiScale - 1e-3) s = Math.min(uiScale, s + 0.06);
+      else if (spp < 4) spp++;
+    }
+    if (Math.abs(s - effScale) > 1e-3){ effScale = s; allocAccum(Math.floor(canvas.width*s), Math.floor(canvas.height*s)); }
+  }
+  fpsN++;
+  if (now - fpsT > 400){
+    $('s_fps').textContent = (fpsN*1000/(now - fpsT)).toFixed(0) + ' fps';
+    $('s_spp').textContent = accW + ' spp × ' + spp;
+    $('s_res').textContent = rw + '×' + rh;
+    $('s_pos').textContent = cam.x.toFixed(1) + ', ' + cam.z.toFixed(1);
+    fpsT = now; fpsN = 0;
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ===================== 7. 启动 / 离屏截图模式 ===================== */
+$('s_box').textContent = boxes.length + ' 个 / ' + NCELL + ' 格';
+if (!SHOT) $('status').textContent = '';
+if (SHOT){
+  let w = parseInt(Q.get('w') || '640', 10), h = parseInt(Q.get('h') || '360', 10);
+  if (Q.get('fit') === '1'){ w = innerWidth; h = innerHeight; }
+  const frames = parseInt(Q.get('frames') || '8', 10);
+  console.log('DSH_VIEWPORT inner=' + innerWidth + 'x' + innerHeight + ' dpr=' + devicePixelRatio);
+  canvas.width = w; canvas.height = h;
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  const views = [
+    {x:1.35, y:1.62, z:1.45, yaw:78,  pitch:-2},
+    {x:8.0,  y:1.62, z:1.20, yaw:96,  pitch:-6},
+    {x:15.0, y:1.62, z:1.50, yaw:150, pitch:2},
+    {x:22.0, y:1.62, z:2.10, yaw:20,  pitch:8},
+    {x:6.0,  y:1.62, z:2.20, yaw:-96, pitch:-4},
+    {x:14.0, y:1.62, z:1.50, yaw:170, pitch:-3}
+  ];
+  const vi = Math.max(0, Math.min(views.length-1, parseInt(Q.get('view') || '0', 10)));
+  const v = views[vi];
+  cam.x = parseFloat(Q.get('px') || v.x); cam.y = parseFloat(Q.get('py') || v.y); cam.z = parseFloat(Q.get('pz') || v.z);
+  cam.yaw = parseFloat(Q.get('yaw') || v.yaw)*Math.PI/180;
+  cam.pitch = parseFloat(Q.get('pitch') || v.pitch)*Math.PI/180;
+  if (Q.get('lamp') === '0') lampOn = false;
+  if (Q.get('bounce')) maxB = parseInt(Q.get('bounce'), 10);
+  if (Q.get('exp')) exposure = parseFloat(Q.get('exp'));
+  if (Q.get('dbg')) dbgMode = parseInt(Q.get('dbg'), 10);
+  if (Q.get('nofilt') === '1') filtOff = true;
+  if (Q.get('time')) hour = parseFloat(Q.get('time'));
+  if (Q.get('az')) azOverride = parseFloat(Q.get('az'));
+  if (Q.get('el')) elOverride = parseFloat(Q.get('el'));
+  autoScale = false; effScale = 1.0; uiScale = 1.0;
+  ['overlay','panel','help','hud'].forEach(function(id){ $(id).classList.add('hide'); });
+  $('status').style.cssText = 'position:fixed;left:0;bottom:0;font:11px Consolas,monospace;color:#0f0;background:#000;padding:2px 5px;z-index:50';
+  allocAccum(w, h);
+  setTimeout(function(){
+    const t0 = performance.now();
+    try {
+      for (let i = 0; i < frames; i++) tracePass();
+      filterPass();
+      present();
+      gl.finish();
+    } catch (e){ fail('render: ' + e); }
+    const ms = (performance.now() - t0).toFixed(0);
+    $('status').textContent = 'RENDER_OK frames=' + frames + ' res=' + rw + 'x' + rh +
+      ' ms=' + ms + ' boxes=' + boxes.length + ' cells=' + NCELL + ' mats=' + mats.length +
+      ' glErr=' + gl.getError();
+    console.log('DSH_STATUS ' + $('status').textContent);
+  }, 60);
+} else {
+  resize();
+  requestAnimationFrame(loop);
+}
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1426ccf0ae913',t:'MTc4OTc0NDAzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

@@ -111,6 +111,21 @@
 
     .btn-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
 
+    .opt-row {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        margin-top: 14px; padding: 10px 12px;
+        background: #f6f8fa; border: 1px solid #e1e4e8;
+        font-size: 13px; color: #24292f;
+    }
+    .opt-row label { font-weight: 500; }
+    .opt-row select {
+        font: inherit; font-size: 13px; padding: 3px 6px;
+        border: 1px solid #c6ccd4; background: #ffffff; color: #24292f;
+        border-radius: 0; cursor: pointer;
+    }
+    .opt-row select:disabled { color: #8b949e; cursor: default; background: #f0f2f5; }
+    .opt-row .hint { color: #8b949e; font-size: 12px; }
+
     .bar { height: 6px; background: #e1e4e8; margin: 14px 0 6px; }
     .bar-fill { height: 100%; background: #0969da; width: 0; }
     .bar-multi { display: flex; gap: 2px; height: 8px; margin: 14px 0 6px; }
@@ -157,6 +172,10 @@
         .note b { color: #c9d1d9; }
         .meta-table .mono { color: #c9d1d9; }
         .piece-list li { border-bottom-color: #30363d; }
+        .opt-row { background: #161b22; border-color: #30363d; color: #c9d1d9; }
+        .opt-row select { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+        .opt-row select:disabled { background: #161b22; color: #6e7681; }
+        .opt-row .hint { color: #6e7681; }
         button { background: #21262d; border-color: #30363d; color: #c9d1d9; }
         button:hover { background: #30363d; }
         .bar { background: #30363d; }
@@ -194,7 +213,7 @@
             <tr><td>文件名</td><td class="mono" id="mName">—</td></tr>
             <tr><td>大小</td><td class="mono" id="mSize">—</td></tr>
             <tr><td>分片数</td><td class="mono" id="mParts">—</td></tr>
-            <tr><td>并发数</td><td class="mono" id="mConc">—</td></tr>
+            <tr><td>建议并发</td><td class="mono" id="mConc">—</td></tr>
             <tr><td>原件 SHA-256</td><td class="mono" id="mSha" style="word-break:break-all;">—</td></tr>
         </table>
         <p style="font-size:13px;color:#57606a;margin:12px 0 0;line-height:1.7;" id="mDesc"></p>
@@ -210,6 +229,21 @@
         <h2>下载与合成</h2>
         <div class="bar"><div class="bar-fill" id="barFill"></div></div>
         <div class="status" id="status">等待开始</div>
+
+        <div class="opt-row">
+            <label for="concSel">并发线程数</label>
+            <select id="concSel">
+                <option value="1">1（最稳）</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4（默认）</option>
+                <option value="6">6</option>
+                <option value="8">8</option>
+                <option value="12">12</option>
+                <option value="16">16（最猛）</option>
+            </select>
+            <span class="hint" id="concHint">同时拉取的分片个数，网络差就调小</span>
+        </div>
 
         <div class="btn-row">
             <button type="button" class="primary" id="btnStart">开始下载</button>
@@ -239,13 +273,19 @@
    ========================================================================= */
 
 var MANIFEST = "parts/manifest.json";
+var CONC_KEY = "split.conc";        /* 记住上次选的线程数 */
+var CONC_MAX = 16;                  /* 上限，防止有人填个 999 把浏览器打爆 */
 
 var state = {
     manifest: null,
     buffers: [],     // 每个分片的 ArrayBuffer，null 表示还没到
     status: [],      // 'wait' | 'doing' | 'done' | 'fail'
     running: false,
-    cancelled: false
+    cancelled: false,
+    conc: 4,         // 当前并发线程数
+    t0: 0,           // 本轮开始时间，用于算速度
+    timer: null,     // 速度刷新定时器
+    bytesDone: 0     // 已下载字节，用于算速度
 };
 
 function $(id) { return document.getElementById(id); }
@@ -364,6 +404,7 @@ function fetchPart(i, attempt) {
         .then(function (buf) {
             state.buffers[i] = buf;
             state.status[i] = "done";
+            state.bytesDone += buf.byteLength;
             var st = $("st" + i);
             if (st) { st.className = "st done"; st.textContent = "完成"; }
             updateProgress();
@@ -400,7 +441,7 @@ function sha256(arrayBuffer) {
 
 /* ---------- 并发调度 ---------- */
 function runPool() {
-    var conc = state.manifest.concurrency || 4;
+    var conc = Math.max(1, Math.min(CONC_MAX, state.conc || 4));
     var next = 0;
 
     function worker() {
@@ -418,6 +459,24 @@ function runPool() {
     var runners = [];
     for (var k = 0; k < conc; k++) runners.push(worker());
     return Promise.all(runners);
+}
+
+/* ---------- 速度显示 ---------- */
+function startSpeed() {
+    state.t0 = performance.now();
+    state.bytesDone = 0;
+    stopSpeed();
+    state.timer = setInterval(function () {
+        var secs = (performance.now() - state.t0) / 1000;
+        if (secs <= 0.3) return;
+        var sp = state.bytesDone / secs;
+        var done = state.status.filter(function (s) { return s === "done"; }).length;
+        $("status").textContent = "正在下载… " + done + "/" + state.status.length
+            + "　均速 " + fmtSize(sp) + "/s";
+    }, 500);
+}
+function stopSpeed() {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
 }
 
 /* ---------- 合成 ---------- */
@@ -454,16 +513,20 @@ $("btnStart").addEventListener("click", function () {
     updateProgress();
     $("btnStart").disabled = true;
     $("btnCancel").disabled = false;
+    $("concSel").disabled = true;
     $("btnRetry").classList.add("hidden");
     $("btnSave").classList.add("hidden");
     $("status").textContent = "正在下载…";
     log("开始下载 " + state.manifest.parts.length + " 个分片，并发 "
-        + state.manifest.concurrency + " 个", "hi");
+        + state.conc + " 个", "hi");
 
     var t0 = performance.now();
+    startSpeed();
     runPool().then(function () {
         state.running = false;
+        stopSpeed();
         $("btnCancel").disabled = true;
+        $("concSel").disabled = false;
         if (state.cancelled) {
             $("status").textContent = "已取消";
             log("已取消。", "er");
@@ -524,10 +587,14 @@ $("btnRetry").addEventListener("click", function () {
     $("btnRetry").classList.add("hidden");
     $("btnStart").disabled = true;
     $("btnCancel").disabled = false;
+    $("concSel").disabled = true;
     log("重试失败分片…", "hi");
+    startSpeed();
     runPool().then(function () {
         state.running = false;
+        stopSpeed();
         $("btnCancel").disabled = true;
+        $("concSel").disabled = false;
         var failed = state.status.filter(function (s) { return s === "fail"; }).length;
         if (failed) {
             $("btnRetry").classList.remove("hidden");
@@ -548,7 +615,27 @@ $("btnSave").addEventListener("click", function () {
     if (blob) { doSave(blob); log("已触发保存：" + state.manifest.name, "ok"); }
 });
 
+/* ---------- 线程数控件 ---------- */
+function applyConc(n, remember) {
+    n = Math.max(1, Math.min(CONC_MAX, parseInt(n, 10) || 4));
+    state.conc = n;
+    $("concSel").value = String(n);
+    if (remember) { try { localStorage.setItem(CONC_KEY, String(n)); } catch (e) {} }
+    $("concHint").textContent = n <= 2 ? "同时拉取 " + n + " 个分片，慢但稳"
+                            : n >= 12 ? "同时拉取 " + n + " 个分片，快但吃带宽"
+                            : "同时拉取 " + n + " 个分片，网络差就调小";
+}
+$("concSel").addEventListener("change", function () {
+    applyConc(this.value, true);
+});
+
 /* ---------- 初始化 ---------- */
+(function initConc() {
+    var saved = 4;
+    try { saved = parseInt(localStorage.getItem(CONC_KEY), 10) || 4; } catch (e) {}
+    applyConc(saved, false);
+})();
+
 loadManifest().catch(function (e) {
     $("status").textContent = "清单读取失败";
     log("读不到 " + MANIFEST + "：" + e.message, "er");

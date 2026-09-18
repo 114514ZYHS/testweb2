@@ -233,6 +233,8 @@
     </label>
 
     <button type="button" id="btnNight">夜间</button>
+    <button type="button" id="btnLocal" title="打开电脑里的 txt 文件">本地</button>
+    <input type="file" id="fileInput" accept=".txt,text/plain" hidden>
 </div>
 
 <div class="bar" id="bar"><div class="bar-fill" id="barFill"></div></div>
@@ -257,12 +259,13 @@
 
 <script>
 /* =========================================================================
-   小说阅读器（紧凑版）
+   小说阅读器
    -------------------------------------------------------------------------
-   书库来源：同目录 books.json（由脚本生成）。
-   拿不到时回退内置示例书单，避免白屏。
+   书库来源：同目录 books.json（由脚本生成），拿不到时回退内置书单。
+   新增小说：把 txt 丢进 TXT/，重跑一次生成脚本（见维护手册 4.10 节）。
 
-   新增小说：把 txt 丢进 TXT/，再跑一次生成脚本（见维护手册 4.10 节）。
+   阅读进度：按书名分别存，各篇互不影响。换每页字数时以"当前页中间位置"
+   的字符偏移为锚点重新定位，避免跳页。
    ========================================================================= */
 
 var FALLBACK_BOOKS = [
@@ -274,8 +277,11 @@ var FALLBACK_BOOKS = [
 
 var state = {
     books: [], idx: -1, text: "",
-    page: 0, font: 18, per: 1000, lh: 1.8, night: false
+    page: 0, font: 18, per: 1000, lh: 1.8, night: false,
+    local: false           /* 当前看的是不是本地文件 */
 };
+
+var PROG_KEY = "novel.prog";        /* 阅读进度表：{ 书名: 字符偏移 } */
 
 function $(id) { return document.getElementById(id); }
 function encName(n) { return encodeURI(n); }
@@ -295,9 +301,33 @@ function loadBooks() {
             var w = $("scanWarn");
             w.classList.remove("hide");
             w.textContent = "读取 books.json 失败（" + e.message +
-                "），当前显示内置示例书单。本地双击打开时浏览器会拦截读取，放到网站上即正常。";
+                "），当前显示内置书单。本地双击打开时浏览器会拦截读取，放到网站上即正常。";
             return FALLBACK_BOOKS;
         });
+}
+
+/* ---------- 阅读进度：按书分别记 ---------- */
+function readProg() {
+    try { return JSON.parse(localStorage.getItem(PROG_KEY) || "{}"); }
+    catch (e) { return {}; }
+}
+function progKey() {
+    if (state.local) return "local:" + (state.localName || "");
+    var b = state.books[state.idx];
+    return b ? "book:" + b.file : "";
+}
+function saveProg() {
+    var k = progKey();
+    if (!k) return;
+    var m = readProg();
+    m[k] = state.text ? state.page * state.per : 0;
+    try { localStorage.setItem(PROG_KEY, JSON.stringify(m)); } catch (e) {}
+}
+function loadProgFor(key) {
+    var m = readProg();
+    var off = m[key];
+    if (typeof off !== "number" || off < 0) return 0;
+    return Math.min(Math.floor(off / state.per), Math.max(0, totalPages() - 1));
 }
 
 function renderBookSelect() {
@@ -323,7 +353,8 @@ function openBook(i) {
     var b = state.books[i];
     if (!b) return;
     state.idx = i;
-    state.page = 0;
+    state.local = false;
+    state.localName = "";
     renderBookSelect();
 
     fetch(encName(b.file), { cache: "no-store" })
@@ -333,20 +364,61 @@ function openBook(i) {
         })
         .then(function (t) {
             state.text = t.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+            state.page = loadProgFor("book:" + b.file);   /* 各篇分别接着上次看 */
             renderPage();
             try { localStorage.setItem("novel.last", b.file); } catch (e) {}
         })
         .catch(function (e) {
             state.text = "读取失败：" + e.message +
                 "\n\n如果是本地双击打开的，浏览器不允许读取同目录文件，这是安全限制。放到网站上访问即可。";
+            state.page = 0;
             renderPage();
         });
+}
+
+/* ---------- 打开本地文件 ---------- */
+function openLocalFile(file) {
+    if (!file) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+        state.text = String(fr.result).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+        state.local = true;
+        state.localName = file.name;
+        state.idx = -1;
+        /* 下拉框里加/选中"本地"这一项 */
+        var sel = $("bookSel");
+        var o = document.getElementById("optLocal");
+        if (!o) {
+            o = document.createElement("option");
+            o.id = "optLocal";
+            sel.appendChild(o);
+        }
+        o.value = "__local__";
+        o.textContent = "[本地] " + file.name;
+        sel.value = "__local__";
+        state.page = loadProgFor(progKey());
+        renderPage();
+    };
+    fr.onerror = function () {
+        state.text = "本地文件读取失败。";
+        state.page = 0;
+        renderPage();
+    };
+    fr.readAsText(file, "UTF-8");
 }
 
 /* ---------- 分页 ---------- */
 function totalPages() {
     if (!state.text) return 1;
     return Math.max(1, Math.ceil(state.text.length / state.per));
+}
+
+/* 当前页的中间位置对应全文第几个字符（换档位时用它当锚点）。
+   注意不能用 per/2 硬算：最后一页往往不满，那算出来的位置会越过正文末尾。 */
+function anchorOffset() {
+    var start = state.page * state.per;
+    var len = Math.min(state.per, Math.max(0, state.text.length - start));
+    return start + Math.floor(len / 2);
 }
 
 function renderPage() {
@@ -385,11 +457,13 @@ function renderPage() {
 function go(p) {
     state.page = p;
     renderPage();
+    saveProg();
     window.scrollTo(0, 0);
 }
 
 /* ---------- 设置 ---------- */
 $("bookSel").addEventListener("change", function () {
+    if (this.value === "__local__") return;      /* 本地项只能通过按钮进入 */
     openBook(parseInt(this.value, 10) || 0);
 });
 $("fontSize").addEventListener("change", function () {
@@ -398,18 +472,26 @@ $("fontSize").addEventListener("change", function () {
     savePrefs();
 });
 $("perPage").addEventListener("change", function () {
-    var oldTotal = totalPages();
-    var ratio = oldTotal > 1 ? state.page / oldTotal : 0;
+    // 以"当前页中间"那个字的位置为锚点，换完档位后让这个字仍落在页中间附近，
+    // 这样读完半页再换档位不会跳回去重看。
+    var anchor = anchorOffset();
     state.per = parseInt(this.value, 10) || 1000;
-    // 换了每页字数，按原进度比例定位，避免跳得太突然
-    state.page = Math.min(Math.round(ratio * totalPages()), totalPages() - 1);
+    state.page = Math.min(Math.floor(anchor / state.per), Math.max(0, totalPages() - 1));
     renderPage();
+    saveProg();
     savePrefs();
 });
 $("lineHeight").addEventListener("change", function () {
     state.lh = parseFloat(this.value) || 1.8;
     $("content").style.lineHeight = state.lh;
     savePrefs();
+});
+
+/* ---------- 本地文件 ---------- */
+$("btnLocal").addEventListener("click", function () { $("fileInput").click(); });
+$("fileInput").addEventListener("change", function () {
+    if (this.files && this.files[0]) openLocalFile(this.files[0]);
+    this.value = "";                             /* 允许重复选同一个文件 */
 });
 
 function setNight(on) {

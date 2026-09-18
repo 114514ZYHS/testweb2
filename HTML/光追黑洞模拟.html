@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>黑洞模拟 · Kerr Spacetime Ray Tracer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;
+    font:12px/1.5 "Cascadia Mono",Consolas,"Sarasa Mono SC","Microsoft YaHei",monospace;color:#cfe0f5}
+  #gl{display:block;width:100vw;height:100vh;cursor:crosshair}
+  .pane{position:fixed;background:rgba(6,10,18,.62);border:1px solid rgba(120,170,255,.18);
+    border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  #hud{left:10px;top:10px;padding:8px 11px;min-width:232px;pointer-events:none;white-space:pre;
+    font-size:11.5px;text-shadow:0 1px 2px #000}
+  #hud b{color:#8ec6ff;font-weight:600}
+  .warn{color:#ffb060}.bad{color:#ff6b6b}.ok{color:#7ee08a}.dim{color:#7a8ba3}
+  #panel{right:10px;top:10px;width:266px;max-height:calc(100vh - 20px);overflow-y:auto;padding:6px 10px 10px}
+  #panel h3{margin:8px 0 4px;font-size:11px;letter-spacing:.14em;color:#8ec6ff;
+    border-bottom:1px solid rgba(120,170,255,.16);padding-bottom:3px;text-transform:uppercase}
+  .row{display:flex;align-items:center;gap:6px;margin:3px 0}
+  .row label{flex:1 1 auto;font-size:11px;color:#a9bdd6}
+  .row .val{flex:0 0 46px;text-align:right;color:#e8f1ff;font-size:11px}
+  .row input[type=range]{flex:0 0 108px;width:108px;height:14px;accent-color:#4f9dff;background:none}
+  .row input[type=checkbox]{accent-color:#4f9dff;width:14px;height:14px}
+  .row select{flex:0 0 118px;background:#0d1522;color:#dce9fb;border:1px solid rgba(120,170,255,.25);
+    border-radius:4px;font:inherit;font-size:11px;padding:1px 3px}
+  .btns{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0}
+  button{background:#122036;color:#cfe0f5;border:1px solid rgba(120,170,255,.28);border-radius:5px;
+    padding:3px 7px;font:inherit;font-size:11px;cursor:pointer}
+  button:hover{background:#1b3157;border-color:#4f9dff}
+  #panel.hide,#hud.hide{display:none}
+  #tip{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);padding:5px 12px;font-size:11px;
+    color:#93a9c4;pointer-events:none;text-align:center}
+  #ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 45%,rgba(12,20,36,.86),rgba(0,0,0,.95));z-index:9;cursor:pointer}
+  #ov.gone{opacity:0;pointer-events:none;transition:opacity .5s}
+  #ovin{max-width:660px;padding:26px 32px;text-align:left}
+  #ovin h1{margin:0 0 2px;font-size:24px;letter-spacing:.06em;color:#eaf3ff;font-weight:600}
+  #ovin h2{margin:0 0 16px;font-size:12px;letter-spacing:.22em;color:#5c9ae0;font-weight:400}
+  #ovin .k{display:inline-block;min-width:52px;color:#8ec6ff}
+  #ovin .g{display:grid;grid-template-columns:1fr 1fr;gap:2px 22px;font-size:12px;color:#b9cbe2}
+  #ovin p{color:#8ba1bb;font-size:11.5px;margin:14px 0 0}
+  #ovin .go{margin-top:18px;color:#ffd479;font-size:13px}
+  #err{position:fixed;left:0;top:0;right:0;max-height:42vh;display:none;padding:10px 14px;
+    background:rgba(8,11,18,.93);border-bottom:1px solid rgba(255,120,120,.3);color:#ff8f8f;
+    white-space:pre-wrap;overflow:auto;font-size:11.5px;z-index:99}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud" class="pane"></div>
+<div id="panel" class="pane"></div>
+<div id="tip">点击画面捕获鼠标 · <b>WASD</b> 平移 <b>R/F</b> 升降 <b>滚轮</b> 加减速 · <b>Tab</b> 面板 · <b>H</b> HUD · <b>Esc</b> 释放鼠标</div>
+<div id="ov"><div id="ovin">
+  <h1>黑洞模拟 · Kerr Spacetime</h1>
+  <h2>ROTATING BLACK HOLE / NULL GEODESIC RAY TRACER</h2>
+  <div class="g">
+    <div><span class="k">W A S D</span> 前后左右</div><div><span class="k">R / F</span> 上升 / 下降</div>
+    <div><span class="k">滚轮</span> 速度 ×/÷（SE 式指数档）</div><div><span class="k">Shift/Ctrl</span> 加速 / 微调</div>
+    <div><span class="k">鼠标</span> 视角（点击锁定）</div><div><span class="k">空格</span> 刹车归零</div>
+    <div><span class="k">L</span> 对准黑洞</div><div><span class="k">C</span> 复位相机</div>
+    <div><span class="k">[ / ]</span> 自旋 a −/+</div><div><span class="k">, / .</span> 背景亮度 −/+</div>
+    <div><span class="k">B</span> 背景模式（默认纯黑）</div><div><span class="k">G</span> 吸积盘开关</div>
+    <div><span class="k">K</span> 多普勒集束</div><div><span class="k">O</span> 奇异环</div>
+    <div><span class="k">1 2 3</span> 画质 低/中/高</div><div><span class="k">- / =</span> 渲染分辨率</div>
+    <div><span class="k">P</span> 暂停演化</div><div><span class="k">Tab</span> 参数面板 / <span class="k">H</span> HUD</div>
+  </div>
+  <p><b>反宇宙</b>：克尔时空 r 可取负值，r&lt;0 是斥力的「反宇宙」。有视界时它被因果遮蔽（看不到，如实呈现）；
+  把 <b>a²+Q²&gt;1</b>（裸奇环，面板拖自旋/电荷，或点预设按钮）视线即可穿过奇异环进入 r&lt;0，出现紫色反宇宙窗口。</p>
+  <p class="go">点击任意位置开始 ▶　<span style="color:#8ba1bb;font-size:11px">卡就调面板里的「目标帧时」，自动画质会按真实帧时闭环收敛</span></p>
+  <p id="boot" style="color:#5c9ae0;font-size:11.5px;margin-top:6px">正在初始化…</p>
+</div></div>
+<div id="err"></div>
+
+<script>
+"use strict";
+const CV=document.getElementById('gl'),HUD=document.getElementById('hud'),
+      PANEL=document.getElementById('panel'),OV=document.getElementById('ov'),ERR=document.getElementById('err');
+function fatal(m){ERR.style.display='block';ERR.style.color='#ff8f8f';ERR.textContent=m;console.error(m);}
+addEventListener('error',e=>fatal('运行时错误: '+(e.message||e)+'\n'+(e.filename||'')+' :'+(e.lineno||'')));
+addEventListener('unhandledrejection',e=>fatal('未捕获异常: '+
+  ((e.reason&&(e.reason.stack||e.reason.message))||e.reason)));
+
+/* ============================ 设置 ============================ */
+const S={
+  spin:0.95, charge:0.0, ringOn:1, ringBright:1.0,
+  bgMode:0, bgBright:0.0, antiBright:0.55,
+  diskOn:1, diskBright:0.45, diskIn:2.0, diskOut:16, diskOpa:1.0,
+  diskCon:14, diskStep:0.9, diskShade:0.9, diskGlow:0.30, diskRim:1.0, diskScale:1.0, tempK:9500,
+  diskThick:0.25,
+  jetOn:0, jetBright:1.0, jetBeta:0.95, jetOpen:0.14, jetLen:70, jetR0:0.7, jetTempK:9000,
+  prBoost:3.0, prTemp:1.2, doppler:1, delay:1, autoIn:1, orbit:0,
+  exposure:1.0, bloom:0.42, streak:0.20, ca:0.7, grain:0.15, sat:1.05, vig:0.20, fov:65,
+  scale:0.62, autoQ:1, targetMs:60, ssaa:1, steps:150, tol:0.17, timeRate:14, paused:0,
+  mass:0, look:1.0, lookSmooth:0.30, frames:0, bench:0, debug:0, dbg:0, camR:0, camTh:83, camPh:-90
+};
+const SPEC=[
+ {sec:'时空 / SPACETIME'},
+ {k:'spin',l:'自旋 a',min:0,max:1.45,step:.005,f:v=>v.toFixed(3)},
+ {k:'charge',l:'电荷 Q (Kerr–Newman)',min:0,max:1.2,step:.005,f:v=>v.toFixed(3)},
+ {k:'ringOn',t:'chk',l:'奇异环发光'},
+ {k:'ringBright',l:'奇异环亮度',min:0,max:3,step:.05},
+ {sec:'背景 / BACKGROUND'},
+ {k:'bgMode',t:'sel',l:'背景模式',opts:['纯黑','星空','星空+星云','经纬网格']},
+ {k:'bgBright',l:'背景亮度',min:0,max:2,step:.02},
+ {k:'antiBright',l:'反宇宙亮度',min:0,max:2,step:.02},
+ {sec:'吸积盘 / DISK'},
+ {k:'diskOn',t:'chk',l:'盘面（锐利薄面）'},
+ {k:'autoIn',t:'chk',l:'内缘跟随 ISCO'},
+ {k:'diskBright',l:'盘亮度',min:0,max:6,step:.05},
+ {k:'diskIn',l:'内缘 r',min:.3,max:20,step:.05},
+ {k:'diskOut',l:'外缘 r',min:2,max:60,step:.5},
+ {k:'diskOpa',l:'盘面不透明度',min:.05,max:1,step:.02},
+ {k:'diskGlow',l:'盘底光',min:0,max:1.5,step:.02},
+ {k:'diskRim',l:'内缘亮环',min:0,max:4,step:.05},
+ {k:'diskCon',l:'丝状对比',min:1,max:60,step:.5},
+ {k:'diskThick',l:'半厚度系数',min:.02,max:2,step:.01},
+ {k:'diskShade',l:'盘着色间隔',min:.25,max:3,step:.05},
+ {k:'diskStep',l:'体元精细度',min:.25,max:2,step:.05},
+ {k:'diskScale',l:'纹理尺度',min:.2,max:4,step:.05},
+ {k:'tempK',l:'盘色温基准 K',min:2500,max:40000,step:250,f:v=>(v/1000).toFixed(1)+'k'},
+ {sec:'喷流 / JET（默认关）'},
+ {k:'jetOn',t:'chk',l:'相对论喷流'},
+ {k:'jetBright',l:'喷流亮度',min:0,max:4,step:.05},
+ {k:'jetBeta',l:'喷流速度 β',min:0,max:.995,step:.005,f:v=>v.toFixed(3)},
+ {k:'jetOpen',l:'张开角',min:0,max:.6,step:.01},
+ {k:'jetR0',l:'根部半径',min:.1,max:4,step:.05},
+ {k:'jetLen',l:'长度 M',min:5,max:200,step:5},
+ {k:'jetTempK',l:'喷流色温 K',min:2000,max:40000,step:250,f:v=>(v/1000).toFixed(1)+'k'},
+ {sec:'光子环 / PHOTON RING'},
+ {k:'prBoost',l:'光子环增亮',min:0,max:10,step:.1},
+ {k:'prTemp',l:'光子环色温',min:0,max:4,step:.05},
+ {k:'doppler',t:'chk',l:'多普勒 / 集束'},
+ {k:'delay',t:'chk',l:'光行时延迟'},
+ {k:'timeRate',l:'演化速率',min:0,max:60,step:.5},
+ {sec:'画面 / RENDER'},
+ {k:'exposure',l:'曝光',min:.1,max:4,step:.02},
+ {k:'bloom',l:'泛光',min:0,max:2.5,step:.02},
+ {k:'streak',l:'横向拉丝',min:0,max:2,step:.02},
+ {k:'ca',l:'色差',min:0,max:5,step:.1},
+ {k:'grain',l:'颗粒',min:0,max:1,step:.02},
+ {k:'sat',l:'饱和度',min:.4,max:1.8,step:.02},
+ {k:'vig',l:'暗角',min:0,max:.7,step:.02},
+ {k:'fov',l:'视场 °',min:25,max:110,step:1},
+ {k:'scale',l:'分辨率',min:.3,max:1.5,step:.02},
+ {k:'autoQ',t:'chk',l:'自动画质(按帧时预算闭环)'},
+ {k:'targetMs',l:'目标帧时 ms',min:12,max:200,step:2,f:v=>v.toFixed(0)+' ('+(1000/v).toFixed(0)+'fps)'},
+ {k:'ssaa',t:'sel',l:'抗锯齿',opts:['关','4× 超采样(4倍开销)']},
+ {k:'steps',l:'最大步数',min:60,max:640,step:10,f:v=>v|0},
+ {k:'tol',l:'步长容差',min:.03,max:.2,step:.005},
+ {sec:'操作 / INPUT'},
+ {k:'orbit',t:'chk',l:'锁定黑洞(A/D绕行 R/F纬度 W/S远近)'},
+ {k:'look',l:'鼠标灵敏度',min:.08,max:3,step:.02},
+ {k:'lookSmooth',l:'视角平滑',min:0,max:1,step:.02},
+ {sec:'单位 / UNITS'},
+ {k:'mass',t:'sel',l:'黑洞质量',opts:['10 M☉','4.3e6 M☉ (Sgr A*)','6.5e9 M☉ (M87*)']}
+];
+
+/* ============================ 着色器 ============================ */
+const VS=`#version 300 es
+void main(){vec2 p=vec2(gl_VertexID==1?3.0:-1.0, gl_VertexID==2?3.0:-1.0);gl_Position=vec4(p,0.0,1.0);}`;
+
+const SCENE_FS=`#version 300 es
+precision highp float;
+out vec4 oCol;
+uniform vec2  uRes;
+uniform mat3  uCamBasis;   // 列: right, up, fwd  (笛卡尔嵌入)
+uniform mat3  uEhat;       // 列: e_r, e_theta, e_phi
+uniform vec3  uCamBL;      // r, theta, phi
+uniform float uA, uTime, uTol, uEscape, uRhor, uPixA, uExposure;
+uniform int   uMaxSteps;
+uniform float uDiskOn,uDiskIn,uDiskOut,uDiskBright,uDiskThick,uDoppler,uDelay;
+uniform float uBgMode,uBgBright,uAntiBright,uRingOn,uRingBright,uDbg,uSSAA;
+uniform float uDiskOpa,uPRBoost,uPRTemp,uDiskStep,uDiskShade,uDiskCon,uDiskAzi;
+uniform float uDiskGlow,uDiskRim,uDiskScale,uQ2,uTempK;
+uniform float uJetOn,uJetBright,uJetBeta,uJetOpen,uJetLen,uJetR0,uJetTempK;
+uniform highp sampler3D uNoise;
+const float PI=3.141592653589793;
+
+/* ---------- 噪声 ---------- */
+float h13(vec3 p){p=fract(p*0.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+/* 4 倍频预烘进一张 3D 噪声纹理的 RGBA（参考 dsgames 版做法）：
+   一次 texture fetch = 4 层 fbm，还白拿硬件三线性插值。
+   之前每个体元要算 24 次哈希（~200 flop 纯 ALU），这是数量级差距；
+   顺带把星云也换掉，于是整套手写 vnoise/fbm 可以删掉 —— 着色器更小、编译更快。*/
+float n4(vec3 p){ vec4 t=texture(uNoise,p); return t.x*0.50+t.y*0.26+t.z*0.15+t.w*0.09; }
+float n2f(vec3 p){ vec4 t=texture(uNoise,p); return t.x*0.66+t.y*0.34; }
+/* ---------- 黑体色 ---------- */
+vec3 blackbody(float T){
+  float t=clamp(T,1000.0,40000.0)/100.0; vec3 c;
+  /* ★ 必须把 pow/log 的参数全部夹到正数域再算。
+     原写法在未被选中的三元分支里存在 pow(t-60, 负指数)（t<60 时底数为负 ⇒ NaN）
+     和 log(t-10)（t<10 时 ⇒ -inf）。HLSL/ANGLE 常把三元编译成"两边都算再 lerp 选择"，
+     NaN×0 仍是 NaN ⇒ 直接污染整条颜色链，画面变全黑。SwiftShader 上恰好不暴露。*/
+  float tm=max(t-60.0,1e-3), tl=max(t,1e-3), tb=max(t-10.0,1e-3);
+  c.r = t<=66.0 ? 255.0 : 329.698727446*pow(tm,-0.1332047592);
+  c.g = t<=66.0 ? 99.4708025861*log(tl)-161.1195681661 : 288.1221695283*pow(tm,-0.0755148492);
+  c.b = t>=66.0 ? 255.0 : (t<=19.0 ? 0.0 : 138.5177312231*log(tb)-305.0447927307);
+  return clamp(c/255.0,0.0,1.0);
+}
+/* ---------- 星空 ---------- */
+vec3 starLayer(vec3 d,float sc,float th,float br,float sd){
+  vec3 v=d*sc, id=floor(v), fr=v-id, nb=step(vec3(0.5),fr)*2.0-1.0, acc=vec3(0.0);
+  for(int i=0;i<8;i++){
+    vec3 o=vec3(float(i&1),float((i>>1)&1),float((i>>2)&1))*nb, cid=id+o;
+    if(h13(cid+sd)>th) continue;
+    vec3 rn=vec3(h13(cid+sd+1.7),h13(cid+sd+3.3),h13(cid+sd+5.9));
+    vec3 sp=cid+0.5+(rn-0.5)*0.72;
+    float rad=max(0.05,uPixA*sc*0.8);
+    float gl=exp(-2.2*pow(length(v-sp)/rad,1.5));
+    float mag=pow(h13(cid+sd+8.1),4.0), ct=h13(cid+sd+11.3);
+    acc+=blackbody(mix(2400.0,14000.0,ct*ct))*(gl*br*(0.18+3.4*mag));
+  }
+  return acc;
+}
+float skyGrid(vec3 d){
+  float th=acos(clamp(d.z,-1.0,1.0)), ph=atan(d.y,d.x);
+  float w=max(0.0035,uPixA*1.4), st=PI/12.0;
+  float a=1.0-smoothstep(0.0,w,abs(mod(th+st*0.5,st)-st*0.5));
+  // ★ 极点修复：经线宽度曾用 w/max(sin,0.03)，在极点 sin→0 时宽度发散 → 整片纯白，
+  //   正是"两极上下两个亮白色锥形带"。改回 w/sin(th)，并在极点附近让经线自然淡出
+  //   （经线本就在极点收敛、无几何意义）。
+  float sinTh=max(sin(th),2e-3);
+  float b=1.0-smoothstep(0.0,w/sinTh,abs(mod(ph+st*0.5,st)-st*0.5));
+  b*=smoothstep(0.05,0.30,abs(th-PI*0.5));
+  float eq=1.0-smoothstep(0.0,w*2.0,abs(th-PI*0.5));
+  return max(max(a,b),eq*2.0);
+}
+vec3 skyMain(vec3 d){
+  if(uBgMode<0.5) return vec3(0.0);
+  vec3 c=vec3(0.0);
+  if(uBgMode>2.5){
+    c+=vec3(0.30,0.62,1.0)*skyGrid(d)*0.85+vec3(0.030,0.055,0.125);
+  }else{
+    c+=starLayer(d,120.0,0.085,1.0,0.0);
+    c+=starLayer(d, 58.0,0.050,2.3,41.0);
+    c+=starLayer(d,240.0,0.10,0.42,91.0);
+    if(uBgMode>1.5){
+      vec3 bn=normalize(vec3(0.34,0.56,-0.76));
+      float band=pow(clamp(1.0-abs(dot(d,bn)),0.0,1.0),8.0);
+      float n=n4(d*0.9+11.0), n2=n2f(d*2.6-3.0);
+      c+=mix(vec3(0.05,0.08,0.19),vec3(0.34,0.20,0.30),n)*(0.3+0.9*n2)*band*0.55;
+      c+=vec3(0.010,0.014,0.028)*(0.4+n);
+    }
+  }
+  return c*uBgBright;
+}
+vec3 skyAnti(vec3 d){
+  // 反宇宙：r<0 区域的天空（自带底光，使「奇异环窗口」在纯黑背景下也可见）
+  float g=skyGrid(d);
+  float n=n2f(d*1.2+vec3(37.0));
+  vec3 c=vec3(0.26,0.10,0.42)*(0.35+0.55*n) + vec3(0.55,0.35,1.0)*g*0.35;
+  if(uBgMode>0.5) c+=starLayer(d,90.0,0.05,1.2,777.0)*vec3(0.75,0.8,1.0)*uBgBright;
+  return c*uAntiBright;
+}
+/* ---------- Kerr–Newman 零测地线 (Carter 形式, 2H=Δpr²+pθ²-P²/Δ+W²) ----------
+   带电只改度规、不改光子的守恒结构：Δ = r²−2r+a²+Q²，g_tt/g_tφ 里的 2r 变成 (2r−Q²)。
+   Carter 分离依然成立，R(r)=P²−Δk 的四次式只有常数项多出 −kQ²。 */
+void deriv(vec3 X,vec3 Y,float E,float L,float a,out vec3 dX,out vec3 dY){
+  float r=X.x,th=X.y,pr=Y.x,pt=Y.y;
+  float s=sin(th); s = (abs(s)<1e-4)? (s<0.0?-1e-4:1e-4) : s;
+  float c=cos(th);
+  float D=r*r-2.0*r+a*a+uQ2; if(abs(D)<1e-5) D=(D<0.0?-1e-5:1e-5);
+  float Dp=2.0*r-2.0, r2a2=r*r+a*a;
+  float P=E*r2a2-L*a, W=L/s-a*E*s;
+  dX=vec3(D*pr, pt, a*P/D+W/s);
+  dY=vec3(-0.5*Dp*pr*pr + 2.0*r*E*P/D - 0.5*P*P*Dp/(D*D),
+          W*c*(L/(s*s)+a*E),
+          P*r2a2/D + a*W*s);
+}
+vec3 blCart(float r,float th,float ph,float a){
+  float rho=sqrt(r*r+a*a),s=sin(th);
+  return vec3(rho*s*cos(ph),rho*s*sin(ph),r*cos(th));
+}
+vec3 escDir(vec3 X,vec3 Y,float E,float L,float a){
+  float r=X.x,th=X.y,ph=X.z;
+  float s=max(sin(th),1e-4),c=cos(th);
+  float Sg=r*r+a*a*c*c, D=max(r*r-2.0*r+a*a+uQ2,1e-6);
+  float A=max((r*r+a*a)*(r*r+a*a)-a*a*D*s*s,1e-6);
+  float nr=Y.x*sqrt(D/Sg), nt=Y.y/sqrt(Sg), np=L*sqrt(Sg/A)/s;
+  vec3 er=vec3(s*cos(ph),s*sin(ph),c), et=vec3(c*cos(ph),c*sin(ph),-s), ep=vec3(-sin(ph),cos(ph),0.0);
+  vec3 d=normalize(nr*er+nt*et+np*ep);
+  // 残余偏折解析补偿：在 r=55M 收敛时，剩下到无穷远的弯折约 (2M/b)(1−x/r)，
+  // 补掉它就能把逃逸半径从 110M 降到 55M（省 ~5 步/像素）而天空位置几乎不动。
+  if(r>0.0){
+    float nrn=dot(d,er);
+    float b=r*sqrt(max(1.0-nrn*nrn,0.0));
+    float x=sqrt(max(r*r-b*b,0.0));
+    float dal=(2.0/max(b,1e-4))*(1.0-x/r);
+    vec3 e2=-er+d*nrn; float e2n=length(e2);
+    if(e2n>1e-6&&dal>1e-6) d=normalize(d*cos(dal)+(e2/e2n)*sin(dal));
+  }
+  return d;
+}
+/* ---------- 径向势 R(r) 与解析剔除（对应原文 6.3/6.4 的提前剔除思想）----------
+   Carter 形式下径向运动是纯 1D：(dr/dλ')² = R(r) = P² − Δ·k ，k=(L−aE)²+Q 全程守恒。
+   于是「会不会被吞掉」「够不够得着吸积盘」都能在发射时一次性解析判定，无需积分。 */
+float Rrad(float r,float E2,float c2,float c1,float c0){ float r2=r*r; return E2*r2*r2+c2*r2+c1*r+c0; }
+float cbrtf(float x){ return sign(x)*pow(abs(x),0.3333333333); }
+// R 在 (rh,r0) 内的极小值（无极小点则 +1e9），并给出所在半径。
+// R_min≥0 ⇒ 入射光线无势垒可挡 ⇒ 必然落入视界；|R_min|≈0 ⇒ 贴近临界 ⇒ 绕行多圈（光子环来源）
+float RminIn(float r0,float E2,float c2,float c1,float c0,float rh,out float rmAt){
+  float p=c2/(2.0*E2), q=c1/(4.0*E2);              // R'=0 → r³+pr+q=0
+  float D=q*q*0.25+p*p*p/27.0;
+  float best=1e9; rmAt=0.0;
+  if(D>0.0){
+    float sq=sqrt(D);
+    float t=cbrtf(-q*0.5+sq)+cbrtf(-q*0.5-sq);
+    if(t>rh&&t<r0){ best=Rrad(t,E2,c2,c1,c0); rmAt=t; }
+  }else if(p<0.0){
+    float m=2.0*sqrt(-p/3.0);
+    float phc=acos(clamp((3.0*q)/(2.0*p)*sqrt(-3.0/p),-1.0,1.0))/3.0;
+    for(int j=0;j<3;j++){
+      float t=m*cos(phc-2.0943951*float(j));
+      if(t>rh&&t<r0){ float v=Rrad(t,E2,c2,c1,c0); if(v<best){best=v;rmAt=t;} }
+    }
+  }
+  return best;
+}
+/* ---------- 三次 Hermite：用两端的值+导数在步内插值（不额外调用 deriv）----------
+   线性插值的 O(h²) 误差会让相邻像素的采样半径分段跳变，画面上表现为首尾相连的三角形色块。*/
+float herm(float y0,float y1,float d0,float d1,float h,float s){
+  float s2=s*s, s3=s2*s;
+  return (2.0*s3-3.0*s2+1.0)*y0+(s3-2.0*s2+s)*h*d0+(-2.0*s3+3.0*s2)*y1+(s3-s2)*h*d1;
+}
+
+/* 平滑取小：1/√Σ(1/h²)。恒 ≤ min 但处处 C∞ —— 硬 min() 在几个限制条件互相切换处
+   会让步长跳变，相邻像素的采样落点随之分段错位，画面上就是首尾相连的三角形色块。*/
+float smin5(float a,float b,float c,float d,float e){
+  return inversesqrt(1.0/(a*a)+1.0/(b*b)+1.0/(c*c)+1.0/(d*d)+1.0/(e*e));
+}
+/* 原文 GenerateAccretionDiskNoise 的高对比映射：log(1+x^C)，多层相乘保证分布平滑 */
+float diskNoise(vec3 p,float contrast){
+  vec3 q=p*uDiskScale;
+  float a1=1.0+0.34*(n4(q)-0.5);
+  float a2=1.0+0.30*(n2f(q*2.7+7.0)-0.5);
+  return log(1.0+pow(max(a1*a2,1e-6),contrast));
+}
+/* 盘的几何半厚度：外张（原文 Hopper=0.24 斜率）+ 内缘鼓包（InnerCloudBound） */
+float diskHalfH(float r){
+  float hh=uDiskThick*(1.0+0.24*max(r-3.0,0.0));
+  float t=(r-uDiskIn)/min(uDiskOut-uDiskIn,12.0);
+  return hh*(1.0+1.6*max(0.0,1.0-5.0*t*t));
+}
+/* ---------- 吸积盘体元（模型参考 xjp.txt）----------
+   seg = 落在厚度层内的几何长度。薄盘极限下自动等于 2h/sinψ。 */
+void sampleDisk(float r,float yy,float ph,float tc,float seg,
+                float E,float L,float a,float wind,inout vec3 acc,inout float tr){
+  float x=clamp((r-uDiskIn)/max(uDiskOut-uDiskIn,1e-3),0.0,1.0);
+  float sx=sqrt(x), s4=sqrt(sx), s8=sqrt(s4);
+  float ix=1.0-x;
+  float prof=4.895*(sx*s4*s8)*(ix*sqrt(ix));      // Shape(x,0.9,1.5) 近似
+  if(prof<0.002) return;
+  float hh=diskHalfH(r);
+  float vw=max(0.0,1.0-abs(yy)/max(hh,1e-4));     // 垂向密度衰减
+  if(vw<0.004) return;
+  float sr=sqrt(r), r15=r*sr;
+  float Om=1.0/(r15+a);                           // 开普勒角速度（顺行）
+  float den=sqrt(max(r*r*r-3.0*r*r+2.0*a*r15,1e-4));
+  float ut=(r15+a)/den;                           // 圆轨道 u^t
+  float Eem=max(ut*(E-L*Om),1e-3);
+  float g=(uDoppler>0.5)? clamp(1.0/Eem,0.05,2.0) : 1.0;
+  float tt=uTime-((uDelay>0.5)?tc:0.0);           // 光行时延迟
+  float ir=uDiskIn/r;                             // Shakura–Sunyaev 温度
+  float ssf=ir*ir*ir*max(1.0-sqrt(ir),0.0);
+  float Tn=sqrt(sqrt(max(ssf,0.0)*17.651));
+  float spir=ph-Om*tt+2.0*log(max(r,0.2));        // 共转 + 对数螺旋
+  float con=clamp(uDiskCon-1.6*max(r-10.0,0.0),6.0,90.0);
+  float nz=diskNoise(vec3(0.1*(r+0.0833*tt),0.1*yy,uDiskAzi*spir),con);
+  float dens=prof*(uDiskGlow+nz)*vw*0.42;
+  float al=1.0-exp(-dens*seg*uDiskOpa);
+  float pb=clamp(0.3*wind-0.1,0.0,1.0);           // 光子环增亮/蓝移
+  float g2=g*g;
+  vec3 col=blackbody(uTempK*Tn*(g2*g)*(1.0+uPRTemp*pb));
+  // 参考版用 tn^3.5：亮度强烈集中在内缘（sqrt(Tn) 会让整个盘一样亮 ⇒ "糊成一团"）
+  float tn2=Tn*Tn;
+  float lum=uDiskBright*(tn2*Tn*sqrt(Tn))*(g2*g2)*(1.0+uPRBoost*pb);
+  float rq=(r-uDiskIn*1.035)/0.30;                // 内缘白热亮边
+  lum*=1.0+uDiskRim*exp(-rq*rq);
+  acc+=tr*col*lum*al; tr*=(1.0-al);
+}
+/* ---------- 相对论喷流（默认关闭）----------
+   沿自旋轴的双锥外流：空心壁更亮 + 沿轴指数衰减 + 强多普勒集束
+   （近侧喷流极亮、远侧几乎看不见——真实射电星系照片的标志性不对称）。
+   dop 上限取原文 iJetShiftMax=3，亮度 ∝ dop²（原文 JetRedShiftIntensityExponent=2）。*/
+void jetSample(float r,float yy,float ph,float tc,float seg,float nr,float nt,
+               inout vec3 acc,inout float tr){
+  float ay=abs(yy);
+  if(ay<uDiskIn*0.35||ay>uJetLen) return;
+  float rho=sqrt(max(r*r-yy*yy,0.0));
+  float Rj=uJetR0+uJetOpen*ay;                       // 锥形张开
+  float w=1.0-rho/max(Rj,1e-3);
+  if(w<=0.0) return;
+  float shell=smoothstep(0.0,0.35,w)*(1.0-0.55*smoothstep(0.55,1.0,w)); // 空心壁
+  float fall=exp(-ay/(0.65*uJetLen));
+  float tt=uTime-((uDelay>0.5)?tc:0.0);
+  float tx=n2f(vec3(0.55*rho*cos(ph),0.55*rho*sin(ph),0.16*ay-0.09*tt));
+  float dens=shell*fall*smoothstep(0.22,0.86,tx)*0.6;
+  if(dens<=0.0) return;
+  // 外流多普勒：β 沿 ±ẑ，光子（发射体→观测者）方向 = −(nr·er+nθ·eθ)，
+  // 与 +ẑ 的夹角余弦 = nθ·sinθ − nr·cosθ
+  float s=sin(acos(clamp(yy/max(r,1e-4),-1.0,1.0)));
+  float ct2=yy/max(r,1e-4);
+  float cosPsi=s*nt-ct2*nr;
+  float b=clamp(uJetBeta,0.0,0.995), gam=inversesqrt(max(1.0-b*b,1e-4));
+  float dop=min(1.0/max(gam*(1.0-b*(yy>0.0?cosPsi:-cosPsi)),0.05),3.0);
+  float gj=sqrt(max(1.0-2.0/max(r,2.001),0.02))*dop; // 再乘引力红移
+  float al=1.0-exp(-dens*seg*1.6);
+  vec3 col=blackbody(uJetTempK*pow(max(gj,0.05),2.0));
+  float lum=uJetBright*gj*gj;
+  acc+=tr*col*lum*al; tr*=(1.0-al);
+}
+/* ============================ 单条光线 ============================ */
+vec3 traceRay(vec2 uv,out int state,out int used,out int nx){
+  float jit=h13(vec3(gl_FragCoord.xy,3.7));      // 每像素固定随机相位（不闪烁）
+  vec3 dirC=normalize(uCamBasis*vec3(uv,1.0));   // 视场缩放已并入 uCamBasis 的 right/up 列
+  vec3 n=dirC*uEhat;                        // (n_r, n_theta, n_phi) 局部正交
+  float a=uA, r=uCamBL.x, th=uCamBL.y, ph=uCamBL.z;
+  float s=max(sin(th),1e-4), c=cos(th);
+  float Sg=r*r+a*a*c*c, D=r*r-2.0*r+a*a+uQ2;
+  float A=(r*r+a*a)*(r*r+a*a)-a*a*D*s*s;
+  D=max(D,1e-5); A=max(A,1e-5);
+  float m2r=2.0*r-uQ2;                                   // KN：(2Mr−Q²) 取代 2Mr
+  float alpha=sqrt(Sg*D/A), om=a*m2r/A;
+  float pr=n.x*sqrt(Sg/D), pth=n.y*sqrt(Sg);
+  float pt_u=1.0/alpha, pph_u=om/alpha+n.z*sqrt(Sg/A)/s;
+  float gtt=-(1.0-m2r/Sg), gtp=-a*m2r*s*s/Sg, gpp=A*s*s/Sg;
+  float L=gpp*pph_u+gtp*pt_u;
+  float E=-(gtt*pt_u+gtp*pph_u);
+
+  /* ---- 解析剔除 + 光子环预判：先算守恒量 Q、k 与径向势系数 ---- */
+  float Q=pth*pth-a*a*E*E*c*c+L*L*c*c/(s*s);
+  float k=(L-a*E)*(L-a*E)+Q;
+  float E2=E*E;
+  float c2=2.0*a*a*E2-2.0*a*E*L-k, c1=2.0*k, c0=a*a*((a*E-L)*(a*E-L)-k)-k*uQ2;
+  bool inward=(n.x<0.0);
+  float rmAt; float Rm=RminIn(r,E2,c2,c1,c0,max(uRhor,0.02),rmAt);
+  bool cap=inward&&uRhor>0.0&&(Rm>=0.0);                 // 无势垒可挡 ⇒ 必然被吞
+  // 近临界：势垒顶几乎贴着 R=0 ⇒ 光线在光子壳里绕很多圈，正是光子环的来源。
+  // 只给这一小圈像素加预算与精度，成本几乎不变，光子环却能真正解析出来。
+  bool nearCrit=(Rm<1e8)&&(abs(Rm)<0.05*E2*rmAt*rmAt*rmAt*rmAt);
+  state=0; used=0; nx=0;
+
+  // 【剔除 1】必然落入视界 + 盘关闭 ⇒ 纯黑，零步
+  if(cap&&uDiskOn<0.5) return vec3(0.0);
+
+  // 【剔除 2】到不了"作用区"的光线：解析弱场偏折直接出天空，零步
+  //   R(rProbe)<0 说明径向禁区挡在前面，光线根本进不到 rProbe 以内（因此碰不到盘/视界/奇环）
+  float rProbe=max(uDiskOut,8.0);
+  if(r>rProbe*1.02 && (!inward || Rrad(rProbe,E2,c2,c1,c0)<0.0)){
+    float sinPsi=sqrt(max(1.0-n.x*n.x,0.0));
+    float b=r*sinPsi;                                     // 远场冲量参数
+    float x=sqrt(max(r*r-b*b,0.0));
+    // 弱场偏折：从当前点到无穷远 (2M/b)(1−x/r)；入射光线还要加上到近日点的那一段 ⇒ (1+x/r)
+    float dal=(2.0/max(b,1e-4))*(1.0+(inward?1.0:-1.0)*x/r);
+    vec3 er=uEhat[0];
+    vec3 e2=-er+dirC*n.x;                                 // ⊥dirC 且指向黑洞一侧
+    float e2n=length(e2);
+    vec3 nd=(e2n>1e-6)? normalize(dirC*cos(dal)+(e2/e2n)*sin(dal)) : dirC;
+    state=1;
+    return skyMain(nd);
+  }
+
+  vec3 X=vec3(r,th,ph), Y=vec3(pr,pth,0.0);
+  vec3 acc=vec3(0.0); float tr=1.0;
+  float rStop=(uDiskOn>0.5)?uDiskIn*0.96:0.0;             // 落入视界的光线：过了盘内缘就再无可采之物
+  float rShell=1.6+pow(abs(a),0.6666667);                 // 光子壳（原文取 1.6+|a|^(2/3)）
+  float wind=0.0;                                         // 壳内累计绕行角
+  float pendSeg=0.0,pendS=0.5,jetSeg=0.0;                 // 待结算的盘/喷流光程
+  int budget=nearCrit?min(640,uMaxSteps*3):uMaxSteps;     // 近临界光线才给三倍步数
+  float tolS=nearCrit?uTol*0.45:uTol;
+  for(int i=0;i<budget;i++){
+    used=i+1;
+    vec3 k1X,k1Y; deriv(X,Y,E,L,a,k1X,k1Y);
+    // 径向用严容差，角向可放宽 2.5×（RK4 单步误差 ~h⁵，实测终点方向变化 <1e-4 rad）
+    float tA=tolS*2.5;
+    float hr=tolS*(abs(X.x)+1.0)/(abs(k1X.x)+1e-7);
+    float hth=tA/(abs(k1X.y)+1e-7);
+    float hph=tA/(abs(k1X.z)+1e-7);
+    // θ 二阶约束：赤道面是 θ 的吸引平衡点，光线会绕盘面振荡。只限一阶时，
+    // 贴着盘面走的光线（p_θ≈0）可能一步跨过整个振荡 → 穿越漏检 → 细黑条。
+    float h2nd=sqrt(2.0*tA/(abs(k1Y.y)+1e-7));
+    // 盘内限步：体元不能比雾层厚太多，否则出现层纹
+    float hdk=1e5;
+    if(uDiskOn>0.5&&X.x>uDiskIn*0.9&&X.x<uDiskOut*1.05){
+      float yc=X.x*cos(X.y), Hc=0.11+0.085*max(0.0,X.x-uDiskIn);
+      if(abs(yc)<Hc*3.0){
+        float sp3=sqrt(k1X.x*k1X.x+(X.x*k1X.y)*(X.x*k1X.y)+(X.x*k1X.z)*(X.x*k1X.z));
+        hdk=uDiskStep*Hc*2.0/(sp3+1e-6);
+      }
+    }
+    float h=smin5(hr,hth,hph,h2nd,hdk);
+    if(i==0) h*=0.35+0.65*jit;      // 首步随机相位：把残留的相干条带打散成细噪声
+    h=clamp(h,1e-6,1e5);
+    if(X.x<rShell) wind+=abs(h*k1X.z);                    // 在光子壳内累计绕行角
+    vec3 k2X,k2Y; deriv(X+0.5*h*k1X,Y+0.5*h*k1Y,E,L,a,k2X,k2Y);
+    vec3 k3X,k3Y; deriv(X+0.5*h*k2X,Y+0.5*h*k2Y,E,L,a,k3X,k3Y);
+    vec3 k4X,k4Y; deriv(X+h*k3X,Y+h*k3Y,E,L,a,k4X,k4Y);
+    vec3 Xn=X+(h/6.0)*(k1X+2.0*k2X+2.0*k3X+k4X);
+    vec3 Yn=Y+(h/6.0)*(k1Y+2.0*k2Y+2.0*k3Y+k4Y);
+    // 极轴反射
+    if(Xn.y<0.0){ Xn.y=-Xn.y; Xn.z+=PI; Yn.y=-Yn.y; }
+    else if(Xn.y>PI){ Xn.y=2.0*PI-Xn.y; Xn.z+=PI; Yn.y=-Yn.y; }
+    /* ① 吸积盘：这一步与厚度层的交集累积成体元（着色频率与积分频率解耦） */
+    if(uDiskOn>0.5){
+      float rm=0.5*(X.x+Xn.x);
+      bool inRange=(rm>uDiskIn*0.9&&rm<uDiskOut*1.05);
+      float segNow=0.0, hh=0.0;
+      if(inRange){
+        float y0=X.x*cos(X.y), y1=Xn.x*cos(Xn.y);
+        hh=diskHalfH(rm);
+        float lo=min(y0,y1), hi=max(y0,y1);
+        float b0=max(lo,-hh), b1=min(hi,hh);
+        if(b1>b0){
+          float dy=y1-y0, sa=0.0, sb=1.0;
+          if(abs(dy)>1e-6){
+            float t0=(b0-y0)/dy, t1=(b1-y0)/dy;
+            sa=clamp(min(t0,t1),0.0,1.0); sb=clamp(max(t0,t1),0.0,1.0);
+          }
+          float dr3=Xn.x-X.x, dth=Xn.y-X.y, dph=Xn.z-X.z;
+          float ds=sqrt(dr3*dr3+(rm*dth)*(rm*dth)+(rm*dph)*(rm*dph));
+          segNow=ds*(sb-sa);
+          if(pendSeg<=0.0) pendS=0.5*(sa+sb);
+          pendSeg+=segNow;
+        }
+      }
+      if(pendSeg>0.0&&(segNow<=0.0||pendSeg>=uDiskShade*max(hh,1e-3))){
+        float sm=pendS;
+        float rc=herm(X.x,Xn.x,k1X.x,k4X.x,h,sm);
+        float thc=herm(X.y,Xn.y,k1X.y,k4X.y,h,sm);
+        if(rc>0.0){
+          nx++;
+          sampleDisk(rc,rc*cos(thc),herm(X.z,Xn.z,k1X.z,k4X.z,h,sm),
+                     herm(Y.z,Yn.z,k1Y.z,k4Y.z,h,sm),pendSeg,
+                     E,L,a,wind,acc,tr);
+        }
+        pendSeg=0.0;
+        if(tr<0.006){ state=4; break; }
+      }
+    }
+    /* ② 喷流（默认关）：按固定光程在自旋轴附近累积采样 */
+    if(uJetOn>0.5){
+      float rm=0.5*(X.x+Xn.x);
+      float ym=0.5*(X.x*cos(X.y)+Xn.x*cos(Xn.y));
+      float ay=abs(ym);
+      if(rm>0.0&&rm<uJetLen*1.25&&ay>uDiskIn*0.30&&ay<uJetLen){
+        float rhom=sqrt(max(rm*rm-ym*ym,0.0));
+        if(rhom<(uJetR0+uJetOpen*ay)*1.1){
+          float dr3=Xn.x-X.x, dth=Xn.y-X.y, dph=Xn.z-X.z;
+          jetSeg+=sqrt(dr3*dr3+(rm*dth)*(rm*dth)+(rm*dph)*(rm*dph));
+          if(jetSeg>=uDiskShade*0.6){
+            float rc=herm(X.x,Xn.x,k1X.x,k4X.x,h,0.5);
+            float thc=herm(X.y,Xn.y,k1X.y,k4X.y,h,0.5);
+            if(rc>0.0){
+              float Sgm=rc*rc+a*a*cos(thc)*cos(thc);
+              float Dm=max(rc*rc-2.0*rc+a*a+uQ2,1e-6);
+              float prm=herm(Y.x,Yn.x,k1Y.x,k4Y.x,h,0.5);
+              float ptm=herm(Y.y,Yn.y,k1Y.y,k4Y.y,h,0.5);
+              float nrm=prm*sqrt(Dm/Sgm), ntm=ptm/sqrt(Sgm);
+              float nn=inversesqrt(max(nrm*nrm+ntm*ntm,1e-6));
+              jetSample(rc,rc*cos(thc),herm(X.z,Xn.z,k1X.z,k4X.z,h,0.5),
+                        herm(Y.z,Yn.z,k1Y.z,k4Y.z,h,0.5),jetSeg,nrm*nn,ntm*nn,acc,tr);
+            }
+            jetSeg=0.0;
+            if(tr<0.006){ state=4; break; }
+          }
+        }else jetSeg=0.0;
+      }else jetSeg=0.0;
+    }
+    // 奇异环 / 视界 / 逃逸
+    float cn=cos(Xn.y), Sgn=Xn.x*Xn.x+a*a*cn*cn;
+    if(Sgn<4.5e-4){ state=3; break; }
+    /* 注意：这里**不能**在 θ 的解析转折点上做镜面反射。
+       转折点处 p_θ 本应连续趋零，镜面却只翻符号、不衰减幅值 ⇒ 注入虚假 θ 动量，
+       光线被一个"假锥面"弹回、再次撞上吸积盘 ⇒ 画面上出现绕自旋轴的**亮白色圆锥**。
+       实测只加镜面会把方向误差从 6.32% 抬到 7.18%（更差）。
+       正确做法只有一条：按 sinθ 下界成比例收紧容差（上面的 axk），让 RK4 老实走过刚性区。*/
+    // 【剔除 1b】解析已判定必然被吞：过了盘内缘就没有任何可采样的东西，直接终止，
+    //            省掉沿视界"死亡螺旋"的几十步（那里 dφ/dλ~aP/Δ 发散，步长被压到极小）
+    if(cap&&Xn.x<rStop&&Xn.x>0.0){ state=2; break; }
+    if(uRhor>0.0 && Xn.x<uRhor+0.0025 && Xn.x>0.0){ state=2; break; }
+    // 逃逸：到达外边界，或已远离且沿径向外行（残余偏折在 escDir 里解析补偿）
+    if(abs(Xn.x)>uEscape || (abs(Xn.x)>55.0 && Xn.x*k1X.x>0.0)){ X=Xn; Y=Yn; state=1; break; }
+    X=Xn; Y=Yn;
+  }
+  vec3 col=acc;
+  if(state==1||state==0){                       // 天空只求值一次（避免着色器体积翻倍）
+    vec3 ed=escDir(X,Y,E,L,a);
+    vec3 sky=(X.x>0.0)?skyMain(ed):skyAnti(ed);
+    col+=tr*sky*((state==1)?1.0:0.22);          // 步数耗尽只留极暗残影，避免大片死黑
+  }else if(state==3&&uRingOn>0.5) col+=tr*vec3(1.0,0.86,0.62)*uRingBright*3.0;
+  return col;
+}
+/* ============================ main ============================ */
+void main(){
+  vec2 uv=(gl_FragCoord.xy-0.5*uRes)/uRes.y;
+  int st=0,us=0,nx=0;
+  vec3 sum=vec3(0.0);
+  int ns=(uSSAA>1.5)?4:1;                       // 循环上界依赖 uniform：编译器不会把积分器内联 4 份
+  float e=0.25/uRes.y;
+  for(int i=0;i<ns;i++){
+    vec2 o=(ns==1)?vec2(0.0):
+           (i==0)?vec2(-e,3.0*e):(i==1)?vec2(3.0*e,e):(i==2)?vec2(e,-3.0*e):vec2(-3.0*e,-e);
+    sum+=traceRay(uv+o,st,us,nx);
+  }
+  vec3 col=sum/float(ns);
+  /* ★ 净化：场景里只要有一个 NaN/Inf 像素，泛光的模糊链就会把它扩散到整幅画面，
+     再经 ACES 变成 NaN ⇒ 整屏全黑。
+     不能用 isnan()（编译器 fast-math 常直接优化掉），要用 IEEE 比较语义：
+     NaN 与任何值比较都为 false，于是 mix 的布尔选择会挑走 0。*/
+  bvec3 finite=greaterThanEqual(col,vec3(0.0));
+  col=mix(vec3(0.0),min(col,vec3(4e3)),finite);
+  if(uDbg>0.5){
+    if(uDbg<1.5) col=vec3(float(us)/float(uMaxSteps));                        // 步数热图
+    else if(uDbg<2.5) col=(st==0)?vec3(1,0,0):(st==1)?vec3(0,0,1):
+                          (st==2)?vec3(0.08):(st==3)?vec3(0,1,0):vec3(1);     // 终止状态
+    else if(uDbg<3.5) col=vec3(float(nx)*0.34,length(col),0.0);               // 穿盘次数 / 亮度
+    else{                                                                     // 非有限值探测
+      bool bad=!(all(greaterThanEqual(sum,vec3(0.0)))&&all(lessThan(sum,vec3(1e30))));
+      col=bad?vec3(1,0,1):vec3(0.04)+vec3(0.0,min(length(sum)*0.02,0.6),0.0);
+    }
+  }
+  oCol=vec4(col*uExposure,1.0);
+}`;
+
+const BRIGHT_FS=`#version 300 es
+precision highp float; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uOut,uTexel; uniform float uThresh;
+void main(){
+  vec2 uv=gl_FragCoord.xy/uOut; vec3 c=vec3(0.0);
+  c+=texture(uTex,uv+uTexel*vec2( .5, .5)).rgb; c+=texture(uTex,uv+uTexel*vec2(-.5, .5)).rgb;
+  c+=texture(uTex,uv+uTexel*vec2( .5,-.5)).rgb; c+=texture(uTex,uv+uTexel*vec2(-.5,-.5)).rgb;
+  c*=0.25;
+  // 同样用比较语义净化：NaN 进了模糊链就会污染整幅画面
+  vec3 b=max(c-uThresh,0.0);
+  o=vec4(mix(vec3(0.0),min(b,vec3(1e3)),greaterThanEqual(b,vec3(0.0))),1.0);
+}`;
+const BLUR_FS=`#version 300 es
+precision highp float; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uOut,uStep;
+void main(){
+  vec2 uv=gl_FragCoord.xy/uOut;
+  float w[5]; w[0]=0.227027; w[1]=0.194594; w[2]=0.121621; w[3]=0.054054; w[4]=0.016216;
+  vec3 c=texture(uTex,uv).rgb*w[0];
+  for(int i=1;i<5;i++){ vec2 d=uStep*float(i); c+=texture(uTex,uv+d).rgb*w[i]; c+=texture(uTex,uv-d).rgb*w[i]; }
+  o=vec4(c,1.0);
+}`;
+const COMP_FS=`#version 300 es
+precision highp float; out vec4 o;
+uniform sampler2D uScene,uB1,uB2,uStreak;
+uniform vec2 uOut;
+uniform float uBloom,uStreakAmt,uCA,uGrain,uSat,uVig,uTimeS;
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
+void main(){
+  vec2 uv=gl_FragCoord.xy/uOut;
+  vec3 c=texture(uScene,uv).rgb;
+  // 注意：必须用分支跳过，不能靠乘 0 —— 泛光关闭时那几张 RT 从未被渲染过，
+  // 内容未初始化，而 NaN×0 仍是 NaN，会把整帧染成 NaN ⇒ 全黑。
+  if(uBloom>0.001){
+    vec2 off=vec2(uCA/uOut.x,0.0);                          // 泛光带色差
+    vec3 bl;
+    bl.r=texture(uB1,uv-off*0.6).r*0.62+texture(uB2,uv-off).r*0.38;
+    bl.g=texture(uB1,uv).g*0.62+texture(uB2,uv).g*0.38;
+    bl.b=texture(uB1,uv+off*0.6).b*0.62+texture(uB2,uv+off).b*0.38;
+    c+=clamp(bl,0.0,1e3)*uBloom;
+  }
+  if(uStreakAmt>0.001){                                     // 各向异性横向拉丝
+    c+=clamp(texture(uStreak,uv).rgb,0.0,1e3)*vec3(0.75,0.85,1.0)*uStreakAmt;
+  }
+  float v=smoothstep(1.32,0.42,length(uv-0.5)*1.32);
+  c*=mix(1.0-uVig,1.0,v);
+  c=aces(c);
+  float l=dot(c,vec3(0.2126,0.7152,0.0722));
+  c=mix(vec3(l),c,uSat);                                  // 饱和度
+  c=pow(max(c,0.0),vec3(1.0/2.2));
+  float g=fract(sin(dot(gl_FragCoord.xy+uTimeS,vec2(12.9898,78.233)))*43758.5453);
+  c+=(g-0.5)*uGrain*0.06+(g-0.5)/255.0;                   // 颗粒 + 抖动
+  o=vec4(c,1.0);
+}`;
+const STREAK_FS=`#version 300 es
+precision highp float; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uOut,uStep;
+void main(){
+  vec2 uv=gl_FragCoord.xy/uOut;
+  vec3 c=vec3(0.0); float w=0.0;
+  for(int i=-8;i<=8;i++){
+    float fi=float(i);
+    float k=exp(-abs(fi)*0.22);
+    c+=texture(uTex,uv+uStep*fi).rgb*k; w+=k;
+  }
+  o=vec4(c/w,1.0);
+}`;
+
+/* ============================ WebGL（延后初始化，见文件末 boot()）=================== */
+let gl=null,EXT=null,IFMT=0,ITYPE=0,VAO=null;
+let GPU='unknown',SOFTGPU=false;
+let P_SCENE,P_BRIGHT,P_BLUR,P_COMP,P_STREAK;
+
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;}
+function shCheck(s,src){
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
+    const log=gl.getShaderInfoLog(s);
+    fatal('着色器编译失败:\n'+log+'\n\n'+src.split('\n').map((l,i)=>(i+1)+': '+l).join('\n'));
+    throw new Error(log);} return s;}
+function prog(fs){
+  const p=gl.createProgram();
+  const vs=sh(gl.VERTEX_SHADER,VS), fsh=sh(gl.FRAGMENT_SHADER,fs);
+  gl.attachShader(p,vs);gl.attachShader(p,fsh);gl.linkProgram(p);
+  return {p,vs,fsh,fs,u:null};
+}
+function progFinish(o){                      // 真正取回结果（会等驱动编译完）
+  shCheck(o.vs,VS); shCheck(o.fsh,o.fs);
+  if(!gl.getProgramParameter(o.p,gl.LINK_STATUS)){fatal('链接失败: '+gl.getProgramInfoLog(o.p));throw 0;}
+  const u={},n=gl.getProgramParameter(o.p,gl.ACTIVE_UNIFORMS);
+  for(let i=0;i<n;i++){const nm=gl.getActiveUniform(o.p,i).name.replace(/\[0\]$/,'');u[nm]=gl.getUniformLocation(o.p,nm);}
+  o.u=u; return o;
+}
+
+/* 生成 4 倍频打包的 3D 噪声纹理（RGBA 各存一层，可无缝平铺）。 */
+function makeNoise3D(N){
+  const data=new Uint8Array(N*N*N*4), freqs=[4,8,16,32];
+  const sm=t=>t*t*(3.0-2.0*t);
+  for(let c=0;c<4;c++){
+    const F=freqs[c], lat=new Float32Array(F*F*F);
+    for(let i=0;i<lat.length;i++) lat[i]=Math.random();
+    const at=(x,y,z)=>lat[(((z%F)+F)%F*F+((y%F)+F)%F)*F+((x%F)+F)%F];
+    for(let z=0;z<N;z++){
+      const fz=z*F/N, iz=Math.floor(fz), tz=sm(fz-iz);
+      for(let y=0;y<N;y++){
+        const fy=y*F/N, iy=Math.floor(fy), ty=sm(fy-iy);
+        for(let x=0;x<N;x++){
+          const fx=x*F/N, ix=Math.floor(fx), tx=sm(fx-ix);
+          const c00=at(ix,iy,iz)+(at(ix+1,iy,iz)-at(ix,iy,iz))*tx;
+          const c10=at(ix,iy+1,iz)+(at(ix+1,iy+1,iz)-at(ix,iy+1,iz))*tx;
+          const c01=at(ix,iy,iz+1)+(at(ix+1,iy,iz+1)-at(ix,iy,iz+1))*tx;
+          const c11=at(ix,iy+1,iz+1)+(at(ix+1,iy+1,iz+1)-at(ix,iy+1,iz+1))*tx;
+          const v=(c00+(c10-c00)*ty)+((c01+(c11-c01)*ty)-(c00+(c10-c00)*ty))*tz;
+          data[((z*N+y)*N+x)*4+c]=Math.max(0,Math.min(255,(v*255)|0));
+        }
+      }
+    }
+  }
+  const t=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_3D,t);
+  gl.texImage3D(gl.TEXTURE_3D,0,gl.RGBA8,N,N,N,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
+  gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_S,gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_R,gl.REPEAT);
+  return t;
+}
+let NOISE3=null;
+
+function mkRT(w,h){
+  const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,IFMT,w,h,0,gl.RGBA,ITYPE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);return{t,f,w,h};}
+let RT_SCENE=null,RT_A=null,RT_B=null,RT_C=null,RT_D=null,RT_S1=null,RT_S2=null,CW=0,CH=0;
+const MAXPX=2.4e6;             // 场景光追像素上限（1080p 满分辨率 ≈ 2.07M，留一点余量）
+function resize(){
+  if(!gl) return;
+  const dpr=Math.min(window.devicePixelRatio||1,1.5);
+  CW=Math.max(64,Math.floor(CV.clientWidth*dpr)); CH=Math.max(64,Math.floor(CV.clientHeight*dpr));
+  CV.width=CW; CV.height=CH;
+  let w=Math.max(64,Math.floor(CW*S.scale*qScale)), h=Math.max(64,Math.floor(CH*S.scale*qScale));
+  const budget=started?MAXPX:2.2e5;                 // 起始遮罩期间只跑极低分辨率预览
+  if(w*h>budget){const k=Math.sqrt(budget/(w*h));w=Math.max(64,Math.floor(w*k));h=Math.max(64,Math.floor(h*k));}
+  [RT_SCENE,RT_A,RT_B,RT_C,RT_D,RT_S1,RT_S2].forEach(rt=>{if(rt){gl.deleteTexture(rt.t);gl.deleteFramebuffer(rt.f);}});
+  RT_SCENE=mkRT(w,h);
+  RT_A=mkRT(Math.max(8,w>>1),Math.max(8,h>>1)); RT_B=mkRT(Math.max(8,w>>1),Math.max(8,h>>1));
+  RT_C=mkRT(Math.max(8,w>>2),Math.max(8,h>>2)); RT_D=mkRT(Math.max(8,w>>2),Math.max(8,h>>2));
+  RT_S1=mkRT(Math.max(8,w>>2),Math.max(8,h>>2)); RT_S2=mkRT(Math.max(8,w>>2),Math.max(8,h>>2));
+}
+
+/* ============================ 物理 / 相机 ============================ */
+const rHorizon=(a,Q)=>{const d=1-a*a-(Q||0)*(Q||0);return d>=0?1+Math.sqrt(d):-1;};
+/* KN 赤道顺行圆轨道比能，ISCO = E(r) 的极小点（数值求）。
+   校验：Q=0,a=0 → 6M；Q=1,a=0 → 4M（极端 RN 已知值）。*/
+function eCirc(r,a,Q){
+  const q2=Q*Q, u=Math.sqrt(Math.max(r-q2,1e-9));
+  const num=r*r-2*r+q2+a*u;
+  const den=r*Math.sqrt(Math.max(r*r-3*r+2*q2+2*a*u,1e-12));
+  return num/den;
+}
+function rIsco(a,Q){
+  Q=Q||0;
+  const rh=rHorizon(a,Q), lo=(rh>0?rh:0.2)+0.02;
+  let best=6, bv=1e9;
+  for(let r=lo;r<24;r+=0.01){ const v=eCirc(r,a,Q); if(isFinite(v)&&v<bv){bv=v;best=r;} }
+  for(let s=0.005;s>1e-4;s*=0.5){          // 二分细化
+    const l=eCirc(best-s,a,Q), rr=eCirc(best+s,a,Q);
+    if(isFinite(l)&&l<bv){bv=l;best-=s;} else if(isFinite(rr)&&rr<bv){bv=rr;best+=s;}
+  }
+  return best;
+}
+function blFromCart(x,y,z,a){
+  const rho2=x*x+y*y+z*z, q=rho2-a*a;
+  const r2=0.5*(q+Math.sqrt(Math.max(0,q*q+4*a*a*z*z)));
+  const r=Math.sqrt(Math.max(r2,1e-12));
+  return {r, th:Math.acos(Math.max(-1,Math.min(1,z/r))), ph:Math.atan2(y,x)};
+}
+function cartFromBL(r,th,ph,a){
+  const rho=Math.sqrt(r*r+a*a),s=Math.sin(th);
+  return [rho*s*Math.cos(ph),rho*s*Math.sin(ph),r*Math.cos(th)];
+}
+const cam={pos:[0,-26,3.2],yaw:Math.PI/2,pitch:-0.11,speed:1.2,vel:[0,0,0]};
+function camMinR(){const rh=rHorizon(S.spin,S.charge);return rh>0?rh+0.28:0.45;}
+function clampCam(){
+  const a=S.spin,b=blFromCart(cam.pos[0],cam.pos[1],cam.pos[2],a),rm=camMinR();
+  if(b.r<rm){cam.pos=cartFromBL(rm,b.th,b.ph,a);return true;} return false;
+}
+function lookAt(t){
+  const d=[t[0]-cam.pos[0],t[1]-cam.pos[1],t[2]-cam.pos[2]];
+  const n=Math.hypot(d[0],d[1],d[2])||1;
+  cam.pitch=Math.asin(Math.max(-1,Math.min(1,d[2]/n))); cam.yaw=Math.atan2(d[1],d[0]);
+}
+function resetCam(){cam.pos=[0,-26,3.2];cam.speed=1.2;cam.vel=[0,0,0];lookAt([0,0,0]);}
+
+/* ============================ 输入 ============================ */
+const keys=Object.create(null);
+let locked=false,started=false,lookDX=0,lookDY=0,wantShot=0,shotMsg=0;
+addEventListener('keydown',e=>{
+  const c=e.code; keys[c]=true;
+  if(c==='Tab'){e.preventDefault();PANEL.classList.toggle('hide');return;}
+  if(e.repeat) return;
+  switch(c){
+    case 'KeyH':HUD.classList.toggle('hide');break;
+    case 'KeyC':lookAt([0,0,0]);break;        // 对准中心（找奇异环窗口 / 进反宇宙用）
+    case 'KeyV':resetCam();break;             // 复位相机
+    case 'KeyL':lookAt([0,0,0]);break;
+    case 'Space':cam.vel=[0,0,0];e.preventDefault();break;
+    case 'KeyG':set('diskOn',S.diskOn?0:1);break;
+    case 'KeyK':set('doppler',S.doppler?0:1);break;
+    case 'KeyO':set('ringOn',S.ringOn?0:1);break;
+    case 'KeyX':set('orbit',S.orbit?0:1);if(S.orbit)lookAt([0,0,0]);break;
+    case 'KeyJ':set('ssaa',S.ssaa?0:1);break;
+    case 'Semicolon':set('look',Math.max(0.08,+(S.look-0.1).toFixed(2)));break;
+    case 'Quote':set('look',Math.min(3,+(S.look+0.1).toFixed(2)));break;
+    case 'F2':wantShot=1;e.preventDefault();break;
+    case 'F3':set('dbg',(S.dbg+1)%4);e.preventDefault();break;
+    case 'KeyP':S.paused=S.paused?0:1;break;
+    case 'KeyB':set('bgMode',(S.bgMode+1)%4);break;
+    case 'Comma':set('bgBright',Math.max(0,S.bgBright-0.08));break;
+    case 'Period':set('bgBright',Math.min(2,S.bgBright+0.08));break;
+    case 'BracketLeft':set('spin',Math.max(0,+(S.spin-0.02).toFixed(3)));break;
+    case 'BracketRight':set('spin',Math.min(1.45,+(S.spin+0.02).toFixed(3)));break;
+    case 'Minus':set('scale',Math.max(0.3,+(S.scale-0.06).toFixed(2)));break;
+    case 'Equal':set('scale',Math.min(1.5,+(S.scale+0.06).toFixed(2)));break;
+    case 'Digit1':set('steps',90);set('tol',0.26);break;
+    case 'Digit2':set('steps',150);set('tol',0.17);break;
+    case 'Digit3':set('steps',320);set('tol',0.08);break;
+    case 'Enter':if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+                 else document.exitFullscreen?.();break;
+  }
+});
+addEventListener('keyup',e=>{keys[e.code]=false;});
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
+/* 指针锁定：刚退出锁定后浏览器会拒绝立即重新获取，并且新版返回的是 Promise
+   （不 catch 就会变成未捕获异常弹到界面上）。这里统一加时间闸门与静默兜底。*/
+let lockExitT=-1e9;
+function tryLock(){
+  if(!CV.requestPointerLock) return;
+  if(document.pointerLockElement===CV) return;
+  if(performance.now()-lockExitT<1400) return;      // 太快请求必被拒
+  try{ const p=CV.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+}
+CV.addEventListener('mousedown',tryLock);
+document.addEventListener('pointerlockchange',()=>{
+  locked=document.pointerLockElement===CV;
+  if(!locked) lockExitT=performance.now();
+});
+document.addEventListener('pointerlockerror',()=>{ lockExitT=performance.now(); });
+addEventListener('mousemove',e=>{
+  if(!locked) return;
+  const mx=Math.max(-200,Math.min(200,e.movementX)),my=Math.max(-200,Math.min(200,e.movementY));
+  // 基准灵敏度 × 用户倍率 × 视场缩放（拉近时自动变慢，手感一致）
+  const sens=0.0011*S.look*(Math.tan(S.fov*Math.PI/360)/0.637);
+  lookDX-=mx*sens; lookDY-=my*sens;
+});
+CV.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const n=Math.max(-3,Math.min(3,-Math.sign(e.deltaY)*Math.max(1,Math.min(3,Math.abs(e.deltaY)/100))));
+  cam.speed=Math.max(1e-5,Math.min(1e6,cam.speed*Math.pow(1.28,n)));
+},{passive:false});
+OV.addEventListener('click',()=>{OV.classList.add('gone');started=true;qTouch=performance.now();resize();tryLock();});
+
+/* ============================ 面板 ============================ */
+function set(k,v){S[k]=v;syncUI(k);if(k==='scale'||k==='targetMs'){qTouch=performance.now();resize();}
+  if(k==='spin'||k==='charge')onSpin();}
+let qTouch=0,qScale=1,qT=0,qSteps=1;
+/* 自动画质：以「真实帧时预算」为目标闭环调节（分辨率倍率 + 步数倍率）。
+   之前用数 rAF 得来的假帧率做决策，结果是 GPU 越淹越深还一路加画质。 */
+function autoQuality(dt){
+  if(!S.autoQ){ if(qScale!==1||qSteps!==1){qScale=1;qSteps=1;resize();} return; }
+  const budget=Math.max(8,S.targetMs);
+  // 严重超预算立刻砍，不等统计窗口（防驱动复位 TDR）
+  if(gpuMs>budget*2.5&&(qScale>0.3||qSteps>0.35)){
+    qSteps=Math.max(0.32,qSteps*0.65); qScale=Math.max(0.3,qScale*0.7);
+    resize(); qT=0; return;
+  }
+  qT+=dt; if(qT<0.5||performance.now()-qTouch<1500) return; qT=0;
+  const old=qScale,oldS=qSteps;
+  if(gpuMs>budget*1.12){                       // 超预算：先降步数（画面变化小），再降分辨率
+    if(qSteps>0.34) qSteps=Math.max(0.32,qSteps*0.88);
+    else qScale=Math.max(0.3,qScale*0.9);
+  }else if(gpuMs<budget*0.72){                 // 有余量：先补分辨率，再补步数
+    if(qScale<1) qScale=Math.min(1,qScale*1.06);
+    else if(qSteps<1) qSteps=Math.min(1,qSteps*1.08);
+  }
+  if(Math.abs(qScale-old)>0.004) resize();
+  if(qSteps!==oldS) qT=-0.25;
+}
+function onSpin(){ if(S.autoIn){ const ri=rIsco(S.spin,S.charge); set('diskIn',+Math.max(0.4,ri).toFixed(2)); } clampCam(); }
+const UI={};
+function buildPanel(){
+  let html='';
+  for(const it of SPEC){
+    if(it.sec){html+=`<h3>${it.sec}</h3>`;continue;}
+    const v=S[it.k];
+    if(it.t==='chk')
+      html+=`<div class="row"><label>${it.l}</label><input type="checkbox" data-k="${it.k}" ${v?'checked':''}></div>`;
+    else if(it.t==='sel'){
+      html+=`<div class="row"><label>${it.l}</label><select data-k="${it.k}">`+
+        it.opts.map((o,i)=>`<option value="${i}">${o}</option>`).join('')+`</select></div>`;
+    }else
+      html+=`<div class="row"><label>${it.l}</label><input type="range" data-k="${it.k}" min="${it.min}" max="${it.max}" step="${it.step}" value="${v}"><span class="val" id="v_${it.k}"></span></div>`;
+  }
+  html+=`<h3>预设 / PRESETS</h3><div class="btns">
+    <button data-ps="schw">史瓦西 a=0</button><button data-ps="fast">快转 a=0.95</button>
+    <button data-ps="thorne">Thorne 极限 a=0.998</button>
+    <button data-ps="kn">Kerr–Newman a=.75 Q=.6</button>
+    <button data-ps="naked">裸奇环 a=1.05</button><button data-ps="knNaked">带电裸奇环 a²+Q²&gt;1</button>
+    <button data-ps="anti">反宇宙特写 ▶</button>
+    <button data-ps="blue">蓝色盘 ▶</button><button data-ps="jet">开喷流 ▶</button>
+    <button data-ps="stars">开星空</button>
+    <button data-ps="black">纯黑背景</button><button data-ps="edge">侧视盘面</button>
+    <button data-ps="reset">复位相机</button></div>`;
+  PANEL.innerHTML=html;
+  PANEL.querySelectorAll('[data-k]').forEach(el=>{
+    UI[el.dataset.k]=el;
+    const ev=el.type==='range'?'input':'change';
+    el.addEventListener(ev,()=>{
+      const k=el.dataset.k;
+      let v = el.type==='checkbox' ? (el.checked?1:0) : parseFloat(el.value);
+      S[k]=v;
+      if(k==='scale'||k==='autoQ'||k==='targetMs'){qTouch=performance.now();resize();}
+      if(k==='spin'||k==='charge'||k==='autoIn')onSpin();
+      syncUI(k);
+    });
+  });
+  PANEL.querySelectorAll('[data-ps]').forEach(b=>b.addEventListener('click',()=>{
+    switch(b.dataset.ps){
+      case 'schw':set('spin',0);set('charge',0);break;
+      case 'fast':set('spin',0.95);set('charge',0);break;
+      case 'thorne':set('spin',0.998);set('charge',0);break;
+      case 'kn':set('spin',0.75);set('charge',0.60);break;              // a²+Q²=0.92，仍有视界
+      case 'naked':set('spin',1.05);set('charge',0);set('antiBright',0.95);break;
+      case 'knNaked':set('spin',0.80);set('charge',0.70);set('antiBright',1.0);break; // a²+Q²=1.13
+      case 'anti':{ // 反宇宙特写：裸奇环 + 俯视 + 网格天空便于看透镜
+        set('spin',1.05);set('charge',0);set('antiBright',1.1);set('bgMode',3);set('bgBright',0.7);
+        set('steps',420);set('tol',0.07);set('fov',48);set('diskOut',9);
+        cam.pos=cartFromBL(7.5,35*Math.PI/180,-Math.PI/2,S.spin);lookAt([0,0,0]);cam.speed=0.25;break;}
+      case 'blue':set('tempK',24000);set('sat',1.18);break;       // 蓝色盘
+      case 'jet':set('jetOn',1);set('jetBright',1.2);break;        // 开喷流
+      case 'stars':set('bgMode',2);set('bgBright',0.9);break;
+      case 'black':set('bgMode',0);set('bgBright',0);break;
+      case 'edge':{const a=S.spin;cam.pos=cartFromBL(24,Math.PI/2-0.045,-Math.PI/2,a);lookAt([0,0,0]);break;}
+      case 'reset':resetCam();break;
+    }
+    for(const k in UI)syncUI(k);
+  }));
+  for(const k in UI)syncUI(k);
+}
+function syncUI(k){
+  const el=UI[k];if(!el)return;
+  const it=SPEC.find(s=>s.k===k);
+  if(el.type==='checkbox')el.checked=!!S[k];
+  else el.value=S[k];
+  const vs=document.getElementById('v_'+k);
+  if(vs)vs.textContent=it&&it.f?it.f(S[k]):(Math.abs(S[k])>=100?S[k].toFixed(0):S[k].toFixed(2));
+}
+
+/* ============================ 渲染 ============================ */
+function drawFS(){gl.bindVertexArray(VAO);gl.drawArrays(gl.TRIANGLES,0,3);}
+function bindRT(rt){gl.bindFramebuffer(gl.FRAMEBUFFER,rt?rt.f:null);
+  gl.viewport(0,0,rt?rt.w:CW,rt?rt.h:CH);}
+let simT=0,last=performance.now(),fps=60,hudT=9;
+/* GPU 真实帧时测量 + 单帧在飞限流。
+   关键教训：WebGL 提交命令后立刻返回，rAF 仍按 60Hz 触发，于是"数 rAF 得到的帧率"
+   可以显示 60 而 GPU 已落后十几帧 —— 体感只有几帧，而自动画质还以为很流畅、继续加码。
+   用 fenceSync 等上一帧真正画完再提交下一帧：帧率变真值，输入延迟也一起降下来。*/
+let inflight=null,submitT=0,gpuMs=16.7,fenceSkips=0;
+let DBG=null;
+function dumpDebug(){
+  const px=new Float32Array(4), c8=new Uint8Array(4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,RT_SCENE.f);
+  try{gl.readPixels((RT_SCENE.w/2)|0,(RT_SCENE.h/2)|0,1,1,gl.RGBA,gl.FLOAT,px);}catch(e){}
+  // 横向条带采样，看场景 RT 是否有任何非零内容
+  const strip=[];
+  const row=new Float32Array(RT_SCENE.w*4);
+  try{
+    gl.readPixels(0,(RT_SCENE.h*0.5)|0,RT_SCENE.w,1,gl.RGBA,gl.FLOAT,row);
+    for(let i=0;i<9;i++){const x=Math.min(RT_SCENE.w-1,((RT_SCENE.w-1)*i/8)|0);
+      strip.push([row[x*4].toFixed(3),row[x*4+1].toFixed(3),row[x*4+2].toFixed(3)].join('/'));}
+  }catch(e){strip.push('ERR '+e.message);}
+  let mx=0;for(let i=0;i<row.length;i++)if(row[i]>mx)mx=row[i];
+  // 全帧统计：最大亮度与位置、各阈值以上像素数
+  let fmax=0,fx=0,fy=0,n01=0,n1=0,n001=0,rsum=0;
+  const all=new Float32Array(RT_SCENE.w*RT_SCENE.h*4);
+  try{
+    gl.readPixels(0,0,RT_SCENE.w,RT_SCENE.h,gl.RGBA,gl.FLOAT,all);
+    for(let y=0;y<RT_SCENE.h;y++)for(let x=0;x<RT_SCENE.w;x++){
+      const i=(y*RT_SCENE.w+x)*4;
+      const l=0.2126*all[i]+0.7152*all[i+1]+0.0722*all[i+2];
+      rsum+=all[i];
+      if(l>fmax){fmax=l;fx=x;fy=y;}
+      if(l>0.001)n001++; if(l>0.01)n01++; if(l>0.1)n1++;
+    }
+  }catch(e){}
+  const tot=RT_SCENE.w*RT_SCENE.h;
+  const meanSteps=(rsum/tot)*Math.max(40,Math.min(640,Math.round(S.steps*qSteps)))/Math.max(S.exposure,1e-6);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.readPixels((CW/2)|0,(CH/2)|0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,c8);
+  const ks=Object.keys(P_SCENE.u);
+  ERR.style.display='block';ERR.style.color='#9f9';
+  ERR.textContent=
+    'canvas '+CW+'x'+CH+' RT '+RT_SCENE.w+'x'+RT_SCENE.h+' HDR='+(EXT?1:0)+'\n'+
+    'uniforms='+ks.length+' | uMaxSteps='+('uMaxSteps'in P_SCENE.u)+
+      ' uEhat='+('uEhat'in P_SCENE.u)+' uCamBasis='+('uCamBasis'in P_SCENE.u)+
+      ' uCamBL='+('uCamBL'in P_SCENE.u)+'\n'+
+    'names='+ks.join(' ')+'\n'+
+    'S steps='+S.steps+' tol='+S.tol+' scale='+S.scale+' spin='+S.spin+
+      ' diskOn='+S.diskOn+' in='+S.diskIn+' out='+S.diskOut+' br='+S.diskBright+' exp='+S.exposure+'\n'+
+    'DBG='+JSON.stringify(DBG)+'\n'+
+    'dbg='+S.dbg+' rowMax='+mx.toFixed(4)+'\n'+
+    'MEANSTEPS '+meanSteps.toFixed(2)+' (dbg=1 时有效；每像素平均积分步数，成本主导指标)\n'+
+    'FRAME max L='+fmax.toFixed(4)+' @('+fx+','+fy+') of '+RT_SCENE.w+'x'+RT_SCENE.h+
+      '  px>0.001: '+(100*n001/tot).toFixed(1)+'%  >0.01: '+(100*n01/tot).toFixed(1)+
+      '%  >0.1: '+(100*n1/tot).toFixed(1)+'%\n'+
+    'strip(y=mid)='+strip.join('  ')+'\n'+
+    'sceneCenterPx='+[...px].map(v=>v.toFixed(4)).join(',')+'  canvasCenterPx='+[...c8].join(',')+'\n'+
+    'glError='+gl.getError();
+}
+const MASSV=[10,4.3e6,6.5e9];
+function fmtLen(M_units){ // 输入 M 为单位的长度 -> km/AU 字符串
+  const km=M_units*1.4766*MASSV[S.mass|0]/1;
+  if(km<1e4)return km.toFixed(km<100?2:0)+' km';
+  const au=km/1.495978707e8;
+  if(au<0.02)return (km/1e3).toPrecision(4)+'e3 km';
+  if(au<1e4)return au.toPrecision(4)+' AU';
+  return (au/63241.1).toPrecision(4)+' ly';
+}
+function frame(now){
+  /* 上一帧还没画完就不再堆命令（否则 GPU 队列越积越深、帧率虚高、延迟爆炸）。
+     必须有等待上限：某些驱动/无头环境下 clientWaitSync 可能长时间不返回信号，
+     无上限就会一帧都渲染不出来（画布停在初始黑）。*/
+  if(inflight){
+    const st=gl.clientWaitSync(inflight,0,0);
+    if(st===gl.TIMEOUT_EXPIRED&&fenceSkips<40){ fenceSkips++; schedule(); return; }
+    gl.deleteSync(inflight); inflight=null; fenceSkips=0;
+    gpuMs=gpuMs*0.75+(performance.now()-submitT)*0.25;   // 真实帧时（含 GPU 执行）
+    fps=1000/Math.max(gpuMs,0.3);
+  }
+  const dt=Math.min(0.1,(now-last)/1000);last=now;
+  if(!S.paused)simT+=dt*S.timeRate;
+  autoQuality(dt);
+  const a=S.spin;
+
+  /* --- 视角平滑 --- */
+  if(lookDX||lookDY){
+    const k=(S.lookSmooth<=0.02)?1:(1-Math.exp(-dt/(0.012+S.lookSmooth*0.10)));
+    cam.yaw+=lookDX*k; cam.pitch+=lookDY*k;
+    lookDX*=(1-k); lookDY*=(1-k);
+    if(Math.abs(lookDX)<1e-6)lookDX=0; if(Math.abs(lookDY)<1e-6)lookDY=0;
+    const lim=Math.PI/2-0.004; cam.pitch=Math.max(-lim,Math.min(lim,cam.pitch));
+  }
+  /* --- 相机基 --- */
+  const cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch),cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw);
+  const fwd=[cp*cy,cp*sy,sp];
+  let right=[fwd[1],-fwd[0],0];                 // cross(fwd, zUp)
+  const rn=Math.hypot(right[0],right[1])||1;right=[right[0]/rn,right[1]/rn,0];
+  const up=[right[1]*fwd[2]-right[2]*fwd[1],right[2]*fwd[0]-right[0]*fwd[2],right[0]*fwd[1]-right[1]*fwd[0]];
+  /* --- 移动 --- */
+  let mv=[0,0,0],any=false;
+  const add=(v,s)=>{mv[0]+=v[0]*s;mv[1]+=v[1]*s;mv[2]+=v[2]*s;any=true;};
+  if(keys['KeyW'])add(fwd,1); if(keys['KeyS'])add(fwd,-1);
+  if(keys['KeyD'])add(right,1); if(keys['KeyA'])add(right,-1);
+  if(keys['KeyR'])add(up,1); if(keys['KeyF'])add(up,-1);
+  let boost=1; if(keys['ShiftLeft']||keys['ShiftRight'])boost*=8;
+  if(keys['ControlLeft']||keys['ControlRight'])boost*=0.12;
+  if(S.orbit){
+    /* 锁定黑洞：A/D 绕行、R/F 改变纬度、W/S 拉近拉远，黑洞始终在画面中心。
+       自由平移在只有黑洞可参照时会被感知成"转视角"，这个模式解决观察需求。 */
+    const p=cam.pos, d0=Math.hypot(p[0],p[1],p[2])||1;
+    let lat=Math.asin(Math.max(-1,Math.min(1,p[2]/d0))), lon=Math.atan2(p[1],p[0]), dist=d0;
+    const w=cam.speed*boost/Math.max(dist,0.5)*dt;        // 角速度按距离归一
+    if(keys['KeyD'])lon-=w; if(keys['KeyA'])lon+=w;
+    if(keys['KeyR'])lat=Math.min(1.552,lat+w); if(keys['KeyF'])lat=Math.max(-1.552,lat-w);
+    if(keys['KeyW'])dist-=cam.speed*boost*dt; if(keys['KeyS'])dist+=cam.speed*boost*dt;
+    dist=Math.max(camMinR()*1.02,dist);
+    const cl=Math.cos(lat);
+    cam.pos=[dist*cl*Math.cos(lon),dist*cl*Math.sin(lon),dist*Math.sin(lat)];
+    cam.vel=[0,0,0];
+    if(any)lookAt([0,0,0]);
+  }else{
+    let tv=[0,0,0];
+    if(any){const n=Math.hypot(mv[0],mv[1],mv[2])||1;const sc=cam.speed*boost/n;tv=[mv[0]*sc,mv[1]*sc,mv[2]*sc];}
+    const k=1-Math.exp(-dt*9);
+    for(let i=0;i<3;i++){cam.vel[i]+=(tv[i]-cam.vel[i])*k;cam.pos[i]+=cam.vel[i]*dt;}
+  }
+  if(any||Math.abs(lookDX)>1e-5||Math.abs(lookDY)>1e-5) moveT=now;
+  const moving=(now-moveT)<250;      // 运动中降精度：人眼看不出，帧率立竿见影
+  const clamped=clampCam();
+  if(clamped)cam.vel=[0,0,0];
+
+  const bl=blFromCart(cam.pos[0],cam.pos[1],cam.pos[2],a);
+  /* 局部正交基 e_r,e_th,e_ph（斜球坐标，精确正交） */
+  const rr=bl.r,th=bl.th,ph=bl.ph,rho=Math.sqrt(rr*rr+a*a);
+  const st=Math.sin(th),ct=Math.cos(th),cph=Math.cos(ph),sph=Math.sin(ph);
+  let er=[rr/rho*st*cph,rr/rho*st*sph,ct], et=[rho*ct*cph,rho*ct*sph,-rr*st], ep=[-sph,cph,0];
+  const nz=v=>{const n=Math.hypot(v[0],v[1],v[2])||1;return[v[0]/n,v[1]/n,v[2]/n];};
+  er=nz(er);et=nz(et);
+  /* 视场缩放并入相机基 */
+  const tanH=Math.tan(S.fov*Math.PI/360);
+  const basis=[right[0]*tanH,right[1]*tanH,right[2]*tanH, up[0]*tanH,up[1]*tanH,up[2]*tanH, fwd[0],fwd[1],fwd[2]];
+
+  if(!RT_SCENE)resize();
+  /* --- 场景 --- */
+  const u=P_SCENE.u;
+  gl.useProgram(P_SCENE.p);bindRT(RT_SCENE);
+  gl.uniform2f(u.uRes,RT_SCENE.w,RT_SCENE.h);
+  gl.uniformMatrix3fv(u.uCamBasis,false,basis);
+  gl.uniformMatrix3fv(u.uEhat,false,[er[0],er[1],er[2],et[0],et[1],et[2],ep[0],ep[1],ep[2]]);
+  gl.uniform3f(u.uCamBL,rr,th,ph);
+  gl.uniform1f(u.uA,a);
+  gl.uniform1f(u.uTime,simT);
+  gl.uniform1f(u.uTol,S.tol*(moving?1.5:1.0));
+  gl.uniform1i(u.uMaxSteps,Math.max(40,Math.min(640,Math.round(S.steps*qSteps*(moving?0.7:1.0)))));
+  gl.uniform1f(u.uEscape,Math.max(240,rr*2.2));
+  gl.uniform1f(u.uRhor,rHorizon(a,S.charge));gl.uniform1f(u.uQ2,S.charge*S.charge);
+  gl.uniform1f(u.uPixA,2*tanH/RT_SCENE.h);
+  gl.uniform1f(u.uExposure,S.exposure);
+  gl.uniform1f(u.uDiskOn,S.diskOn);gl.uniform1f(u.uDiskIn,S.diskIn);gl.uniform1f(u.uDiskOut,S.diskOut);
+  gl.uniform1f(u.uDiskBright,S.diskBright);gl.uniform1f(u.uDiskThick,S.diskThick);
+  gl.uniform1f(u.uDiskOpa,S.diskOpa);
+  gl.uniform1f(u.uDiskStep,S.diskStep);
+  gl.uniform1f(u.uDiskShade,S.diskShade*(moving?1.8:1.0)); // 移动时降低盘着色频率
+  gl.uniform1f(u.uDiskGlow,S.diskGlow);gl.uniform1f(u.uDiskRim,S.diskRim);gl.uniform1f(u.uTempK,S.tempK);
+  gl.uniform1f(u.uJetOn,S.jetOn);gl.uniform1f(u.uJetBright,S.jetBright);gl.uniform1f(u.uJetBeta,S.jetBeta);gl.uniform1f(u.uJetOpen,S.jetOpen);gl.uniform1f(u.uJetLen,S.jetLen);gl.uniform1f(u.uJetR0,S.jetR0);gl.uniform1f(u.uJetTempK,S.jetTempK);
+  gl.uniform1f(u.uDiskScale,S.diskScale);gl.uniform1f(u.uDiskCon,S.diskCon);
+  gl.uniform1f(u.uDiskAzi,0.02*Math.pow(S.diskOut,0.7));
+  gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_3D,NOISE3);
+  gl.uniform1i(u.uNoise,3);
+  gl.uniform1f(u.uPRBoost,S.prBoost);gl.uniform1f(u.uPRTemp,S.prTemp);
+  gl.uniform1f(u.uDoppler,S.doppler);gl.uniform1f(u.uDelay,S.delay);
+  gl.uniform1f(u.uBgMode,S.bgMode);gl.uniform1f(u.uBgBright,S.bgBright);
+  gl.uniform1f(u.uAntiBright,S.antiBright);
+  gl.uniform1f(u.uRingOn,S.ringOn);gl.uniform1f(u.uRingBright,S.ringBright);
+  gl.uniform1f(u.uDbg,S.dbg);gl.uniform1f(u.uSSAA,S.ssaa>0.5?2:1);
+  drawFS();
+  /* --- Bloom --- */
+  if(S.bloom>0.001){
+    gl.useProgram(P_BRIGHT.p);bindRT(RT_A);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,RT_SCENE.t);
+    gl.uniform1i(P_BRIGHT.u.uTex,0);gl.uniform2f(P_BRIGHT.u.uOut,RT_A.w,RT_A.h);
+    gl.uniform2f(P_BRIGHT.u.uTexel,1/RT_SCENE.w,1/RT_SCENE.h);
+    gl.uniform1f(P_BRIGHT.u.uThresh,EXT?1.0:0.72);drawFS();
+    const blur=(src,dst,dx,dy)=>{gl.useProgram(P_BLUR.p);bindRT(dst);
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,src.t);
+      gl.uniform1i(P_BLUR.u.uTex,0);gl.uniform2f(P_BLUR.u.uOut,dst.w,dst.h);
+      gl.uniform2f(P_BLUR.u.uStep,dx/src.w,dy/src.h);drawFS();};
+    blur(RT_A,RT_B,1.4,0);blur(RT_B,RT_A,0,1.4);
+    blur(RT_A,RT_C,2.6,0);blur(RT_C,RT_D,0,2.6);
+    if(S.streak>0.001){                                  // 横向拉丝：两趟宽核，只做水平方向
+      const st=(src,dst,dx)=>{gl.useProgram(P_STREAK.p);bindRT(dst);
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,src.t);
+        gl.uniform1i(P_STREAK.u.uTex,0);gl.uniform2f(P_STREAK.u.uOut,dst.w,dst.h);
+        gl.uniform2f(P_STREAK.u.uStep,dx/src.w,0);drawFS();};
+      st(RT_A,RT_S1,2.0); st(RT_S1,RT_S2,10.0);
+    }
+  }
+  /* --- 合成 --- */
+  gl.useProgram(P_COMP.p);bindRT(null);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,RT_SCENE.t);gl.uniform1i(P_COMP.u.uScene,0);
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,RT_A.t);gl.uniform1i(P_COMP.u.uB1,1);
+  gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,RT_D.t);gl.uniform1i(P_COMP.u.uB2,2);
+  gl.activeTexture(gl.TEXTURE4);gl.bindTexture(gl.TEXTURE_2D,RT_S2.t);gl.uniform1i(P_COMP.u.uStreak,4);
+  gl.uniform2f(P_COMP.u.uOut,CW,CH);gl.uniform1f(P_COMP.u.uBloom,S.bloom);
+  gl.uniform1f(P_COMP.u.uStreakAmt,S.streak);gl.uniform1f(P_COMP.u.uCA,S.ca);
+  gl.uniform1f(P_COMP.u.uGrain,S.grain);gl.uniform1f(P_COMP.u.uSat,S.sat);
+  gl.uniform1f(P_COMP.u.uVig,S.vig);gl.uniform1f(P_COMP.u.uTimeS,(now*0.001)%100);
+  drawFS();
+  /* ★ 解绑所有采样单元：否则下一帧泛光/拉丝往这些纹理渲染时，它们仍绑在采样器上，
+     构成"同一纹理既是采样源又是渲染目标"的反馈环 —— 规范里是未定义行为，
+     D3D11 后端会直接给出垃圾/零（SwiftShader 恰好容忍，所以之前没暴露）。*/
+  for(let i=0;i<5;i++){ gl.activeTexture(gl.TEXTURE0+i); gl.bindTexture(gl.TEXTURE_2D,null); }
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D,null);
+  inflight=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);   // 标记这一帧的 GPU 完成点
+  submitT=performance.now();
+  gl.flush();
+
+  /* --- F2 截图（必须在同一帧绘制后立即取，未开 preserveDrawingBuffer）--- */
+  if(wantShot){
+    wantShot=0;
+    try{
+      CV.toBlob(b=>{
+        if(!b)return;
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(b);
+        a.download='blackhole_'+new Date().toISOString().replace(/[:.]/g,'-')+'.png';
+        a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      },'image/png');
+      shotMsg=performance.now();
+    }catch(err){ shotMsg=-1; }
+  }
+
+  /* --- HUD --- */
+  hudT+=dt;
+  if(hudT>0.12&&!HUD.classList.contains('hide')){
+    hudT=0;
+    const rh=rHorizon(a,S.charge),ri=rIsco(a,S.charge);
+    const spd=cam.speed*(keys['ShiftLeft']||keys['ShiftRight']?8:1)*
+              (keys['ControlLeft']||keys['ControlRight']?0.12:1);
+    const kms=spd*1.4766*MASSV[S.mass|0], cfrac=kms/299792.458;
+    const Qc=S.charge, ext=a*a+Qc*Qc;
+    const erg=1+Math.sqrt(Math.max(0,1-a*a*ct*ct-Qc*Qc));
+    const dil=rh>0?Math.sqrt(Math.max(0,1-(2*rr-Qc*Qc)/(rr*rr+a*a*ct*ct))):NaN;
+    const naked=ext>1;
+    HUD.innerHTML=
+      `<b>${Qc>0.001?'KERR–NEWMAN':'KERR'} BLACK HOLE</b>  a=${a.toFixed(3)}${Qc>0.001?'  Q='+Qc.toFixed(3):''}  ${naked?'<span class="warn">裸奇环 (a²+Q²='+ext.toFixed(3)+'>1)</span>':'<span class="ok">有视界</span>'}\n`+
+      `r₊ ${rh>0?rh.toFixed(3)+' M':'—'}   ISCO ${ri.toFixed(2)} M   能层 ${erg.toFixed(2)} M\n`+
+      `<b>相机</b> r=${rr.toFixed(3)} M (${fmtLen(rr)})  θ=${(th*57.2958).toFixed(1)}°${S.orbit?'  <span class="ok">[锁定黑洞]</span>':''}\n`+
+      `<b>速度</b> ${spd<1e-2?spd.toExponential(2):spd.toFixed(3)} M/s  ${kms<1e4?kms.toFixed(1):kms.toExponential(3)} km/s  ${cfrac<1?(cfrac.toFixed(4)+' c'):('<span class="warn">'+cfrac.toPrecision(3)+' c</span>')}\n`+
+      `<b>时间膨胀</b> ${isFinite(dil)?dil.toFixed(4):'—'}   ${clamped?'<span class="bad">已抵最近可达半径</span>':''}${S.dbg?'<span class="warn"> 调试通道 '+S.dbg+'</span>':''}${shotMsg>0&&performance.now()-shotMsg<2500?'<span class="ok"> 已保存截图</span>':''}\n`+
+      `<b>反宇宙</b> ${naked?'<span class="ok">视线可达 (r&lt;0)</span>':'<span class="dim">被视界遮蔽</span>'}\n`+
+      `<span class="dim">盘 ${S.diskOn?'开':'关'} ${S.diskIn.toFixed(1)}–${S.diskOut.toFixed(0)}M · 多普勒 ${S.doppler?'开':'关'} · 背景 ${['纯黑','星空','星云','网格'][S.bgMode|0]}\n`+
+      `步数 ${Math.round(S.steps*qSteps)}/${S.steps|0} · 容差 ${S.tol.toFixed(3)} · 分辨率 ${(S.scale*qScale*100)|0}% (${RT_SCENE.w}×${RT_SCENE.h})${S.autoQ&&(qScale<0.995||qSteps<0.995)?' auto':''}\n`+
+      `<b class="${gpuMs>S.targetMs*1.5?'bad':'ok'}">真实帧时 ${gpuMs.toFixed(1)} ms = ${fps.toFixed(1)} FPS</b> <span class="dim">(目标 ${S.targetMs|0}ms，fence 同步实测)${EXT?'':' · 无HDR'}\n`+
+      `GPU ${SOFTGPU?'<span class="bad">软件渲染 '+GPU+'</span>':GPU}</span>`;
+  }
+  frameN++;
+  /* --- 基准测试：?bench=N 渲染 N 帧后报告平均帧时（gl.finish 保证 GPU 真的做完）--- */
+  if(S.bench>0){
+    if(frameN===1){benchT0=performance.now();benchN=0;}
+    else{
+      benchN++;
+      if(benchN>=S.bench){
+        gl.finish();
+        const ms=(performance.now()-benchT0)/benchN;
+        ERR.style.display='block';ERR.style.color='#9f9';
+        ERR.textContent='BENCH '+ms.toFixed(2)+' ms/frame ('+(1000/ms).toFixed(1)+' FPS)\n'+
+          'RT '+RT_SCENE.w+'x'+RT_SCENE.h+' = '+(RT_SCENE.w*RT_SCENE.h/1e3).toFixed(0)+'k px'+
+          '  scale='+S.scale+' steps='+(S.steps|0)+' tol='+S.tol+' ssaa='+(S.ssaa?4:1)+
+          ' bloom='+S.bloom+'\nspin='+S.spin+' diskOn='+S.diskOn+' bgMode='+S.bgMode+
+          ' camR='+rr.toFixed(2)+'\nGPU '+GPU;
+        S.bench=0; return;                        // 停帧，保留结果
+      }
+    }
+  }
+  if(S.debug&&frameN===Math.max(1,S.frames-1)){
+    DBG={r:+rr.toFixed(3),th:+th.toFixed(3),ph:+ph.toFixed(3),
+         fwd:fwd.map(v=>+v.toFixed(3)),er:er.map(v=>+v.toFixed(3)),
+         et:et.map(v=>+v.toFixed(3)),ep:ep.map(v=>+v.toFixed(3)),tanH:+tanH.toFixed(3),
+         rhor:+rHorizon(a,S.charge).toFixed(3),esc:Math.max(240,rr*2.2)};
+    dumpDebug();
+  }
+  if(!(S.frames>0&&frameN>=S.frames)) schedule();
+}
+/* 帧循环推进：rAF 优先；rAF 长时间不回调（后台标签页/无头浏览器）时用定时器兜底 */
+let schedTimer=0,schedDone=true;
+function schedule(){
+  schedDone=false;
+  const go=t=>{ if(schedDone)return; schedDone=true; clearTimeout(schedTimer);
+                frame(typeof t==='number'?t:performance.now()); };
+  requestAnimationFrame(go);
+  schedTimer=setTimeout(go,250);
+}
+function frameLoop(){ last=performance.now(); schedule(); }
+let frameN=0,benchT0=0,benchN=0,moveT=0;
+
+/* ============================ URL 参数（便于展示/自动化：?auto=1&scale=0.4&steps=90） === */
+const urlKeys=new Set();
+function applyURL(){
+  const q=new URLSearchParams(location.search);
+  for(const [k,v]of q){
+    if(k==='auto'){OV.classList.add('gone');started=true;continue;}
+    if(k==='safe'){S.scale=0.34;S.steps=100;S.tol=0.18;S.bloom=0.35;S.ssaa=0;S.autoQ=1;
+      ['scale','steps','tol','bloom','ssaa'].forEach(x=>urlKeys.add(x));continue;}
+    if(k==='panel'&&v==='0'){PANEL.classList.add('hide');continue;}
+    if(k==='hud'&&v==='0'){HUD.classList.add('hide');continue;}
+    if(k in S){const f=parseFloat(v);if(isFinite(f)){S[k]=f;urlKeys.add(k);}}
+  }
+}
+
+/* ============================ 启动（分步 + 让浏览器先绘制界面）=================== */
+function status(msg){
+  const el=document.getElementById('boot');
+  if(el) el.innerHTML=msg;
+}
+// rAF 与定时器竞速：后台标签页/无头浏览器里 rAF 可能完全不推进，必须有兜底
+const nextTick=()=>new Promise(r=>{
+  let done=false; const fin=()=>{ if(!done){done=true;r();} };
+  requestAnimationFrame(()=>setTimeout(fin,0));
+  setTimeout(fin,220);
+});
+
+async function boot(){
+ try{
+  applyURL();                       // URL 参数最先生效（safe / auto / 各项设置）
+  status('创建 WebGL2 上下文…');
+  await nextTick();
+  gl=CV.getContext('webgl2',{antialias:false,alpha:false,depth:false,stencil:false,
+    powerPreference:'high-performance'});
+  if(!gl){
+    fatal('无法创建 WebGL2 上下文。\n请用 Chrome / Edge / Firefox 打开，并确认已启用硬件加速：\n'+
+          'chrome://gpu 里 WebGL2 应为 Hardware accelerated。');
+    status('<span style="color:#ff8f8f">WebGL2 不可用，见顶部提示</span>');return;
+  }
+  EXT=gl.getExtension('EXT_color_buffer_float')||gl.getExtension('EXT_color_buffer_half_float');
+  IFMT=EXT?gl.RGBA16F:gl.RGBA8; ITYPE=EXT?gl.HALF_FLOAT:gl.UNSIGNED_BYTE;
+  const ri=gl.getExtension('WEBGL_debug_renderer_info');
+  try{ GPU=(ri?gl.getParameter(ri.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER))||'unknown'; }catch(e){}
+  SOFTGPU=/swiftshader|software|basic render|llvmpipe|mesa offscreen/i.test(GPU);
+  CV.addEventListener('webglcontextlost',e=>{
+    e.preventDefault();
+    ERR.style.display='block';ERR.style.color='#ffb060';
+    ERR.textContent='WebGL 上下文丢失（多半是单帧过重触发显卡驱动复位 TDR）。\nGPU: '+GPU+
+      '\n请刷新页面；刷新后先按 1（低画质），或用低配安全模式打开：index.html?safe=1';
+  });
+  // 注意：不要用 KHR_parallel_shader_compile 轮询 —— 某些 ANGLE 后端每次查询
+  // COMPLETION_STATUS_KHR 都会触发一次同步编译，反而把主线程卡死。
+
+  status('编译着色器…<span class="dim">（部分驱动首次需要几秒，请稍候）</span><br>GPU: '+GPU);
+  await nextTick(); await nextTick();
+  try{
+    // 先把 4 个程序全部提交编译/链接（驱动可并行），再一次性取回结果。
+    // 注意：不要用 KHR_parallel_shader_compile 轮询 —— 某些 ANGLE 后端每次查询都会
+    // 触发一次同步编译，反而卡死。
+    const list=[prog(SCENE_FS),prog(BRIGHT_FS),prog(BLUR_FS),prog(COMP_FS),prog(STREAK_FS)];
+    await nextTick();
+    status('链接着色器…');
+    await nextTick();
+    [P_SCENE,P_BRIGHT,P_BLUR,P_COMP,P_STREAK]=list.map(progFinish);
+  }catch(e){ status('<span style="color:#ff8f8f">着色器失败，见顶部日志</span>'); return; }
+
+  addEventListener('resize',resize);
+  if(SOFTGPU){                                   // 软件渲染兜底（URL 显式给的参数优先）
+    if(!urlKeys.has('scale'))S.scale=0.3;
+    if(!urlKeys.has('steps'))S.steps=90;
+    if(!urlKeys.has('tol'))S.tol=0.2;
+    if(!urlKeys.has('bloom'))S.bloom=0.3;
+    if(!urlKeys.has('ssaa'))S.ssaa=0;
+  }
+  qScale=SOFTGPU?0.5:0.62; qSteps=SOFTGPU?0.4:0.5;                       // 首帧先便宜，再随帧率爬升
+  VAO=gl.createVertexArray();
+  status('生成 3D 噪声纹理…');
+  await nextTick();
+  NOISE3=makeNoise3D(64);
+  buildPanel();
+  if(S.autoIn){S.diskIn=+Math.max(0.4,rIsco(S.spin,S.charge)).toFixed(2);syncUI('diskIn');}
+  resetCam();resize();
+  if(S.camR>0){cam.pos=cartFromBL(S.camR,S.camTh*Math.PI/180,S.camPh*Math.PI/180,S.spin);lookAt([0,0,0]);}
+  status('就绪 · '+(SOFTGPU?'<span style="color:#ffb060">软件渲染（无硬件加速），帧率会很低</span>':GPU));
+  await nextTick();
+  frameLoop();
+ }catch(err){
+  fatal('初始化失败:\n'+((err&&(err.stack||err.message))||err));
+  status('<span style="color:#ff8f8f">初始化失败，见顶部日志</span>');
+ }
+}
+if(document.readyState==='complete') setTimeout(boot,60);
+else addEventListener('load',()=>setTimeout(boot,60));
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d141ba4988bfdf',t:'MTc4OTc0NDAwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

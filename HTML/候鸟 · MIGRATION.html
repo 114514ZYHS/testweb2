@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f2e9">
+  <meta name="description" content="候鸟 MIGRATION。一场由风引领的、没有终点的纸上迁徙。原生 Canvas 实时生成的交互作品。">
+  <title>候鸟 · MIGRATION</title>
+  <style>
+    :root { --paper: #f6f2e9; --ink: #3a362c; --ink-rgb: 58,54,44; --ui: 1; --vh: 1vh; --vw: 1vw; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--paper); }
+    body { color: var(--ink); font-family: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 400; -webkit-font-smoothing: antialiased; }
+    button { color: inherit; font: inherit; border: 0; padding: 0; cursor: pointer; background: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    button:focus-visible { outline: 1px solid currentColor; outline-offset: 7px; }
+    button:disabled { cursor: default; opacity: .4; }
+    svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+    [hidden] { display: none !important; }
+    .serif { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", Georgia, serif; }
+    .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    #stage { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; isolation: isolate; background: var(--paper); }
+    #world { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+    .manual-camera #world { cursor: grab; }
+    .manual-camera.dragging #world { cursor: grabbing; }
+    .intro-wash { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(var(--paper-rgb,246,242,233),.9) 0%, rgba(var(--paper-rgb,246,242,233),.66) 22%, rgba(var(--paper-rgb,246,242,233),.08) 47%, transparent 66%); transition: opacity 2s ease; }
+    .topbar { position: absolute; z-index: 4; top: 0; left: calc(42px * var(--ui)); right: calc(42px * var(--ui)); height: calc(85px * var(--ui)); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(var(--ink-rgb),.18); }
+    .signature { display: flex; align-items: center; gap: calc(13px * var(--ui)); text-align: left; }
+    .signature svg { width: calc(35px * var(--ui)); height: calc(35px * var(--ui)); stroke-width: .85; }
+    .signature-text { font-size: calc(11px * var(--ui)); letter-spacing: .2em; }
+    .signature-name { display: none; }
+    .header-center { position: absolute; left: 50%; transform: translateX(-50%); font-size: calc(9px * var(--ui)); letter-spacing: .28em; opacity: .48; white-space: nowrap; }
+    .header-tools { display: flex; gap: calc(24px * var(--ui)); align-items: center; }
+    .tool { min-height: calc(32px * var(--ui)); display: flex; align-items: center; gap: calc(8px * var(--ui)); font-size: calc(11px * var(--ui)); letter-spacing: .12em; opacity: .75; transition: opacity .25s; }
+    .tool:hover { opacity: 1; }
+    .tool svg { width: calc(17px * var(--ui)); height: calc(17px * var(--ui)); }
+    .tool-separator { width: 1px; height: calc(13px * var(--ui)); background: rgba(var(--ink-rgb),.2); }
+    .sound-bars { display: flex; width: calc(17px * var(--ui)); height: calc(16px * var(--ui)); align-items: center; gap: calc(3px * var(--ui)); }
+    .sound-bars i { display: block; width: 1px; height: 30%; background: currentColor; transition: height .5s; }
+    .sound-bars i:nth-child(2) { height: 65%; }
+    .sound-bars i:nth-child(3) { height: 90%; }
+    .sound-bars i:nth-child(4) { height: 50%; }
+    .sound-on .sound-bars i { animation: sound-breathe 1.3s ease-in-out infinite alternate; }
+    .sound-on .sound-bars i:nth-child(2) { animation-delay: -.8s; }
+    .sound-on .sound-bars i:nth-child(3) { animation-delay: -.4s; }
+    .sound-on .sound-bars i:nth-child(4) { animation-delay: -1.1s; }
+    .camera-hud { position: absolute; z-index: 3; top: calc(111px * var(--ui)); left: calc(44px * var(--ui)); display: flex; gap: calc(13px * var(--ui)); align-items: center; opacity: .67; pointer-events: none; }
+    .view-mark { width: calc(12px * var(--ui)); height: calc(12px * var(--ui)); position: relative; border: 1px solid rgba(var(--ink-rgb),.55); }
+    .view-mark::before { content: ""; position: absolute; inset: 3px; background: currentColor; opacity: .6; }
+    #cameraName { font-size: calc(10px * var(--ui)); letter-spacing: .16em; }
+    #variation { font-size: calc(9px * var(--ui)); letter-spacing: .1em; padding-left: calc(13px * var(--ui)); border-left: 1px solid rgba(var(--ink-rgb),.25); opacity: .8; }
+    .intro { position: absolute; z-index: 3; top: 24%; left: calc(65px * var(--ui)); width: calc(385px * var(--ui)); transition: opacity 1.2s ease, transform 1.7s cubic-bezier(.2,.7,.25,1); }
+    .title-group { animation: arrive 1.8s cubic-bezier(.2,.7,.25,1) both; }
+    h1 { margin: 0 0 0 calc(-5px * var(--ui)); font-size: calc(112px * var(--ui)); line-height: 1.12; letter-spacing: .11em; font-weight: 400; }
+    .title-en { margin: calc(14px * var(--ui)) 0 0 calc(4px * var(--ui)); font: 400 calc(20px * var(--ui))/1.2 Georgia, "Times New Roman", serif; letter-spacing: .39em; }
+    .intro-copy { margin: calc(30px * var(--ui)) 0 0 calc(4px * var(--ui)); font-size: calc(13px * var(--ui)); letter-spacing: .15em; line-height: 1.8; opacity: .76; animation: arrive 1.7s .18s both; }
+    .departure { margin: calc(40px * var(--ui)) 0 0 calc(4px * var(--ui)); animation: arrive 1.7s .33s both; }
+    .departure-label { margin: 0 0 calc(17px * var(--ui)); font-size: calc(9px * var(--ui)); letter-spacing: .19em; opacity: .48; }
+    .climates { display: flex; align-items: start; gap: calc(24px * var(--ui)); }
+    .climate { display: flex; flex-direction: column; align-items: center; gap: calc(11px * var(--ui)); font-size: calc(10px * var(--ui)); letter-spacing: .12em; opacity: .52; transition: opacity .3s; padding: calc(4px * var(--ui)); margin: calc(-4px * var(--ui)); }
+    .climate:hover, .climate[aria-checked="true"] { opacity: 1; }
+    .swatch { display: block; width: calc(17px * var(--ui)); height: calc(17px * var(--ui)); border-radius: 50%; background: var(--swatch); position: relative; }
+    .swatch::after { content: ""; position: absolute; inset: calc(-5px * var(--ui)); border: 1px solid currentColor; border-radius: 50%; opacity: 0; transform: scale(.7); transition: opacity .35s, transform .35s; }
+    .climate[aria-checked="true"] .swatch::after { opacity: .65; transform: scale(1); }
+    .begin { margin: calc(33px * var(--ui)) 0 0 calc(4px * var(--ui)); width: calc(242px * var(--ui)); height: calc(55px * var(--ui)); padding: 0 calc(23px * var(--ui)); background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: space-between; font-size: calc(13px * var(--ui)); letter-spacing: .22em; position: relative; overflow: hidden; animation: arrive 1.7s .45s both; transition: background .6s, color .6s; }
+    .begin::before { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.08); transform: translateX(-101%); transition: transform .6s cubic-bezier(.2,.7,.25,1); }
+    .begin:hover::before { transform: translateX(0); }
+    .begin svg { width: calc(33px * var(--ui)); height: calc(17px * var(--ui)); transition: transform .45s; }
+    .begin:hover svg { transform: translateX(5px); }
+    .headphone-note { display: flex; align-items: center; gap: calc(8px * var(--ui)); margin: calc(18px * var(--ui)) 0 0 calc(4px * var(--ui)); opacity: .47; font-size: calc(9px * var(--ui)); letter-spacing: .09em; animation: arrive 1.8s .55s both; }
+    .headphone-note svg { width: calc(12px * var(--ui)); height: calc(12px * var(--ui)); }
+    .footer { position: absolute; z-index: 4; bottom: 0; left: calc(42px * var(--ui)); right: calc(42px * var(--ui)); height: calc(65px * var(--ui)); border-top: 1px solid rgba(var(--ink-rgb),.18); display: flex; align-items: center; justify-content: space-between; }
+    .wind-instruction { display: flex; align-items: center; gap: calc(10px * var(--ui)); font-size: calc(10px * var(--ui)); letter-spacing: .12em; opacity: .63; }
+    .wind-instruction svg { width: calc(14px * var(--ui)); height: calc(17px * var(--ui)); }
+    .footer-caption { font-size: calc(9px * var(--ui)); letter-spacing: .18em; opacity: .46; }
+    .climate-location { position: absolute; right: calc(43px * var(--ui)); bottom: calc(102px * var(--ui)); display: flex; flex-direction: column; align-items: flex-end; gap: calc(11px * var(--ui)); pointer-events: none; opacity: .7; }
+    .compass { width: calc(51px * var(--ui)); height: calc(65px * var(--ui)); margin-right: calc(7px * var(--ui)); }
+    .compass text { fill: currentColor; stroke: none; font-family: Georgia, serif; font-size: 8px; }
+    #compassNeedle { transform-origin: 26px 38px; }
+    .location-label { font-size: calc(10px * var(--ui)); letter-spacing: .18em; }
+    .location-sub { font-size: calc(8px * var(--ui)); letter-spacing: .13em; opacity: .65; }
+    .flight-only { visibility: hidden; opacity: 0; transition: opacity 1s, visibility 1s; }
+    .flying .flight-only { visibility: visible; opacity: 1; }
+    .flying .intro { opacity: 0; transform: translateY(-20px); pointer-events: none; }
+    .flying .intro-wash { opacity: 0; }
+    .flying .signature-tagline { display: none; }
+    .flying .signature-name { display: inline; }
+    .flying .header-center { opacity: .55; }
+    .camera-controls { display: flex; align-items: center; gap: calc(21px * var(--ui)); position: absolute; left: 50%; transform: translateX(-50%); height: 100%; }
+    .camera-controls button { height: 100%; font-size: calc(10px * var(--ui)); letter-spacing: .1em; opacity: .4; position: relative; white-space: nowrap; transition: opacity .3s; }
+    .camera-controls button[aria-pressed="true"] { opacity: .9; }
+    .camera-controls button::before { content: ""; position: absolute; top: -1px; left: 0; right: 0; height: 1px; background: currentColor; transform: scaleX(0); transition: transform .5s; }
+    .camera-controls button[aria-pressed="true"]::before { transform: scaleX(1); }
+    .camera-controls span { height: calc(11px * var(--ui)); width: 1px; background: rgba(var(--ink-rgb),.2); }
+    .poetry { position: absolute; left: calc(48px * var(--ui)); bottom: calc(125px * var(--ui)); z-index: 3; pointer-events: none; transition: opacity 1.2s ease; }
+    .poetry.off { opacity: 0 !important; }
+    .poetry-line { width: calc(37px * var(--ui)); height: 1px; margin-bottom: calc(20px * var(--ui)); background: currentColor; opacity: .65; transform-origin: left; }
+    .poetry.reveal .poetry-line { animation: line-unfold 2.8s cubic-bezier(.2,.7,.25,1) both; }
+    .poetry-text { margin: 0; font-size: calc(19px * var(--ui)); line-height: 1.95; letter-spacing: .2em; font-weight: 400; text-shadow: 0 1px 18px rgba(var(--paper-rgb),.3); }
+    .poetry-text span:not(.sr-only) { display: inline-block; opacity: 0; transform: translateY(5px); }
+    .poetry.reveal .poetry-text span:not(.sr-only) { animation: word-arrive 1.7s ease both; animation-delay: var(--delay); }
+    .paused .poetry.reveal .poetry-text span, .paused .poetry.reveal .poetry-line { animation-play-state: paused; }
+    .poetry-translation { margin: calc(15px * var(--ui)) 0 0; font: italic calc(11px * var(--ui))/1.5 Georgia, serif; opacity: .57; letter-spacing: .025em; }
+    .journey-meter { display: none; font-size: calc(9px * var(--ui)); letter-spacing: .13em; opacity: .55; }
+    .flying .journey-meter { display: block; }
+    .flying .footer-caption { display: none; }
+    .pause-symbol { display: flex; gap: 4px; align-items: center; height: 15px; width: 13px; }
+    .pause-symbol::before, .pause-symbol::after { content: ""; width: 2px; height: 10px; background: currentColor; }
+    .paused .pause-symbol::before { background: none; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid currentColor; }
+    .paused .pause-symbol::after { display: none; }
+    .poem-icon { font-family: "Songti SC", "STSong", serif; font-size: calc(17px * var(--ui)); }
+    #poemButton[aria-pressed="false"] { opacity: .35; }
+    .overlay { position: absolute; z-index: 20; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(var(--paper-rgb),.5); backdrop-filter: blur(13px); -webkit-backdrop-filter: blur(13px); }
+    .about-panel { background: var(--paper); width: calc(490px * var(--ui)); max-width: 86%; max-height: 86%; overflow-y: auto; padding: calc(43px * var(--ui)); border: 1px solid rgba(var(--ink-rgb),.2); position: relative; animation: arrive .5s ease both; }
+    .close-about { position: absolute; top: calc(18px * var(--ui)); right: calc(18px * var(--ui)); padding: 5px; }
+    .close-about svg { width: calc(18px * var(--ui)); height: calc(18px * var(--ui)); }
+    .about-eyebrow { font-size: calc(9px * var(--ui)); letter-spacing: .26em; opacity: .5; }
+    .about-panel h2 { font-weight: 400; font-size: calc(29px * var(--ui)); line-height: 1.5; margin: calc(22px * var(--ui)) 0; }
+    .about-panel p { font-size: calc(12px * var(--ui)); line-height: 1.95; opacity: .7; }
+    .about-instructions { margin-top: calc(27px * var(--ui)); border-top: 1px solid rgba(var(--ink-rgb),.18); }
+    .about-instructions div { display: flex; gap: calc(20px * var(--ui)); padding: calc(14px * var(--ui)) 0; border-bottom: 1px solid rgba(var(--ink-rgb),.12); font-size: calc(11px * var(--ui)); line-height: 1.7; }
+    .about-instructions strong { min-width: calc(50px * var(--ui)); font-weight: 400; }
+    .about-instructions span { opacity: .6; }
+    .about-footnote { margin-top: calc(23px * var(--ui)); font-size: calc(9px * var(--ui)) !important; opacity: .45 !important; }
+    .toast { position: absolute; z-index: 30; left: 50%; top: calc(109px * var(--ui)); transform: translate(-50%, -7px); font-size: calc(11px * var(--ui)); letter-spacing: .09em; color: var(--ink); background: var(--paper); padding: calc(12px * var(--ui)) calc(21px * var(--ui)); border: 1px solid rgba(var(--ink-rgb),.2); opacity: 0; transition: opacity .4s, transform .4s; pointer-events: none; text-align: center; }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    .compact .topbar { height: calc(61px * var(--ui)); left: calc(25px * var(--ui)); right: calc(25px * var(--ui)); }
+    .compact .header-tools { gap: calc(18px * var(--ui)); }
+    .compact .header-center { display: none; }
+    .compact .camera-hud { left: calc(27px * var(--ui)); top: calc(78px * var(--ui)); }
+    .compact .intro { left: calc(39px * var(--ui)); top: 24%; width: calc(310px * var(--ui)); }
+    .compact h1 { font-size: calc(65px * var(--ui)); }
+    .compact .title-en { font-size: calc(13px * var(--ui)); margin-top: calc(8px * var(--ui)); }
+    .compact .intro-copy { font-size: calc(11px * var(--ui)); margin-top: calc(18px * var(--ui)); }
+    .compact .departure { margin-top: calc(24px * var(--ui)); }
+    .compact .departure-label { display: none; }
+    .compact .climates { gap: calc(24px * var(--ui)); }
+    .compact .climate { font-size: calc(9px * var(--ui)); gap: calc(8px * var(--ui)); }
+    .compact .swatch { width: calc(13px * var(--ui)); height: calc(13px * var(--ui)); }
+    .compact .begin { margin-top: calc(23px * var(--ui)); width: calc(216px * var(--ui)); height: calc(43px * var(--ui)); font-size: calc(11px * var(--ui)); }
+    .compact .headphone-note { display: none; }
+    .compact .footer { height: calc(44px * var(--ui)); left: calc(25px * var(--ui)); right: calc(25px * var(--ui)); }
+    .compact .footer-caption { font-size: calc(8px * var(--ui)); }
+    .compact .wind-instruction { font-size: calc(9px * var(--ui)); }
+    .compact .climate-location { right: calc(27px * var(--ui)); bottom: calc(72px * var(--ui)); gap: calc(5px * var(--ui)); }
+    .compact .compass { width: calc(37px * var(--ui)); height: calc(48px * var(--ui)); }
+    .compact .poetry { left: calc(29px * var(--ui)); bottom: calc(81px * var(--ui)); }
+    .compact .poetry-text { font-size: calc(15px * var(--ui)); }
+    .compact .poetry-line { margin-bottom: calc(12px * var(--ui)); }
+    .compact .poetry-translation { font-size: calc(9px * var(--ui)); margin-top: calc(7px * var(--ui)); }
+    .compact .about-panel { width: calc(510px * var(--ui)); padding: calc(26px * var(--ui)) calc(35px * var(--ui)); }
+    .compact .about-panel h2 { font-size: calc(24px * var(--ui)); margin: calc(12px * var(--ui)) 0; }
+    .compact .about-instructions { margin-top: calc(14px * var(--ui)); }
+    .compact .about-instructions div { padding: calc(8px * var(--ui)) 0; }
+    .compact .about-footnote { margin-bottom: 0; margin-top: calc(14px * var(--ui)); }
+    .very-compact .intro { top: 23%; }
+    .very-compact h1 { font-size: calc(52px * var(--ui)); }
+    .very-compact .intro-copy { margin-top: calc(12px * var(--ui)); }
+    .very-compact .departure { margin-top: calc(19px * var(--ui)); }
+    .very-compact .begin { margin-top: calc(19px * var(--ui)); height: calc(38px * var(--ui)); }
+    .very-compact .footer-caption, .very-compact .signature-tagline { display: none; }
+    .tiny .camera-hud { top: calc(23px * var(--ui)); left: calc(85px * var(--ui)); }
+    .tiny .signature-name { display: none; }
+    .tiny h1 { font-size: calc(44px * var(--ui)); }
+    .tiny .title-en { font-size: calc(12px * var(--ui)); margin-top: calc(6px * var(--ui)); }
+    .tiny .intro-copy { font-size: calc(10px * var(--ui)); margin-top: calc(9px * var(--ui)); }
+    .tiny .departure { margin-top: calc(14px * var(--ui)); }
+    .tiny .begin { height: calc(34px * var(--ui)); margin-top: calc(14px * var(--ui)); }
+    @media (min-width: 2200px) { :root { --ui: 1.5; } }
+    @media (min-width: 3200px) { :root { --ui: 2; } }
+    @media (pointer: coarse) { .tool { min-height: 44px; min-width: 24px; justify-content: center; } }
+    @media (pointer: coarse) and (orientation: portrait) {
+      #stage { width: 100vh; width: 100dvh; height: 100vw; transform-origin: top left; transform: rotate(90deg) translateY(-100%); }
+    }
+    @media (max-width: 1150px) and (orientation: landscape) {
+      .header-center { display: none; }
+      .header-tools { gap: 16px; }
+    }
+    @keyframes arrive { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes word-arrive { to { opacity: 1; transform: translateY(0); } }
+    @keyframes line-unfold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes sound-breathe { from { transform: scaleY(.4); } to { transform: scaleY(1); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main id="stage" aria-label="候鸟 MIGRATION 交互作品">
+    <canvas id="world" tabindex="0" aria-label="程序化生成的迁徙世界。移动鼠标或触摸引导风，自主模式可拖拽旋转，滚轮或双指缩放。">你的浏览器需要支持 HTML5 Canvas 才能展开这段旅程。</canvas>
+    <div class="intro-wash" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <button class="signature" id="homeButton" aria-label="候鸟，返回序章" title="返回序章">
+        <svg viewBox="0 0 40 38" aria-hidden="true"><path d="M3 13 18 19 34 4 27 23 19 28 13 35 14 24 3 13Z"/><path d="m3 13 15 6-4 5m4-5 9 4M18 19 34 4M19 28l-1-9"/><path d="m27 23 9 3-7 2"/></svg>
+        <span class="signature-text signature-tagline">一场没有终点的飞行</span>
+        <span class="signature-text signature-name">候鸟 · MIGRATION</span>
+      </button>
+      <span class="header-center">AN ENDLESS, UNWRITTEN JOURNEY</span>
+      <nav class="header-tools" aria-label="作品控制">
+        <button class="tool flight-only" id="pauseButton" aria-label="暂停旅程" aria-pressed="false" title="暂停 / 继续 [Space]"><span class="pause-symbol" aria-hidden="true"></span></button>
+        <button class="tool flight-only" id="poemButton" aria-label="显示诗句" aria-pressed="true" title="诗句开关 [P]"><span class="poem-icon" aria-hidden="true">诗</span></button>
+        <button class="tool" id="soundButton" aria-label="开启声音" aria-pressed="false" title="声音开关 [M]">
+          <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span id="soundLabel">声音 关</span>
+        </button>
+        <span class="tool-separator" aria-hidden="true"></span>
+        <button class="tool" id="aboutButton" aria-haspopup="dialog">关于作品</button>
+        <button class="tool" id="fullscreenButton" aria-label="进入全屏" aria-pressed="false" title="全屏 [F]"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4"/></svg></button>
+      </nav>
+    </header>
+
+    <div class="camera-hud" aria-live="off"><span class="view-mark" aria-hidden="true"></span><span id="cameraName">斜俯视 · OBLIQUE</span><span id="variation" class="mono">VAR 01</span></div>
+
+    <section class="intro" id="intro" aria-labelledby="artworkTitle">
+      <div class="title-group"><h1 class="serif" id="artworkTitle">候鸟</h1><p class="title-en">MIGRATION</p></div>
+      <p class="intro-copy serif">把方向交给风，把远方留给自己。</p>
+      <div class="departure">
+        <p class="departure-label">选择一处，作为出发的地方</p>
+        <div class="climates" role="radiogroup" aria-label="选择起飞地点">
+          <button class="climate" role="radio" aria-checked="true" tabindex="0" data-climate="0" title="暖纸 WARM"><span class="swatch" style="--swatch:#c8bf9f" aria-hidden="true"></span><span>暖纸</span></button>
+          <button class="climate" role="radio" aria-checked="false" tabindex="-1" data-climate="2" title="暮粉 DUSK"><span class="swatch" style="--swatch:#cda8a0" aria-hidden="true"></span><span>暮粉</span></button>
+          <button class="climate" role="radio" aria-checked="false" tabindex="-1" data-climate="4" title="夜航 NIGHT"><span class="swatch" style="--swatch:#596a72" aria-hidden="true"></span><span>夜航</span></button>
+          <button class="climate" role="radio" aria-checked="false" tabindex="-1" data-climate="1" title="雾境 MIST"><span class="swatch" style="--swatch:#b6c4bf" aria-hidden="true"></span><span>雾境</span></button>
+          <button class="climate" role="radio" aria-checked="false" tabindex="-1" data-climate="3" title="雪境 SNOW"><span class="swatch" style="--swatch:#d9dfdf" aria-hidden="true"></span><span>雪境</span></button>
+        </div>
+      </div>
+      <button class="begin" id="beginButton"><span>开始迁徙</span><svg viewBox="0 0 36 18" aria-hidden="true"><path d="M1 9h32m-7-6 7 6-7 6"/></svg></button>
+      <p class="headphone-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 10V7a5 5 0 0 1 10 0v3M3 8H1v5h3V8Zm10 0h2v5h-3V8Z"/></svg>建议戴上耳机，听见风与纸翼。</p>
+    </section>
+
+    <section class="poetry flight-only" id="poetry" aria-label="旅途诗句">
+      <div class="poetry-line" aria-hidden="true"></div>
+      <p class="poetry-text serif" id="poetryText"></p>
+      <p class="poetry-translation" id="poetryTranslation"></p>
+    </section>
+
+    <div class="climate-location" aria-hidden="true">
+      <svg class="compass" viewBox="0 0 52 67"><text x="26" y="9" text-anchor="middle">N</text><circle cx="26" cy="38" r="20" stroke-opacity=".28" stroke-width=".7"/><path d="M26 15v5m0 36v5M3 38h5m36 0h5" stroke-opacity=".5" stroke-width=".7"/><g id="compassNeedle"><path d="m26 24-4 16 4-3 4 3-4-16Z" fill="currentColor" fill-opacity=".65" stroke-width=".6"/><path d="M26 38v14" stroke-width=".6"/></g></svg>
+      <span class="location-label" id="locationLabel">暖纸 / WARM</span>
+      <span class="location-sub mono" id="locationSub">DEPARTURE NO. 01</span>
+    </div>
+
+    <footer class="footer">
+      <div class="wind-instruction"><svg viewBox="0 0 16 20" aria-hidden="true"><path d="m3 2 10 9-5 1-3 5L3 2Z"/></svg><span id="interactionHint">移动鼠标，让风带路</span></div>
+      <div class="camera-controls flight-only" role="group" aria-label="镜头模式"><button id="autoCameraButton" aria-pressed="true">自动运镜</button><span aria-hidden="true"></span><button id="manualCameraButton" aria-pressed="false">自主探索</button></div>
+      <span class="footer-caption">无尽的风景，自由的方向。</span>
+      <span class="journey-meter mono" id="journeyMeter">00:00 / 0.00 KM</span>
+    </footer>
+
+    <div class="overlay" id="aboutOverlay" hidden>
+      <section class="about-panel" role="dialog" aria-modal="true" aria-labelledby="aboutTitle" tabindex="-1">
+        <button class="close-about" id="closeAboutButton" aria-label="关闭作品介绍"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 4 12 12M16 4 4 16"/></svg></button>
+        <span class="about-eyebrow">A NOTE ON MIGRATION</span>
+        <h2 class="serif" id="aboutTitle">没有终点，<br>也可以是一段旅程。</h2>
+        <p>每一块田野、每一道河湾、每一次振翅，都在此刻生成。暖纸、雾境、暮粉、雪境与夜航，是同一片大地的五种气候。你不必抵达，只需经过。</p>
+        <div class="about-instructions">
+          <div><strong>让风带路</strong><span>移动鼠标或轻触画面。靠近边缘，风更远；松开，候鸟慢慢回到航线。</span></div>
+          <div><strong>换个视角</strong><span>自动模式由镜头带路；自主模式拖拽旋转，滚轮或双指捏合改变真实距离。</span></div>
+          <div><strong>留在此刻</strong><span>空格暂停 · C 镜头 · M 声音 · P 诗句 · F 全屏。随时点击左上角返回序章。</span></div>
+        </div>
+        <p class="about-footnote">原生 CANVAS / 实时地貌 / 纸翼物理 / 内嵌 BASE64 MIDI 配乐<br>全屏、横屏与防息屏将在设备允许时启用。没有权限，也不影响飞行。</p>
+      </section>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <noscript><p style="position:absolute;inset:40%;color:#3a362c">请开启 JavaScript，让候鸟启程。</p></noscript>
+  </main>
+
+  <script>
+  (() => {
+    'use strict';
+    const $ = id => document.getElementById(id);
+    const stage = $('stage'), canvas = $('world'), ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) { $('artworkTitle').textContent = '需要 Canvas 支持'; return; }
+    const TAU = Math.PI * 2, DEG = Math.PI / 180, SEGMENT = 8600, FRONT = 2350;
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    const touchDevice = coarse || navigator.maxTouchPoints>0;
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const seedBytes = new Uint32Array(1);
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(seedBytes);
+    else seedBytes[0] = Date.now();
+    const SEED = seedBytes[0];
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+    const smoother = x => x * x * x * (x * (x * 6 - 15) + 10);
+    const damp = (a, b, rate, dt) => lerp(a, b, 1 - Math.exp(-rate * dt));
+    const mod = (n, m) => ((n % m) + m) % m;
+    const mix = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+    const tint = (a, scale) => a.map(v => clamp(v * scale, 0, 255));
+    const rgb = a => `rgb(${Math.round(a[0])},${Math.round(a[1])},${Math.round(a[2])})`;
+    const rgba = (a, opacity) => `rgba(${Math.round(a[0])},${Math.round(a[1])},${Math.round(a[2])},${opacity})`;
+    function hash(x, z = 0, salt = 0) {
+      let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263) ^ Math.imul(salt | 0, 1442695041) ^ SEED;
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    }
+    function randomSource(seed) {
+      let a = seed >>> 0;
+      return () => { a += 0x6D2B79F5; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    }
+    function noise1(x, salt = 0) { const i = Math.floor(x), f = smooth(0, 1, x - i); return lerp(hash(i, salt), hash(i + 1, salt), f); }
+    function hex(v) { const n = parseInt(v.replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+    const styleDefinitions = [
+      { name: '暖纸', en: 'WARM', sky: '#f6f2e9', horizon: '#e9e8d9', ground: '#ddd9bf', fields: ['#ced0ab','#dfd3a9','#bdc9ab','#e3dfc5','#cbd0b2','#d5c494','#e5d9b6'], river: '#a5bfbc', bank: '#e9e3ce', wall: '#ede2c9', wallDark: '#c8c2ab', roof: '#b38f73', roofDark: '#8d7764', tree: '#8b9c7b', treeLight: '#a9b28b', treeDark: '#728269', bird: '#fff9e7', birdShade: '#c6c9bd', fog: '#f0eee2', ink: '#3a362c', shadow: '#686f52' },
+      { name: '雾境', en: 'MIST', sky: '#e8eeeb', horizon: '#dbe5df', ground: '#c9d2c2', fields: ['#b7c8b9','#c6d0bd','#aebfaf','#d7decd','#bfd0c1','#c9ceba','#d8dbcb'], river: '#a4bdbe', bank: '#d6ded1', wall: '#e1e1d1', wallDark: '#b6c3b8', roof: '#a0aba2', roofDark: '#82928a', tree: '#839f90', treeLight: '#a8bbaa', treeDark: '#6f887d', bird: '#d9e9e7', birdShade: '#a7bfbc', fog: '#e5ebe5', ink: '#3c514b', shadow: '#536a5d' },
+      { name: '暮粉', en: 'DUSK', sky: '#f0e0d8', horizon: '#e7ccc4', ground: '#d7c4b0', fields: ['#c9b9a3','#d5bfa4','#b9b7a2','#e1cbb9','#c8c5b0','#d4b09b','#e5ccbb'], river: '#b7b7ba', bank: '#e4d2c2', wall: '#efdbcc', wallDark: '#c8afa2', roof: '#b98b81', roofDark: '#95776f', tree: '#98977d', treeLight: '#b5aa8e', treeDark: '#7d8273', bird: '#ffe3d8', birdShade: '#c6b6b4', fog: '#ebd8ce', ink: '#60483f', shadow: '#7d675c' },
+      { name: '雪境', en: 'SNOW', sky: '#edf1ef', horizon: '#dce5e4', ground: '#e2e8e1', fields: ['#d6dfd8','#e6e9e0','#cddbd4','#eff0e6','#dce6e2','#dce1d5','#e7ebe5'], river: '#9dbac0', bank: '#f0f3eb', wall: '#dfe4df', wallDark: '#b5c6c3', roof: '#b3bebd', roofDark: '#8a9d9e', tree: '#718f83', treeLight: '#aac0b3', treeDark: '#587469', bird: '#e4f3ff', birdShade: '#a9bfc8', fog: '#e8efeb', ink: '#3e5557', shadow: '#778f90' },
+      { name: '夜航', en: 'NIGHT', sky: '#17292e', horizon: '#344446', ground: '#35494a', fields: ['#304848','#3d5150','#304747','#475852','#385350','#435451','#4b5b56'], river: '#29434b', bank: '#516262', wall: '#6a7770', wallDark: '#465c59', roof: '#455c5c', roofDark: '#314747', tree: '#2b4541', treeLight: '#405b50', treeDark: '#233b37', bird: '#b9d4df', birdShade: '#6c95a9', fog: '#253c40', ink: '#e5e7d8', shadow: '#102629' }
+    ];
+    const styles = styleDefinitions.map(p => Object.fromEntries(Object.entries(p).map(([k,v]) => [k, k === 'fields' ? v.map(hex) : typeof v === 'string' && v.startsWith('#') ? hex(v) : v])));
+    function climateAt(x, z) {
+      const warped = z + 410 * Math.sin(x / 770 + z / 6800) + 175 * Math.sin(x / 270 - z / 3700);
+      const section = Math.floor((warped + FRONT / 2) / SEGMENT);
+      const local = warped + FRONT / 2 - section * SEGMENT;
+      const b = mod(section, 5), a = local < FRONT ? mod(section - 1, 5) : b;
+      const t = a === b ? 0 : smoother(clamp(local / FRONT, 0, 1));
+      const weight = id => (a === id ? 1 - t : 0) + (b === id ? t : 0);
+      return { a, b, t, night: weight(4), snow: weight(3), mist: weight(1), dusk: weight(2), warm: weight(0) };
+    }
+    const colorAt = (c, key, index = 0) => key === 'fields' ? mix(styles[c.a].fields[index % 7], styles[c.b].fields[index % 7], c.t) : mix(styles[c.a][key], styles[c.b][key], c.t);
+    function riverX(z) { return 345 * Math.sin(z / 1440) + 195 * Math.sin(z / 635 + .8) + 210 * (noise1(z / 2500, 83) - .5); }
+    function riverWidth(z) { return 104 + 22 * Math.sin(z / 870 + 1.4) + 14 * noise1(z / 460, 31); }
+    function riverSlope(z) { return (riverX(z + 4) - riverX(z - 4)) / 8; }
+
+    let W = 1, H = 1, DPR = 1, rotated = false;
+    let started = false, paused = false, visualTime = 0, flightTime = 0, travel = 2540, origin = travel;
+    let selectedClimate = 0, poemEnabled = true, lastPoem = -1, uiTick = 0;
+    let previewSnapshot = null, previewFade = 0, lastFrame = 0;
+    let wakeLock = null, toastTimer = 0, lastFocused = null;
+    const pointer = { x: .5, y: .5, rawX: 0, rawY: 0, fx: 0, fy: 0, speed: 0, lastX: .5, lastY: .5, last: -100, lastStamp: 0, down: false, inside: false, alpha: 0 };
+    const wind = { x: 0, z: 0, vx: 0, vz: 0, strength: 0 };
+    const pointers = new Map();
+    let gesture = null;
+
+    const shotLibrary = [
+      { id:'top', name:'正俯视', en:'OVERHEAD', yaw:-40, pitch:90, distance:1760, height:190 },
+      { id:'dive', name:'俯冲', en:'DESCENT', yaw:25, pitch:47, distance:1180, height:180 },
+      { id:'water', name:'贴河掠水', en:'WATERSKIM', yaw:-7, pitch:9, distance:980, height:85 },
+      { id:'river', name:'沿河前推', en:'RIVER RUN', yaw:38, pitch:22, distance:1370, height:185 },
+      { id:'side', name:'侧向轨道', en:'SIDE ORBIT', yaw:82, pitch:35, distance:1440, height:210 },
+      { id:'low', name:'低空宽景', en:'LOW HORIZON', yaw:-64, pitch:18, distance:1590, height:180 },
+      { id:'orbit', name:'环绕', en:'AROUND', yaw:125, pitch:39, distance:1330, height:220 },
+      { id:'reveal', name:'拉远揭示', en:'REVEAL', yaw:-120, pitch:51, distance:2050, height:170 },
+      { id:'rear', name:'正背面', en:'FOLLOWING', yaw:0, pitch:24, distance:1100, height:230 },
+      { id:'front', name:'迎面', en:'INCOMING', yaw:180, pitch:24, distance:1120, height:240 },
+      { id:'drift', name:'高空漂移', en:'HIGH DRIFT', yaw:-87, pitch:67, distance:1900, height:200 },
+      { id:'oblique', name:'斜俯视', en:'OBLIQUE', yaw:-28, pitch:38, distance:1400, height:195 },
+      { id:'bank', name:'河湾回望', en:'RIVERBEND', yaw:142, pitch:31, distance:1510, height:205 },
+      { id:'wing', name:'与翼齐飞', en:'WING TO WING', yaw:63, pitch:13, distance:850, height:285 },
+      { id:'ascend', name:'向光回升', en:'ASCENDING', yaw:-143, pitch:64, distance:1800, height:195 },
+      { id:'overland', name:'大地漫游', en:'OVERLAND', yaw:102, pitch:46, distance:1650, height:190 }
+    ];
+    const shotById = Object.fromEntries(shotLibrary.map(s => [s.id, s]));
+    const angleDelta = (a, b) => mod(b - a + 180, 360) - 180;
+    class CameraDirector {
+      constructor() {
+        this.mode = 'auto'; this.cycle = 0; this.cycleTime = 0;
+        this.plan = this.makePlan(0, null); this.nextPlan = this.makePlan(1, this.plan.at(-1).yaw);
+        this.current = { ...shotById.oblique }; this.manual = { ...this.current };
+        this.observe = 0; this.lastWheel = -100; this.launchPose = { ...this.current };
+        this.targetX = riverX(travel) - 150; this.targetZ = travel + 50; this.anchor = .586;
+        this.position = { x:0, y:0, z:0 }; this.focal = 1; this.label = shotById.oblique;
+      }
+      makePlan(cycle, previousYaw) {
+        const rand = randomSource((SEED ^ Math.imul(cycle + 71, 15485863)) >>> 0);
+        const high = cycle % 2 === 0;
+        const climax = high ? 'rear' : 'front';
+        const groups = [high ? ['top','drift'] : ['drift'], high ? ['dive','river','oblique'] : ['water','river','dive'], ['side','low','wing'], ['orbit','reveal','bank','overland'], [climax], ['ascend','drift','reveal']];
+        const plan = [];
+        for (let i = 0; i < groups.length; i++) {
+          const prev = i ? plan[i - 1].yaw : previousYaw;
+          let pool = groups[i].filter(id => (prev === null || Math.abs(angleDelta(prev, shotById[id].yaw)) >= 32) && (i !== 3 || Math.abs(angleDelta(shotById[id].yaw, shotById[climax].yaw)) >= 32));
+          if (!pool.length) pool = groups[i];
+          const shot = { ...shotById[pool[Math.floor(rand() * pool.length)]] };
+          if (prev !== null && Math.abs(angleDelta(prev, shot.yaw)) < 30) shot.yaw += prev > shot.yaw ? -38 : 38;
+          const distanceCard = [.86, 1, 1.17][Math.floor(rand() * 3)];
+          shot.distance *= distanceCard * (high ? 1.035 : .965);
+          shot.pitch = clamp(shot.pitch + (high ? 2 : -2) + (rand() - .5) * 3, 8, 85);
+          if (i===0) shot.pitch=high ? 78+rand()*7 : 62+rand()*7;
+          if (shot.id==='top') shot.pitch=90;
+          if (i===5) shot.pitch=high ? 66+rand()*7 : 53+rand()*8;
+          shot.duration = 16 + rand() * 1.05;
+          plan.push(shot);
+        }
+        return plan;
+      }
+      reset() {
+        this.cycle = 0; this.cycleTime = 0; this.plan = this.makePlan(0, null);
+        this.nextPlan = this.makePlan(1, this.plan.at(-1).yaw);
+        this.launchPose = { ...this.current };
+      }
+      setMode(mode) {
+        if (this.mode === mode) return;
+        this.mode = mode;
+        if (mode === 'manual') this.manual = { ...this.current };
+        $('autoCameraButton').setAttribute('aria-pressed', String(mode === 'auto'));
+        $('manualCameraButton').setAttribute('aria-pressed', String(mode === 'manual'));
+        updateHint();
+      }
+      update(dt) {
+        if (started) this.cycleTime += dt;
+        let cycleLength = this.plan.reduce((sum, s) => sum + s.duration, 0);
+        while (this.cycleTime >= cycleLength) {
+          this.cycleTime -= cycleLength; this.cycle++; this.plan = this.nextPlan;
+          this.nextPlan = this.makePlan(this.cycle + 1, this.plan.at(-1).yaw);
+          cycleLength = this.plan.reduce((sum, s) => sum + s.duration, 0);
+        }
+        let local = this.cycleTime, index = 0;
+        while (index < this.plan.length - 1 && local >= this.plan[index].duration) local -= this.plan[index++].duration;
+        const currentShot = this.plan[index], nextShot = this.plan[index + 1] || this.nextPlan[0];
+        const blend = smoother(smooth(.47, 1, local / currentShot.duration));
+        const automatic = {
+          yaw: currentShot.yaw + angleDelta(currentShot.yaw, nextShot.yaw) * blend,
+          pitch: lerp(currentShot.pitch, nextShot.pitch, blend),
+          distance: lerp(currentShot.distance, nextShot.distance, blend),
+          height: lerp(currentShot.height, nextShot.height, blend)
+        };
+        let goal;
+        if (!started) {
+          goal = { ...shotById.oblique, yaw: -28 + Math.sin(visualTime * .065) * 1.5, pitch: 38 + Math.sin(visualTime * .049) * .5 };
+          this.label = shotById.oblique;
+        } else if (this.mode === 'manual') {
+          goal = { ...this.manual }; this.label = { name:'自主探索', en:'FREE FLIGHT' };
+        } else {
+          goal = automatic;
+          if (flightTime < 8) {
+            const launch = smoother(clamp(flightTime / 8, 0, 1));
+            goal = { yaw: this.launchPose.yaw + angleDelta(this.launchPose.yaw, goal.yaw) * launch, pitch: lerp(this.launchPose.pitch, goal.pitch, launch), distance: lerp(this.launchPose.distance, goal.distance, launch), height: lerp(this.launchPose.height, goal.height, launch) };
+          }
+          this.label = currentShot;
+          goal.yaw += (noise1(visualTime / 21, 919) - .5) * 2;
+        }
+        if (visualTime - this.lastWheel > 2) this.observe = damp(this.observe, 0, .85, dt);
+        if (this.mode === 'auto') { goal.distance += this.observe; goal.pitch = clamp(goal.pitch + this.observe * .011, 8, 90); }
+        const rate = this.mode === 'manual' ? 7 : 3.5;
+        this.current.yaw += angleDelta(this.current.yaw, goal.yaw) * (1 - Math.exp(-rate * dt));
+        for (const k of ['pitch','distance','height']) this.current[k] = damp(this.current[k], goal[k], rate, dt);
+        this.anchor = damp(this.anchor, started ? .493 : .586, .55, dt);
+        this.targetX = damp(this.targetX, riverX(travel) - 155 + wind.x * .055, 1.6, dt);
+        this.targetZ = travel + 50 + wind.z * .04;
+        this.buildBasis();
+      }
+      buildBasis() {
+        const yaw = this.current.yaw * DEG, pitch = this.current.pitch * DEG;
+        const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch);
+        this.right = [cy, 0, sy]; this.up = [-sy * sp, cp, cy * sp]; this.forward = [-sy * cp, -sp, cy * cp];
+        const target = [this.targetX, this.current.height, this.targetZ];
+        this.position = { x:target[0] - this.forward[0] * this.current.distance, y:target[1] - this.forward[1] * this.current.distance, z:target[2] - this.forward[2] * this.current.distance };
+        this.focal = H * 1.06; this.cx = W * this.anchor; this.cy = H * .445;
+      }
+      view(p) {
+        const dx = p[0] - this.position.x, dy = p[1] - this.position.y, dz = p[2] - this.position.z;
+        return [dx*this.right[0] + dz*this.right[2], dx*this.up[0] + dy*this.up[1] + dz*this.up[2], dx*this.forward[0] + dy*this.forward[1] + dz*this.forward[2]];
+      }
+      project(p) {
+        const v = this.view(p);
+        if (v[2] < 18) return null;
+        const s = this.focal / v[2];
+        return { x:this.cx + v[0]*s, y:this.cy - v[1]*s, d:v[2], s };
+      }
+      polygon(points) {
+        let vertices = points.map(p => this.view(p));
+        const clipped = [];
+        // Clip in camera space before division so river and ground survive low passes.
+        for (let i = 0; i < vertices.length; i++) {
+          const a = vertices[i], b = vertices[(i + 1) % vertices.length];
+          if (a[2] >= 24) clipped.push(a);
+          if ((a[2] >= 24) !== (b[2] >= 24)) { const t = (24 - a[2]) / (b[2] - a[2]); clipped.push([lerp(a[0],b[0],t),lerp(a[1],b[1],t),24]); }
+        }
+        if (clipped.length < 3) return null;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, depth = 0;
+        const screen = clipped.map(v => {
+          const s = this.focal / v[2], x = this.cx + v[0]*s, y = this.cy - v[1]*s;
+          minX = Math.min(minX,x); maxX = Math.max(maxX,x); minY = Math.min(minY,y); maxY = Math.max(maxY,y); depth += v[2];
+          return [x,y];
+        });
+        if (maxX < -15 || minX > W + 15 || maxY < -15 || minY > H + 15) return null;
+        return { points:screen, depth:depth / clipped.length };
+      }
+    }
+    const camera = new CameraDirector();
+
+    class PaperFlock {
+      constructor() {
+        this.birds = []; const rand = randomSource(SEED ^ 0xF10C);
+        const count = touchDevice ? 22 : 30;
+        for (let i = 0; i < count; i++) {
+          const a = i * 2.3999632297 + .28, radius = Math.sqrt((i + .45) / count);
+          const bx = Math.cos(a) * radius * 233, bz = Math.sin(a) * radius * 162;
+          const by = 290 + (i % 4) * 20 + rand() * 18;
+          const k = .78 + rand() * 1.3;
+          this.birds.push({ x:bx,y:by,z:bz,bx,by,bz,vx:0,vy:0,vz:0,k,damping:2*Math.sqrt(k)*1.08,phase:rand()*TAU,courage:.3+Math.pow(rand(),4.5)*2.8,size:.74+rand()*.45,flap:.85+rand()*.65,ax:0,ay:0,az:0 });
+        }
+      }
+      update(dt) {
+        const birds = this.birds;
+        for (const b of birds) {
+          const breathing = Math.sin(visualTime * .5 + b.phase);
+          const p = camera.project([riverX(travel) - 155 + b.x, b.y, travel + b.z]);
+          let boundary = 0, allowance = 1;
+          if (p) {
+            const x = p.x / W;
+            const breath=Math.sin(visualTime*.42+b.phase);
+            boundary = (smooth(.085,.015,x) - smooth(.45,.60,x)) * (34 + 9*breath);
+            boundary += (Math.max(0,.035-x)-Math.max(0,x-.60))*W/Math.max(.08,p.s)*(1.7+.25*breath);
+            const outward = wind.x * camera.right[0] + wind.z * camera.right[2];
+            allowance = outward > 0 ? 1 - smooth(.43,.60,x)*.94 : 1 - smooth(.14,.015,x)*.94;
+          }
+          b.ax = (b.bx + Math.sin(visualTime*.29+b.phase)*12 + wind.x*b.courage*allowance - b.x)*b.k + camera.right[0]*boundary;
+          b.az = (b.bz + Math.cos(visualTime*.22+b.phase)*13 + wind.z*b.courage*allowance - b.z)*b.k + camera.right[2]*boundary;
+          b.ay = (b.by + breathing*14 + wind.strength*b.courage*12 - b.y) * b.k*.8;
+          b.sepX=0; b.sepY=0; b.sepZ=0;
+        }
+        for (let i = 0; i < birds.length; i++) for (let j = i+1; j < birds.length; j++) {
+          const a=birds[i], b=birds[j], dx=a.x-b.x, dy=(a.y-b.y)*.75, dz=a.z-b.z, d2=dx*dx+dy*dy+dz*dz;
+          if (d2 < 58*58) {
+            const d=Math.sqrt(d2)+.01, f=Math.min(62, 44000/(d2+110))*(1-smooth(28,58,d));
+            const fx=dx/d*f, fy=dy/d*f*.3, fz=dz/d*f;
+            a.sepX+=fx; a.sepY+=fy; a.sepZ+=fz; b.sepX-=fx; b.sepY-=fy; b.sepZ-=fz;
+          }
+        }
+        for (const b of birds) {
+          const separationScale=Math.min(1,90/(Math.hypot(b.sepX,b.sepY,b.sepZ)+.001));
+          b.ax+=b.sepX*separationScale; b.ay+=b.sepY*separationScale; b.az+=b.sepZ*separationScale;
+          const friction = Math.exp(-b.damping*dt);
+          b.vx=(b.vx+b.ax*dt)*friction; b.vy=(b.vy+b.ay*dt)*friction; b.vz=(b.vz+b.az*dt)*friction;
+          b.x+=b.vx*dt; b.y+=b.vy*dt; b.z+=b.vz*dt;
+        }
+      }
+      model(b) {
+        const flap = Math.sin(visualTime * b.flap * 2.1 + b.phase) * (7 + Math.sin(visualTime*.17+b.phase)*3);
+        const heading = Math.atan2(b.vx*.22 + riverSlope(travel)*19, 110+b.vz*.35);
+        const bank = clamp(-b.vx*.007, -.32, .32), cs=Math.cos(heading), sn=Math.sin(heading), cb=Math.cos(bank), sb=Math.sin(bank);
+        const transform = (x,y,z) => {
+          x*=b.size; y*=b.size; z*=b.size;
+          const xx=x*cb-y*sb, yy=x*sb+y*cb;
+          return [riverX(travel)-155+b.x+xx*cs+z*sn,b.y+yy,travel+b.z+z*cs-xx*sn];
+        };
+        return { points: [transform(0,3,24),transform(0,8,30),transform(-3,3,19),transform(3,3,19),transform(0,1,5),transform(0,-5,-7),transform(-29,flap+3,-9),transform(-14,flap*.46,-16),transform(29,flap+3,-9),transform(14,flap*.46,-16),transform(0,1,-16),transform(-7,1,-27),transform(7,1,-27)], center:[riverX(travel)-155+b.x,b.y,travel+b.z] };
+      }
+    }
+    const flock = new PaperFlock();
+
+    class WorldRenderer {
+      constructor() {
+        this.commands = []; this.chunks = new Map(); this.climate = climateAt(0,travel);
+        this.fog = colorAt(this.climate,'fog'); this.particles = [];
+        const rand = randomSource(SEED ^ 0x50415045);
+        for (let i=0; i<(coarse ? 165 : 240); i++) this.particles.push({ id:i, life:0, x:riverX(travel)+(rand()-.5)*3200, y:rand()*780+15, z:travel+(rand()-.5)*4200, size:.9+rand()*2, phase:rand()*TAU, rank:rand(), spin:rand()*TAU });
+        const paper = document.createElement('canvas'); paper.width=256; paper.height=256;
+        const pc = paper.getContext('2d'), image = pc.createImageData(256,256);
+        for (let i=0; i<image.data.length; i+=4) { const v=rand(); image.data[i]=65; image.data[i+1]=60; image.data[i+2]=44; image.data[i+3]=v>.44 ? Math.floor(v*31) : 0; }
+        pc.putImageData(image,0,0); pc.strokeStyle='rgba(82,76,56,.06)'; pc.lineWidth=.5;
+        for (let i=0; i<65; i++) { const x=rand()*256,y=rand()*256; pc.beginPath(); pc.moveTo(x,y); pc.lineTo(x+rand()*9-3,y+rand()*3); pc.stroke(); }
+        this.paper = ctx.createPattern(paper,'repeat');
+      }
+      fogged(color, depth) {
+        const f = clamp(Math.pow(Math.max(0,depth-1050) / (5900-this.climate.mist*1200),1.65),0,.985);
+        return mix(color,this.fog,f);
+      }
+      poly(points,color,alpha=1,immediate=false,edge=0) {
+        if (alpha < .004) return;
+        const p=camera.polygon(points); if (!p || p.depth>8200) return;
+        const command={ type:'poly', points:p.points, depth:p.depth, color:rgb(this.fogged(color,p.depth)), alpha, edge };
+        if (immediate) this.paint(command); else this.commands.push(command);
+      }
+      line(a,b,color,width=1,alpha=.5,immediate=false) {
+        const p=camera.project(a),q=camera.project(b);
+        if (!p || !q || (p.d+q.d)*.5>7000) return;
+        if (Math.max(p.x,q.x)<0 || Math.min(p.x,q.x)>W || Math.max(p.y,q.y)<0 || Math.min(p.y,q.y)>H) return;
+        const depth=(p.d+q.d)*.5;
+        const command={ type:'line', points:[[p.x,p.y],[q.x,q.y]], depth, color:rgb(this.fogged(color,depth)), alpha, width:clamp(width*(p.s+q.s)*.5,.22,6) };
+        if (immediate) this.paint(command); else this.commands.push(command);
+      }
+      visible(x,y,z,radius=90) {
+        const p=camera.project([x,y,z]); if (!p || p.d>6800) return null;
+        const margin=radius*p.s+35;
+        return p.x > -margin && p.x < W+margin && p.y > -margin && p.y < H+margin ? p : null;
+      }
+      paint(c) {
+        ctx.globalAlpha=c.alpha;
+        if (c.type==='poly') {
+          ctx.beginPath(); ctx.moveTo(c.points[0][0],c.points[0][1]);
+          for (let i=1; i<c.points.length; i++) ctx.lineTo(c.points[i][0],c.points[i][1]);
+          ctx.closePath(); ctx.fillStyle=c.color; ctx.fill();
+          if (c.edge) { ctx.strokeStyle=rgba(this.fog,c.edge); ctx.lineWidth=.55; ctx.stroke(); }
+        } else if (c.type==='line') {
+          ctx.beginPath(); ctx.moveTo(c.points[0][0],c.points[0][1]); ctx.lineTo(c.points[1][0],c.points[1][1]); ctx.strokeStyle=c.color; ctx.lineWidth=c.width; ctx.stroke();
+        } else if (c.type==='smoke') {
+          ctx.fillStyle=c.color; ctx.beginPath(); ctx.ellipse(c.x,c.y,c.r*1.2,c.r,0,0,TAU); ctx.fill();
+        } else if (c.type==='particle') this.paintParticle(c);
+        ctx.globalAlpha=1;
+      }
+      paintParticle(c) {
+        const draw=(kind,weight) => {
+          if (weight < .01) return;
+          ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.angle); ctx.globalAlpha=c.alpha*weight;
+          if (kind===3) {
+            ctx.strokeStyle=c.color; ctx.lineWidth=.65; ctx.beginPath();
+            for (let i=0;i<3;i++) { const a=i*Math.PI/3; ctx.moveTo(-Math.cos(a)*c.r,-Math.sin(a)*c.r); ctx.lineTo(Math.cos(a)*c.r,Math.sin(a)*c.r); }
+            ctx.stroke();
+          } else if (kind===2) {
+            ctx.fillStyle='#ddaca4'; ctx.beginPath(); ctx.ellipse(0,0,c.r*1.65,c.r*.68,.35,0,TAU); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(-c.r,0); ctx.lineTo(c.r,0); ctx.lineWidth=.35; ctx.strokeStyle='#a08079'; ctx.stroke();
+          } else if (kind===4) {
+            const glow=ctx.createRadialGradient(0,0,0,0,0,c.r*4); glow.addColorStop(0,'rgba(226,232,163,.5)'); glow.addColorStop(1,'rgba(226,232,163,0)');
+            ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(0,0,c.r*4,0,TAU); ctx.fill(); ctx.fillStyle='#e6e4b0'; ctx.beginPath(); ctx.arc(0,0,c.r*.7,0,TAU); ctx.fill();
+          } else { ctx.fillStyle=c.color; ctx.beginPath(); ctx.ellipse(0,0,c.r*.55,c.r*.8,0,0,TAU); ctx.fill(); }
+          ctx.restore();
+        };
+        draw(c.a,1-c.blend); draw(c.b,c.blend);
+      }
+      sky() {
+        const c=this.climate, sky=colorAt(c,'sky'), horizon=colorAt(c,'horizon');
+        const gradient=ctx.createLinearGradient(0,0,0,H);
+        gradient.addColorStop(0,rgb(sky)); gradient.addColorStop(.5,rgb(horizon)); gradient.addColorStop(1,rgb(colorAt(c,'ground')));
+        ctx.fillStyle=gradient; ctx.fillRect(0,0,W,H);
+        const horizonY=camera.cy-camera.focal*Math.tan(camera.current.pitch*DEG);
+        const base=clamp(horizonY+H*.17,H*.025,H*.46);
+        const amount=(1-smooth(47,68,camera.current.pitch))*.27;
+        for (let band=0;band<3;band++) {
+          ctx.beginPath(); ctx.moveTo(0,base+H*.11);
+          for (let x=0;x<=W+35;x+=35) { const world=x/W*8+travel/6200+camera.current.yaw/110; const y=base+band*H*.025-(noise1(world,band+471)*.07+noise1(world*2.2,band+677)*.025)*H; ctx.lineTo(x,y); }
+          ctx.lineTo(W,base+H*.13); ctx.lineTo(0,base+H*.13); ctx.closePath(); ctx.fillStyle=rgba(mix(horizon,colorAt(c,'tree'),.18),amount); ctx.fill();
+        }
+      }
+      terrain() {
+        const sx=coarse ? 355 : 315, sz=coarse ? 375 : 345, rotation=.105, cs=Math.cos(rotation),sn=Math.sin(rotation);
+        const u=camera.targetX*cs-travel*sn,v=camera.targetX*sn+travel*cs;
+        const ci=Math.floor(u/sx),cj=Math.floor(v/sz),rangeX=Math.ceil(5700/sx),rangeZ=Math.ceil(6000/sz);
+        const node=(i,j) => { const x=(i+(hash(i,j,3)-.5)*.15)*sx,z=(j+(hash(i,j,5)-.5)*.13)*sz; return [x*cs+z*sn,0,z*cs-x*sn]; };
+        for (let j=cj-rangeZ;j<=cj+rangeZ;j++) for (let i=ci-rangeX;i<=ci+rangeX;i++) {
+          const ux=(i+.5)*sx,uz=(j+.5)*sz,x=ux*cs+uz*sn,z=uz*cs-ux*sn;
+          const projection=this.visible(x,0,z,Math.max(sx,sz)*.95); if (!projection) continue;
+          const climate=climateAt(x,z),variation=hash(i,j,7),color=tint(colorAt(climate,'fields',Math.floor(variation*7)),.98+hash(i,j,9)*.045);
+          const raw=[node(i,j),node(i+1,j),node(i+1,j+1),node(i,j+1)];
+          const corners=raw.map(p=>[lerp(x,p[0],.978),.05,lerp(z,p[2],.978)]);
+          this.poly(corners,color,1,true);
+          if (projection.d < 4100 && variation > .27 && projection.s*sx>21) {
+            const rows=3+Math.floor(hash(i,j,14)*5),furrow=mix(color,colorAt(climate,'tree'),.25);
+            for (let k=1;k<=rows;k++) {
+              const t=k/(rows+1),a=[lerp(corners[0][0],corners[1][0],t),.12,lerp(corners[0][2],corners[1][2],t)],b=[lerp(corners[3][0],corners[2][0],t),.12,lerp(corners[3][2],corners[2][2],t)];
+              this.line(a,b,furrow,.8,.23,true);
+            }
+          }
+          if (mod(i,4)===0) this.line(raw[0],raw[3],mix(colorAt(climate,'bank'),colorAt(climate,'ground'),.3),3.5,.6,true);
+          if (mod(j,5)===0) this.line(raw[0],raw[1],colorAt(climate,'bank'),4.2,.48,true);
+        }
+      }
+      river() {
+        const step=95,start=Math.floor((travel-7200)/step)*step,end=travel+7200;
+        for (let z=start;z<end;z+=step) {
+          const z2=z+step,x=riverX(z),x2=riverX(z2),w=riverWidth(z),w2=riverWidth(z2);
+          if (!this.visible((x+x2)*.5,0,z+step*.5,250)) continue;
+          const c=climateAt((x+x2)*.5,z+step*.5),water=colorAt(c,'river'),bank=colorAt(c,'bank');
+          this.poly([[x-w-11,.2,z],[x+w+11,.2,z],[x2+w2+11,.2,z2],[x2-w2-11,.2,z2]],bank,1,true);
+          this.poly([[x-w,.3,z],[x+w,.3,z],[x2+w2,.3,z2],[x2-w2,.3,z2]],water,1,true);
+          this.line([x-w,.35,z],[x2-w2,.35,z2],mix(bank,[255,255,245],.25),1.4,.52,true);
+          this.line([x+w,.35,z],[x2+w2,.35,z2],mix(bank,water,.4),1.2,.5,true);
+          if (c.night<.99) for (let j=0;j<3;j++) {
+            const rz=z+hash(Math.floor(z/step),j,82)*step,rx=riverX(rz)+(hash(Math.floor(z/step),j,84)-.5)*riverWidth(rz)*1.65;
+            const length=8+hash(Math.floor(z/step),j,85)*25;
+            this.line([rx-length,.65,rz],[rx+length,.65,rz+3],mix(bank,[255,255,255],.7),.8,(1-c.night)*(.11+.08*Math.sin(visualTime*.8+rz)),true);
+          }
+        }
+      }
+      getChunk(k) {
+        if (this.chunks.has(k)) return this.chunks.get(k);
+        const rand=randomSource((hash(k,17,31)*4294967295)>>>0),houses=[],trees=[];
+        const centerZ=k*850+400+(rand()-.5)*95,hasTown=k===3 || rand()>.22;
+        if (hasTown) {
+          const slope=riverSlope(centerZ),angle=Math.atan(slope),cs=Math.cos(angle),sn=Math.sin(angle);
+          const sides=rand()>.63 ? [-1,1] : [-1];
+          for (const side of sides) {
+            const count=9+Math.floor(rand()*7),total=count*32; let cursor=-total*.5;
+            const bankX=riverX(centerZ)+side*(riverWidth(centerZ)+52);
+            for (let j=0;j<count;j++) {
+              const length=27+rand()*12,depth=43+rand()*20,height=34+rand()*29;
+              const along=cursor+length*.5; cursor+=length-.7;
+              houses.push({ x:bankX+along*sn,z:centerZ+along*cs,angle,depth,length,height,roof:17+rand()*17,variation:rand(),chimney:rand()>.3,seed:Math.floor(rand()*100000),church:false });
+            }
+          }
+          for (let i=0;i<5;i++) {
+            const z=centerZ+(rand()-.5)*650,side=rand()>.24 ? -1 : 1;
+            houses.push({ x:riverX(z)+side*(riverWidth(z)+185+rand()*360),z,angle:angle+(rand()-.5)*.25,depth:38+rand()*25,length:32+rand()*31,height:28+rand()*19,roof:18+rand()*17,variation:rand(),chimney:rand()>.45,seed:Math.floor(rand()*100000),church:false });
+          }
+          if (mod(k,3)===0) {
+            const z=centerZ+215;
+            houses.push({ x:riverX(z)-riverWidth(z)-136,z,angle,depth:57,length:91,height:59,roof:33,variation:.55,chimney:false,seed:k*79,church:true });
+          }
+        }
+        const treeCount=coarse ? 24 : 37;
+        for (let i=0;i<treeCount;i++) {
+          const z=k*850+rand()*850,side=rand()>.48 ? 1 : -1;
+          const margin=i<11 ? 33+rand()*42 : 190+rand()*980;
+          const x=riverX(z)+side*(riverWidth(z)+margin);
+          if (houses.some(h=>Math.abs(h.x-x)<h.depth*.65+14 && Math.abs(h.z-z)<h.length*.6+14)) continue;
+          trees.push({ x,z,height:32+rand()*37,width:.19+rand()*.12,variation:rand(),seed:Math.floor(rand()*90000) });
+        }
+        const chunk={ houses,trees,bridge:hasTown && mod(k,4)===3 ? {z:centerZ-247} : null };
+        this.chunks.set(k,chunk); return chunk;
+      }
+      collect() {
+        const center=Math.floor(travel/850),houses=[],trees=[],bridges=[];
+        for (let k=center-9;k<=center+9;k++) {
+          const chunk=this.getChunk(k);
+          for (const h of chunk.houses) { const p=this.visible(h.x,h.height*.5,h.z,h.church ? 190 : 105); if (p) { h.projection=p; houses.push(h); } }
+          for (const t of chunk.trees) { const p=this.visible(t.x,t.height*.5,t.z,t.height); if (p && p.s*t.height>1.6) { t.projection=p; trees.push(t); } }
+          if (chunk.bridge && this.visible(riverX(chunk.bridge.z),5,chunk.bridge.z,220)) bridges.push(chunk.bridge);
+        }
+        for (const key of this.chunks.keys()) if (Math.abs(key-center)>12) this.chunks.delete(key);
+        return {houses,trees,bridges};
+      }
+      houseTransform(h) {
+        const cs=Math.cos(h.angle),sn=Math.sin(h.angle);
+        return (x,y,z)=>[h.x+x*cs+z*sn,y,h.z+z*cs-x*sn];
+      }
+      hull(points) {
+        const pts=points.slice().sort((a,b)=>a[0]-b[0] || a[2]-b[2]);
+        const cross=(a,b,c)=>(b[0]-a[0])*(c[2]-a[2])-(b[2]-a[2])*(c[0]-a[0]);
+        const lower=[],upper=[];
+        for (const p of pts) { while(lower.length>=2 && cross(lower.at(-2),lower.at(-1),p)<=0) lower.pop(); lower.push(p); }
+        for (let i=pts.length-1;i>=0;i--) { const p=pts[i]; while(upper.length>=2 && cross(upper.at(-2),upper.at(-1),p)<=0) upper.pop(); upper.push(p); }
+        lower.pop(); upper.pop(); return lower.concat(upper);
+      }
+      shadows(objects) {
+        for (const h of objects.houses) {
+          const p=this.houseTransform(h),c=climateAt(h.x,h.z),d=h.depth*.5,l=h.length*.5,alt=h.height+h.roof+(h.church ? 48 : 0);
+          const corners=[p(-d,.75,-l),p(d,.75,-l),p(d,.75,l),p(-d,.75,l)];
+          const cast=corners.map(v=>[v[0]+alt*.88,.75,v[2]+alt*.47]);
+          this.poly(this.hull(corners.concat(cast)),colorAt(c,'shadow'),.12-c.night*.025,true);
+        }
+        for (const t of objects.trees) {
+          const c=climateAt(t.x,t.z),points=[];
+          for (let i=0;i<10;i++) { const a=i/10*TAU,along=Math.cos(a)*t.height*.46+t.height*.47,cross=Math.sin(a)*t.height*.17; points.push([t.x+along*.91+cross*.43,.8,t.z+along*.43-cross*.91]); }
+          this.poly(points,colorAt(c,'shadow'),.11,true);
+        }
+        for (const b of flock.birds) {
+          const model=flock.model(b),p=model.points,c=climateAt(model.center[0],model.center[2]);
+          const project=v=>[v[0]+v[1]*.32,.9,v[2]+v[1]*.24];
+          this.poly([project(p[0]),project(p[6]),project(p[7]),project(p[10]),project(p[9]),project(p[8])],colorAt(c,'shadow'),.095-c.night*.018,true);
+        }
+      }
+      box(p,x,y,z,w,h,d,color,dark,top) {
+        const a=p(x-w/2,y,z-d/2),b=p(x+w/2,y,z-d/2),c=p(x+w/2,y,z+d/2),e=p(x-w/2,y,z+d/2);
+        const A=p(x-w/2,y+h,z-d/2),B=p(x+w/2,y+h,z-d/2),C=p(x+w/2,y+h,z+d/2),E=p(x-w/2,y+h,z+d/2);
+        this.poly([a,b,B,A],dark); this.poly([b,c,C,B],color); this.poly([c,e,E,C],color); this.poly([e,a,A,E],dark); this.poly([A,B,C,E],top);
+      }
+      house(h) {
+        const c=climateAt(h.x,h.z),p=this.houseTransform(h),d=h.depth*.5,l=h.length*.5,y=h.height,r=h.roof;
+        const wall=tint(colorAt(c,'wall'),.94+h.variation*.09),dark=tint(colorAt(c,'wallDark'),.99+h.variation*.04);
+        const roof=tint(colorAt(c,'roof'),.86+h.variation*.25),roofDark=tint(colorAt(c,'roofDark'),.91+h.variation*.18);
+        const dx=camera.position.x-h.x,dz=camera.position.z-h.z,cs=Math.cos(h.angle),sn=Math.sin(h.angle);
+        const sideX=dx*cs-dz*sn>0 ? 1 : -1,sideZ=dx*sn+dz*cs>0 ? 1 : -1;
+        this.poly([p(sideX*d,0,-l),p(sideX*d,0,l),p(sideX*d,y,l),p(sideX*d,y,-l)],sideX>0 ? wall : dark);
+        this.poly([p(-d,0,sideZ*l),p(d,0,sideZ*l),p(d,y,sideZ*l),p(-d,y,sideZ*l)],sideZ>0 ? dark : wall);
+        this.poly([p(-d,y,sideZ*l),p(0,y+r,sideZ*l),p(d,y,sideZ*l)],sideZ>0 ? dark : wall);
+        this.poly([p(-d,y,-l),p(0,y+r,-l),p(0,y+r,l),p(-d,y,l)],roofDark);
+        this.poly([p(0,y+r,-l),p(d,y,-l),p(d,y,l),p(0,y+r,l)],roof);
+        this.line(p(0,y+r+.3,-l),p(0,y+r+.3,l),mix(roof,wall,.42),1,.65);
+        if (c.snow>.005) {
+          const snow=mix([249,251,242],colorAt(c,'fog'),.14);
+          for (const side of [-1,1]) this.poly([p(0,y+r+.5,-l-1),p(side*d*.55,y+r*.45+1,-l-1),p(side*d*.55,y+r*.45+1,l+1),p(0,y+r+.5,l+1)],snow,c.snow*.96);
+          this.line(p(-d,y+1,-l),p(-d,y+1,l),snow,2,c.snow*.8);
+        }
+        if (h.projection.d<3900 && h.projection.s*h.depth>9) {
+          const floors=y>45 ? 3 : 2,windowWidth=h.church ? 6 : 4.6,windowHeight=h.church ? 12 : 6;
+          for (let row=0;row<floors;row++) for (let col=0;col<2;col++) {
+            const wy=11+row*(y-19)/Math.max(1,floors-1),wz=(col-.5)*l*.92;
+            const lit=hash(h.seed,row,col)>.23 ? c.night : c.night*.12;
+            const windowColor=mix(tint(dark,.62),[244,207,125],lit);
+            const wx=sideX*(d+.23),ww=windowWidth,wh=windowHeight;
+            if (lit>.1) this.poly([p(wx,wy-wh*.85,wz-ww),p(wx,wy-wh*.85,wz+ww),p(wx,wy+wh*.85,wz+ww),p(wx,wy+wh*.85,wz-ww)],[247,217,150],lit*.12);
+            this.poly([p(wx,wy-wh/2,wz-ww/2),p(wx,wy-wh/2,wz+ww/2),p(wx,wy+wh/2,wz+ww/2),p(wx,wy+wh/2,wz-ww/2)],windowColor);
+            if (h.projection.s>.6) this.line(p(wx,wy-wh/2,wz),p(wx,wy+wh/2,wz),dark,.6,.8);
+          }
+          for (let row=0;row<floors;row++) for (let col=0;col<2;col++) {
+            const wy=11+row*(y-19)/Math.max(1,floors-1),wx=(col-.5)*d*.9,wz=sideZ*(l+.22),lit=hash(h.seed,row,col+5)>.28 ? c.night : 0;
+            this.poly([p(wx-2.5,wy-3.5,wz),p(wx+2.5,wy-3.5,wz),p(wx+2.5,wy+3.5,wz),p(wx-2.5,wy+3.5,wz)],mix(tint(dark,.66),[250,216,144],lit));
+          }
+          this.poly([p(sideX*(d+.26),0,-3),p(sideX*(d+.26),0,3),p(sideX*(d+.26),12,3),p(sideX*(d+.26),12,-3)],tint(dark,.7));
+        }
+        if (h.chimney && h.projection.d<4250) {
+          this.box(p,-d*.36,y+r*.77,l*.35,5.5,13,6.3,tint(wall,.87),dark,roofDark);
+          if (h.projection.d<2600 && h.variation>.52) for (let i=0;i<4;i++) {
+            const life=mod(visualTime*.12+i*.25+h.variation,1),base=p(-d*.36,y+r*.77+15,l*.35);
+            const point=camera.project([base[0]+life*21+wind.vx*.03,base[1]+life*52,base[2]+life*7]);
+            if (point) this.commands.push({type:'smoke',x:point.x,y:point.y,r:(3+life*7)*point.s,depth:point.d,color:rgb(colorAt(c,'sky')),alpha:Math.sin(life*Math.PI)*.105});
+          }
+        }
+        if (h.church) this.church(h,p,c,wall,dark,roofDark);
+      }
+      church(h,p,c,wall,dark,roof) {
+        const tx=h.depth*.54,tz=-h.length*.27;
+        this.box(p,tx,0,tz,25,104,27,wall,dark,mix(wall,roof,.5));
+        const top=p(tx,162,tz),corners=[p(tx-15,104,tz-16),p(tx+15,104,tz-16),p(tx+15,104,tz+16),p(tx-15,104,tz+16)];
+        for (let i=0;i<4;i++) this.poly([corners[i],corners[(i+1)%4],top],tint(roof,.83+i*.095));
+        this.line(p(tx,159,tz),p(tx,172,tz),roof,1.2,.8);
+        this.line(p(tx-3,168,tz),p(tx+3,168,tz),roof,1,.8);
+        const side=(camera.position.x-h.x)*Math.cos(h.angle)-(camera.position.z-h.z)*Math.sin(h.angle)>0 ? 1 : -1;
+        for (const z of [-5,5]) {
+          const x=tx+side*12.65;
+          this.poly([p(x,80,tz+z-2),p(x,91,tz+z-2),p(x,94,tz+z),p(x,91,tz+z+2),p(x,80,tz+z+2)],mix(tint(dark,.48),[226,186,110],c.night*.7));
+        }
+      }
+      tree(t) {
+        const c=climateAt(t.x,t.z),h=t.height,r=h*t.width;
+        const light=tint(colorAt(c,'treeLight'),.91+t.variation*.16),dark=tint(colorAt(c,'treeDark'),.94+t.variation*.1),leaf=tint(colorAt(c,'tree'),.94+t.variation*.12);
+        this.line([t.x,0,t.z],[t.x,h*.55,t.z],mix(dark,[120,105,83],(1-c.night)*.38),2.1,.82);
+        const top=[t.x,h,t.z],bottom=[t.x,h*.24,t.z],ring=[];
+        for (let i=0;i<6;i++) { const a=i/6*TAU+.2; ring.push([t.x+Math.cos(a)*r,h*(.59+hash(t.seed,i,2)*.055),t.z+Math.sin(a)*r]); }
+        for (let i=0;i<6;i++) {
+          const shade=i<3 ? mix(leaf,light,.5) : mix(leaf,dark,.35);
+          this.poly([top,ring[i],ring[(i+1)%6]],shade,1-c.snow);
+          this.poly([bottom,ring[(i+1)%6],ring[i]],tint(shade,.96),1-c.snow);
+        }
+        if (c.snow>.004) for (let tier=0;tier<3;tier++) {
+          const y=h*(.2+tier*.2),peak=[t.x,h*(.64+tier*.18),t.z],radius=r*(1.2-tier*.29),vertices=[];
+          for (let i=0;i<4;i++) { const a=i*TAU/4+.5; vertices.push([t.x+Math.cos(a)*radius,y,t.z+Math.sin(a)*radius]); }
+          for (let i=0;i<4;i++) {
+            const a=vertices[i],b=vertices[(i+1)%4],shade=i<2 ? leaf : dark;
+            this.poly([peak,a,b],shade,c.snow);
+            const capA=peak.map((v,k)=>lerp(v,a[k],.54)),capB=peak.map((v,k)=>lerp(v,b[k],.54));
+            this.poly([peak,capA,capB],mix([240,246,235],light,.15),c.snow*.91);
+          }
+        }
+      }
+      bridge(bridge) {
+        const z=bridge.z,x=riverX(z),w=riverWidth(z)+28,c=climateAt(x,z),p=(a,b,d)=>[x+a,b,z+d];
+        const stone=mix(colorAt(c,'wall'),colorAt(c,'bank'),.5),dark=mix(colorAt(c,'wallDark'),colorAt(c,'bank'),.2);
+        this.box(p,0,11,0,w*2,5,31,stone,dark,stone);
+        for (const side of [-1,1]) {
+          this.box(p,0,16,side*14,w*2,4,3.1,stone,dark,stone);
+          for (let i=-1;i<=1;i++) this.box(p,i*w*.58,0,side*9,9,12,12,dark,tint(dark,.93),stone);
+        }
+        for (const side of [-1,1]) this.poly([[x+side*w,.9,z-19],[x+side*(w+95),.9,z-19],[x+side*(w+95),.9,z+19],[x+side*w,.9,z+19]],colorAt(c,'bank'),.78,true);
+      }
+      birds() {
+        for (const b of flock.birds) {
+          const model=flock.model(b),p=model.points,center=model.center,c=climateAt(center[0],center[2]);
+          const white=mix([255,253,244],colorAt(c,'bird'),.18+c.night*.75),shade=mix(white,colorAt(c,'birdShade'),.65),mid=mix(white,shade,.32);
+          this.poly([p[10],p[11],p[5]],shade,1,false,.18);
+          this.poly([p[10],p[12],p[5]],mid,1,false,.12);
+          this.poly([p[4],p[6],p[7]],white,1,false,.3);
+          this.poly([p[4],p[7],p[5]],shade,1,false,.18);
+          this.poly([p[4],p[8],p[9]],mid,1,false,.26);
+          this.poly([p[4],p[9],p[5]],mix(shade,mid,.48),1,false,.16);
+          this.poly([p[0],p[4],p[5],p[2]],white,1,false,.18);
+          this.poly([p[0],p[3],p[5],p[4]],shade,1,false,.16);
+          this.poly([p[0],p[1],p[2]],white,1,false,.1);
+          this.poly([p[0],p[3],p[1]],mid,1,false,.1);
+          this.line(p[4],p[7],mix(shade,[160,156,139],.1),.48,.43);
+          this.line(p[4],p[9],shade,.48,.4);
+        }
+      }
+      updateParticles(dt) {
+        for (const p of this.particles) {
+          const c=climateAt(p.x,p.z);
+          p.x += (5+Math.sin(visualTime*.3+p.phase)*4+wind.vx*.12)*dt;
+          p.y -= (2+c.snow*18+c.dusk*5-c.night*3)*dt;
+          p.z += (Math.cos(visualTime*.21+p.phase)*3+wind.vz*.07)*dt;
+          if (Math.abs(p.z-travel)>2600 || p.y<3 || Math.abs(p.x-riverX(travel))>2400) {
+            p.life++;
+            p.x=riverX(travel)+(hash(p.id,p.life,707)-.5)*3200;
+            p.z=travel+(hash(p.id,p.life,709)-.35)*4600;
+            p.y=100+hash(p.id,p.life,711)*750;
+          }
+        }
+      }
+      particlesToScene() {
+        for (const p of this.particles) {
+          const c=climateAt(p.x,p.z),density=.27+c.snow*.73+c.dusk*.12+c.night*.14;
+          if (p.rank>density) continue;
+          const projection=this.visible(p.x,p.y,p.z,15); if (!projection) continue;
+          const activation=smooth(p.rank,p.rank+.035,density);
+          const alpha=activation*(.24+c.snow*.28+c.night*.2)*(.68+.32*Math.sin(visualTime*.8+p.phase))*(1-smooth(3500,6300,projection.d));
+          this.commands.push({ type:'particle',x:projection.x,y:projection.y,depth:projection.d,r:clamp(p.size*projection.s,.45,4.2),angle:p.spin+visualTime*(.19+c.dusk*.45),color:rgb(mix(colorAt(c,'sky'),[255,255,250],.5)),alpha,a:c.a,b:c.b,blend:c.t });
+        }
+      }
+      atmosphericLight() {
+        const c=this.climate;
+        const front=c.a!==c.b ? Math.sin(c.t*Math.PI) : 0;
+        const dawn=front*(c.warm+c.dusk);
+        if (dawn>.01) {
+          const hx=W*(.72+(noise1(travel/4000,999)-.5)*.2),hy=clamp(camera.cy-camera.focal*Math.tan(camera.current.pitch*DEG),H*.03,H*.37);
+          const glow=ctx.createRadialGradient(hx,hy,0,hx,hy,H*.53);
+          glow.addColorStop(0,`rgba(255,218,160,${dawn*.32})`); glow.addColorStop(.35,`rgba(250,211,165,${dawn*.13})`); glow.addColorStop(1,'rgba(255,229,177,0)');
+          ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+          const pool=camera.project([riverX(travel+700)+370,.7,travel+700]);
+          if (pool) {
+            ctx.save(); ctx.translate(pool.x,pool.y); ctx.scale(680*pool.s,420*pool.s*Math.max(.2,Math.sin(camera.current.pitch*DEG)));
+            const light=ctx.createRadialGradient(0,0,0,0,0,1); light.addColorStop(0,`rgba(255,232,172,${dawn*.23})`); light.addColorStop(1,'rgba(255,232,172,0)'); ctx.fillStyle=light; ctx.fillRect(-1,-1,2,2); ctx.restore();
+          }
+        }
+      }
+      stars() {
+        const alpha=this.climate.night*(1-smooth(45,69,camera.current.pitch)); if (alpha<.01) return;
+        for (let i=0;i<88;i++) {
+          const x=mod(hash(i,14,91)*W-camera.current.yaw/360*W*.6,W),y=hash(i,15,93)*H*.205;
+          const a=alpha*(1-y/(H*.25))*(.22+hash(i,17,97)*.42)*(.75+Math.sin(visualTime*.3+i)*.25);
+          ctx.fillStyle=`rgba(222,234,221,${a})`; ctx.beginPath(); ctx.arc(x,y,.45+hash(i,16,95)*.7,0,TAU); ctx.fill();
+        }
+      }
+      cursor() {
+        if (!pointer.inside || pointer.alpha<.015 || !started) return;
+        const x=pointer.x*W,y=pointer.y*H,r=13+wind.strength*4;
+        ctx.strokeStyle=rgba(colorAt(this.climate,'ink'),pointer.alpha*.34); ctx.lineWidth=.65;
+        ctx.beginPath(); ctx.arc(x,y,r,visualTime*.2,visualTime*.2+Math.PI*1.45); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x,y,2,0,TAU); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x+r+5,y-3); ctx.bezierCurveTo(x+r+14,y-7,x+r+17,y+4,x+r+26,y-1); ctx.stroke();
+      }
+      render() {
+        this.commands.length=0;
+        this.climate=climateAt(camera.targetX,camera.targetZ); this.fog=colorAt(this.climate,'fog');
+        ctx.setTransform(DPR,0,0,DPR,0,0); ctx.globalAlpha=1; ctx.lineJoin='round'; ctx.lineCap='round';
+        this.sky(); this.terrain(); this.river();
+        const objects=this.collect();
+        for (const bridge of objects.bridges) this.bridge(bridge);
+        this.shadows(objects);
+        this.atmosphericLight(); this.stars();
+        for (const house of objects.houses) this.house(house);
+        for (const tree of objects.trees) this.tree(tree);
+        this.birds(); this.particlesToScene();
+        this.commands.sort((a,b)=>b.depth-a.depth);
+        for (const command of this.commands) this.paint(command);
+        ctx.globalAlpha=.3-this.climate.night*.14; ctx.fillStyle=this.paper; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1;
+        this.cursor();
+      }
+    }
+    const renderer = new WorldRenderer();
+
+    class Soundscape {
+      constructor() {
+        this.ctx=null; this.enabled=false; this.touched=false; this.preparing=null; this.musicSource=null; this.suspendTimer=0; this.firstPlay=true; this.toggleToken=0;
+        // Original, embedded Standard MIDI files. A native synth supplies the instruments, not a download.
+        this.tracks=[
+          { name:'纸上的风 / Wind on Paper', tone:0, buffer:null, base64:
+            'TVRoZAAAAAYAAAABAGBNVHJrAAABAgD/UQMPQkAAwAAA/wEA'+
+            'AJA8UACQQEAAkEM4hECAPAAAgEAAAIBDAAD/AQEA'+
+            'AJA5UACQQEAAkEU4hECAOQAAgEAAAIBFAAD/AQEA'+
+            'AJA1UACQPEAAkEE4hECANQAAgDwAAIBBAAD/AQEA'+
+            'AJA3UACQPkAAkEM4hECANwAAgD4AAIBDAAD/AQEA'+
+            'AJA8UACQQ0AAkEg4hECAPAAAgEMAAIBIAAD/AQEA'+
+            'AJBAUACQQ0AAkEc4hECAQAAAgEMAAIBHAAD/AQEA'+
+            'AJA5UACQPkAAkEU4hECAOQAAgD4AAIBFAAD/AQEA'+
+            'AJA1UACQPEAAkEM4hECANQAAgDwAAIBDAAD/AQEA'+
+            'AP8vAA==' },
+          { name:'远方的回声 / A Distant Echo', tone:1, buffer:null, base64:
+            'TVRoZAAAAAYAAAABAGBNVHJrAAABAgD/UQMPQkAAwAAA/wEA'+
+            'AJAyUACQOUAAkD44hECAMgAAgDkAAIA+AAD/AQEA'+
+            'AJA1UACQOUAAkDw4hECANQAAgDkAAIA8AAD/AQEA'+
+            'AJA5UACQPEAAkEA4hECAOQAAgDwAAIBAAAD/AQEA'+
+            'AJA3UACQOkAAkD44hECANwAAgDoAAIA+AAD/AQEA'+
+            'AJAyUACQOUAAkEE4hECAMgAAgDkAAIBBAAD/AQEA'+
+            'AJA1UACQPEAAkEU4hECANQAAgDwAAIBFAAD/AQEA'+
+            'AJA6UACQPkAAkEE4hECAOgAAgD4AAIBBAAD/AQEA'+
+            'AJA5UACQQEAAkEM4hECAOQAAgEAAAIBDAAD/AQEA'+
+            'AP8vAA==' }
+        ];
+      }
+      initialize() {
+        if (this.ctx) return;
+        const Audio=window.AudioContext || window.webkitAudioContext;
+        if (!Audio) throw new Error('WebAudio unavailable');
+        this.ctx=new Audio({latencyHint:'playback'});
+        const c=this.ctx;
+        this.master=c.createGain(); this.master.gain.value=0;
+        const limiter=c.createDynamicsCompressor(); limiter.threshold.value=-16; limiter.knee.value=18; limiter.ratio.value=3; limiter.attack.value=.01; limiter.release.value=.45;
+        this.master.connect(limiter); limiter.connect(c.destination);
+        this.musicBus=c.createGain(); this.musicBus.gain.value=0; this.musicBus.connect(this.master);
+        const length=c.sampleRate*4,noise=c.createBuffer(1,length,c.sampleRate),data=noise.getChannelData(0),rand=randomSource(SEED ^ 0xA0D10);
+        for (let i=0;i<length;i++) data[i]=rand()*2-1;
+        const makeNoise=(kind,frequency,q) => {
+          const source=c.createBufferSource(); source.buffer=noise; source.loop=true;
+          const filter=c.createBiquadFilter(); filter.type=kind; filter.frequency.value=frequency; filter.Q.value=q;
+          const gain=c.createGain(); gain.gain.value=0; source.connect(filter); filter.connect(gain); gain.connect(this.master); source.start(0,rand()*3);
+          return {source,filter,gain};
+        };
+        this.windLayer=makeNoise('lowpass',380,.6);
+        this.riverLayer=makeNoise('bandpass',1250,2.8);
+        this.paperLayer=makeNoise('highpass',3600,.7);
+        this.windLfo=c.createOscillator(); this.windLfo.frequency.value=.073;
+        const lfoGain=c.createGain(); lfoGain.gain.value=.007;
+        this.windLfo.connect(lfoGain); lfoGain.connect(this.windLayer.gain.gain); this.windLfo.start();
+        this.preparing=Promise.all(this.tracks.map(track=>this.renderTrack(track))).then(()=>{
+          if (!this.musicSource) this.playTrack(0,c.currentTime+.08);
+        }).catch(()=>toast('环境声已开启；此浏览器未能合成配乐。'));
+      }
+      async setEnabled(enabled,userChoice=true) {
+        if (userChoice) this.touched=true;
+        const token=++this.toggleToken;
+        clearTimeout(this.suspendTimer);
+        this.enabled=enabled; this.updateButton();
+        if (enabled) {
+          try { this.initialize(); await this.ctx.resume(); }
+          catch (error) { if(token===this.toggleToken) { this.enabled=false; this.updateButton(); toast('声音暂不可用，请再次点击声音按钮。'); } return; }
+        }
+        if (token!==this.toggleToken) return;
+        if (!this.ctx) return;
+        const now=this.ctx.currentTime;
+        if (this.master.gain.cancelAndHoldAtTime) this.master.gain.cancelAndHoldAtTime(now);
+        else { const volume=this.master.gain.value; this.master.gain.cancelScheduledValues(now); this.master.gain.setValueAtTime(volume,now); }
+        this.master.gain.linearRampToValueAtTime(enabled ? .8 : 0,now+(this.firstPlay && enabled ? 5 : .8));
+        if (enabled) this.firstPlay=false;
+        else this.suspendTimer=setTimeout(()=>{ if (!this.enabled && this.ctx) this.ctx.suspend().catch(()=>{}); },950);
+      }
+      updateButton() {
+        stage.classList.toggle('sound-on',this.enabled);
+        $('soundButton').setAttribute('aria-pressed',String(this.enabled));
+        $('soundButton').setAttribute('aria-label',this.enabled ? '关闭音乐与环境声' : '开启音乐与环境声');
+        $('soundLabel').textContent=this.enabled ? '声音 开' : '声音 关';
+      }
+      readMidi(base64) {
+        const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0)),view=new DataView(bytes.buffer);
+        if (view.getUint32(0)!==0x4D546864 || view.getUint32(14)!==0x4D54726B) throw new Error('Invalid embedded MIDI');
+        const division=view.getUint16(12),end=22+view.getUint32(18),chords=[];
+        if (end!==bytes.length || division===0) throw new Error('Invalid MIDI length');
+        let position=22,tempo=500000,time=0,runningStatus=0;
+        const variable=()=>{ let value=0,byte=0,count=0; do { if(position>=end || count++>3) throw new Error('Invalid MIDI delta'); byte=bytes[position++]; value=(value<<7)|(byte&127); } while(byte&128); return value; };
+        while(position<end) {
+          time+=variable()/division*tempo/1000000;
+          let status=bytes[position++];
+          if (status<128) { position--; status=runningStatus; }
+          if (status===255) {
+            const type=bytes[position++],length=variable();
+            if (type===81 && length===3) tempo=(bytes[position]<<16)|(bytes[position+1]<<8)|bytes[position+2];
+            position+=length; if (type===47) break;
+          } else if (status===240 || status===247) { const length=variable(); position+=length; }
+          else {
+            runningStatus=status; const kind=status&240,note=bytes[position++];
+            const velocity=kind===192 || kind===208 ? 0 : bytes[position++];
+            if (kind===144 && velocity>0) {
+              let chord=chords[chords.length-1];
+              if (!chord || Math.abs(chord.time-time)>.001) { chord={time,notes:[]}; chords.push(chord); }
+              chord.notes.push(note);
+            }
+          }
+        }
+        if (chords.length!==8 || chords.some(chord=>chord.notes.length!==3)) throw new Error('Incomplete MIDI composition');
+        return chords;
+      }
+      async renderTrack(track) {
+        const Offline=window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (!Offline) throw new Error('OfflineAudio unavailable');
+        const sampleRate=coarse ? 16000 : 22050,seconds=54,offline=new Offline(2,seconds*sampleRate,sampleRate);
+        const output=offline.createGain(); output.gain.value=.43; output.connect(offline.destination);
+        const wet=offline.createGain(); wet.gain.value=.28; wet.connect(output);
+        const reverb=offline.createConvolver(),impulse=offline.createBuffer(2,Math.floor(sampleRate*2.8),sampleRate),rand=randomSource(SEED ^ (track.tone ? 0xEC40 : 0xFADE));
+        for (let channel=0;channel<2;channel++) { const d=impulse.getChannelData(channel); for (let i=0;i<d.length;i++) d[i]=(rand()*2-1)*Math.pow(1-i/d.length,3.2); }
+        reverb.buffer=impulse; reverb.connect(wet);
+        const strike=(midi,start,volume,duration,pan,pad=false) => {
+          const envelope=offline.createGain(); envelope.gain.setValueAtTime(0,start);
+          envelope.gain.linearRampToValueAtTime(volume,start+(pad ? .75 : .018));
+          envelope.gain.exponentialRampToValueAtTime(.00008,start+duration);
+          const panner=offline.createStereoPanner(); panner.pan.value=pan;
+          envelope.connect(panner); panner.connect(output); panner.connect(reverb);
+          const freq=440*Math.pow(2,(midi-69)/12);
+          for (let harmonic=1;harmonic<=2;harmonic++) {
+            const oscillator=offline.createOscillator(),level=offline.createGain();
+            oscillator.type='sine'; oscillator.frequency.value=freq*harmonic; oscillator.detune.value=harmonic===1 ? 0 : (track.tone ? -2 : 2);
+            level.gain.value=harmonic===1 ? 1 : (pad ? .065 : .15);
+            oscillator.connect(level); level.connect(envelope); oscillator.start(start); oscillator.stop(start+duration+.04);
+          }
+        };
+        const chords=this.readMidi(track.base64);
+        for (let bar=0;bar<chords.length;bar++) {
+          const chord=chords[bar].notes,start=.35+chords[bar].time;
+          strike(chord[0]-12,start,.11,5.5,-.12,true);
+          for (let n=0;n<3;n++) strike(chord[n],start+n*.27,.12-n*.017,4.5,(n-1)*.35);
+          const melody=track.tone ? [2,1,0] : [1,2,1];
+          for (let n=0;n<3;n++) strike(chord[melody[n]]+(n===1 ? 12 : 0),start+1.55+n*1.42,.103-n*.012,3.8,Math.sin(bar+n)*.38);
+          if (bar%2===1) strike(chord[2]+12,start+4.9,.048,2.9,.5);
+        }
+        track.buffer=await offline.startRendering();
+      }
+      playTrack(index,when) {
+        if (!this.ctx || !this.tracks[index].buffer) return;
+        const source=this.ctx.createBufferSource(); source.buffer=this.tracks[index].buffer; source.connect(this.musicBus);
+        if (!this.musicSource) { this.musicBus.gain.setValueAtTime(0,when); this.musicBus.gain.linearRampToValueAtTime(.64,when+5); }
+        this.musicSource=source; this.trackIndex=index;
+        const nextStart=when+source.buffer.duration+2.4;
+        source.onended=()=>{ source.disconnect(); if (this.ctx && this.ctx.state!=='closed') this.playTrack(1-index,Math.max(this.ctx.currentTime,nextStart)); };
+        source.start(when);
+      }
+      update() {
+        if (!this.ctx || this.ctx.state!=='running') return;
+        const t=this.ctx.currentTime,climate=renderer.climate;
+        const windLevel=.032+wind.strength*.047;
+        this.windLayer.gain.gain.setTargetAtTime(windLevel*(paused ? .35 : 1),t,.8);
+        this.windLayer.filter.frequency.setTargetAtTime(260+wind.strength*300+climate.snow*90,t,1.3);
+        const riverDistance=Math.abs(camera.position.x-riverX(camera.position.z));
+        const water=(1-smooth(170,590,camera.position.y))*(1-smooth(riverWidth(camera.position.z)*.5,riverWidth(camera.position.z)+260,riverDistance));
+        this.riverLayer.gain.gain.setTargetAtTime(water*.075*(paused ? .2 : 1),t,1.6);
+        const near=1-smooth(630,1490,camera.current.distance);
+        this.paperLayer.gain.gain.setTargetAtTime(near*.007*(.57+.43*Math.sin(visualTime*2.4))*(paused ? 0 : 1),t,.11);
+      }
+      visibility(hidden) {
+        if (!this.ctx) return;
+        if (hidden) this.ctx.suspend().catch(()=>{});
+        else if (this.enabled) this.ctx.resume().catch(()=>{});
+      }
+    }
+    const sound=new Soundscape();
+
+    const poems=[
+      ['我们不问风的来处，\n只把远方，折进翅膀。','We fold the distance into our wings.'],
+      ['河流把大地展开，\n天空，留下一页空白。','The river unfolds. The sky leaves room.'],
+      ['越过一千座屋顶，\n仍有一盏灯，为晚归的人亮着。','Somewhere, a light is waiting for you.'],
+      ['风没有形状，\n直到我们，向它张开翅膀。','The wind takes shape beneath our wings.'],
+      ['雾把世界轻轻藏起，\n却没有藏住，去远方的心。','Even in the mist, the heart knows its way.'],
+      ['把昨日，留给田野。\n把明日，交还给风。','Leave yesterday to the fields, tomorrow to the wind.'],
+      ['暮色落在羽尖，\n我们替白昼，再走一程。','We carry the last light a little further.'],
+      ['雪落下来，像一封\n没有写上地址的信。','Snow falls like a letter without an address.'],
+      ['没有一条河，会走回从前。\n没有一次飞行，是为了重复。','No river returns to the same beginning.'],
+      ['夜色很深，\n星光却轻得，可以随身携带。','The night is deep. The stars are light enough to carry.'],
+      ['有时，迷路只是\n比别人，多看见一片天空。','To wander is to find a wider sky.'],
+      ['我们经过，不占有。\n我们远行，不告别。','We pass without possessing. We leave without goodbye.'],
+      ['如果远方没有终点，\n就让每一次振翅，都算抵达。','Let every wingbeat be an arrival.']
+    ];
+    let needsRender=true,wakeRequest=false;
+    let uiInk=colorAt(climateAt(0,travel),'ink'),uiPaper=colorAt(climateAt(0,travel),'sky');
+
+    function toast(message) {
+      clearTimeout(toastTimer); $('toast').textContent=message; $('toast').classList.add('visible');
+      toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),3400);
+    }
+    function updateHint() {
+      $('interactionHint').textContent=camera.mode==='manual' && started ? (coarse ? '拖拽转镜头 · 双指缩放' : '拖拽转镜头 · 滚轮缩放') : (coarse ? '轻触画面，让风带路' : '移动鼠标，让风带路');
+      stage.classList.toggle('manual-camera',camera.mode==='manual');
+    }
+    function resize() {
+      const oldW=W,oldH=H;
+      W=Math.max(1,Math.round(stage.clientWidth)); H=Math.max(1,Math.round(stage.clientHeight));
+      if (W!==oldW || H!==oldH) { pointers.clear(); pointer.down=false; pointer.inside=false; gesture=null; stage.classList.remove('dragging'); }
+      rotated=coarse && matchMedia('(orientation: portrait)').matches;
+      DPR=Math.min(window.devicePixelRatio || 1,3,Math.sqrt(18000000/(W*H)));
+      canvas.width=Math.round(W*DPR); canvas.height=Math.round(H*DPR);
+      document.documentElement.style.setProperty('--vh',`${H/100}px`);
+      document.documentElement.style.setProperty('--vw',`${W/100}px`);
+      const uiScale=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
+      stage.classList.toggle('compact',H/uiScale<650);
+      stage.classList.toggle('very-compact',H/uiScale<435);
+      stage.classList.toggle('tiny',H/uiScale<360);
+      camera.buildBasis(); needsRender=true;
+    }
+    function stagePoint(event) {
+      const rect=stage.getBoundingClientRect();
+      return rotated ? {x:clamp((event.clientY-rect.top)/rect.height*W,0,W),y:clamp((rect.right-event.clientX)/rect.width*H,0,H)} : {x:clamp((event.clientX-rect.left)/rect.width*W,0,W),y:clamp((event.clientY-rect.top)/rect.height*H,0,H)};
+    }
+    function inputWind(p) {
+      const time=performance.now()/1000,dt=clamp(time-pointer.lastStamp,.004,.2),x=p.x/W,y=p.y/H;
+      const movement=Math.hypot(x-pointer.lastX,y-pointer.lastY);
+      if (pointer.inside && !pointer.down && movement<1.5/Math.max(W,H)) return;
+      const speed=movement/dt;
+      pointer.speed=damp(pointer.speed,Math.min(speed,30),9,dt);
+      pointer.lastStamp=time; pointer.lastX=x; pointer.lastY=y; pointer.x=x; pointer.y=y;
+      pointer.rawX=x*2-1; pointer.rawY=y*2-1; pointer.last=visualTime; pointer.inside=true;
+    }
+    function updateWind(dt) {
+      const active=pointer.down ? 1 : pointer.inside ? Math.exp(-Math.max(0,visualTime-pointer.last-.85)/2.1) : 0;
+      pointer.speed=damp(pointer.speed,0,1.5,dt);
+      // Reversed One Euro response: rapid input lowers the cutoff instead of amplifying jitter.
+      const cutoff=clamp(2.35/(1+pointer.speed*.8),.1,2.35),a=1-Math.exp(-TAU*cutoff*dt);
+      pointer.fx=lerp(pointer.fx,pointer.inside ? pointer.rawX : 0,a); pointer.fy=lerp(pointer.fy,pointer.inside ? pointer.rawY : 0,a);
+      const deadzone=v=>Math.sign(v)*Math.pow(Math.max(0,Math.abs(v)-.055)/.945,1.7);
+      const x=deadzone(pointer.fx)*active,y=-deadzone(pointer.fy)*active*.75;
+      const yaw=camera.current.yaw*DEG;
+      const forceX=x*Math.cos(yaw)-y*Math.sin(yaw),forceZ=x*Math.sin(yaw)+y*Math.cos(yaw);
+      wind.vx+=(forceX*195-wind.x*.43-wind.vx*1.35)*dt;
+      wind.vz+=(forceZ*185-wind.z*.43-wind.vz*1.35)*dt;
+      wind.x=clamp(wind.x+wind.vx*dt,-620,620); wind.z=clamp(wind.z+wind.vz*dt,-700,700);
+      wind.strength=damp(wind.strength,clamp(Math.hypot(x,y),0,1),1.4,dt);
+      pointer.alpha=damp(pointer.alpha,pointer.inside ? active : 0,3,dt);
+    }
+    function selectClimate(index) {
+      if (started || index===selectedClimate) return;
+      previewSnapshot=document.createElement('canvas'); previewSnapshot.width=canvas.width; previewSnapshot.height=canvas.height;
+      previewSnapshot.getContext('2d').drawImage(canvas,0,0); previewFade=1;
+      selectedClimate=index; travel=index*SEGMENT+2540; origin=travel;
+      camera.targetX=riverX(travel)-155; camera.targetZ=travel+50;
+      wind.x=0; wind.z=0; wind.vx=0; wind.vz=0;
+      renderer.chunks.clear();
+      for (const b of flock.birds) { b.x=b.bx; b.y=b.by; b.z=b.bz; b.vx=0; b.vy=0; b.vz=0; }
+      for (const p of renderer.particles) { p.z=travel+(hash(p.id,index,888)-.5)*4000; p.x=riverX(travel)+(hash(p.id,index,889)-.5)*2800; }
+      setClimateSelection(); camera.buildBasis(); needsRender=true;
+    }
+    function setClimateSelection() {
+      document.querySelectorAll('.climate').forEach(button=>{
+        const selected=Number(button.dataset.climate)===selectedClimate;
+        button.setAttribute('aria-checked',String(selected)); button.tabIndex=selected ? 0 : -1;
+      });
+    }
+    function updatePoetry() {
+      const container=$('poetry');
+      container.classList.toggle('off',!poemEnabled);
+      if (!started) return;
+      const index=Math.floor(flightTime/26)%poems.length,within=flightTime%26;
+      if (index!==lastPoem) {
+        lastPoem=index; container.classList.remove('reveal');
+        const fragment=document.createDocumentFragment(),lines=poems[index][0].split('\n'); let n=0;
+        lines.forEach((line,lineIndex)=>{
+          for (const character of line) { const span=document.createElement('span'); span.textContent=character; span.style.setProperty('--delay',`${.7+n*.12}s`); span.setAttribute('aria-hidden','true'); fragment.append(span); n++; }
+          if (lineIndex<lines.length-1) fragment.append(document.createElement('br'));
+        });
+        const accessible=document.createElement('span'); accessible.className='sr-only'; accessible.textContent=poems[index][0]; fragment.append(accessible);
+        $('poetryText').replaceChildren(fragment); $('poetryTranslation').textContent=poems[index][1];
+        void container.offsetWidth; container.classList.add('reveal');
+      }
+      container.style.opacity=within>23.5 ? '0' : '1';
+    }
+    function togglePoetry() {
+      poemEnabled=!poemEnabled; $('poemButton').setAttribute('aria-pressed',String(poemEnabled));
+      $('poemButton').setAttribute('aria-label',poemEnabled ? '隐藏诗句' : '显示诗句');
+      if (poemEnabled) lastPoem=-1;
+      updatePoetry();
+    }
+    function updateUI(dt) {
+      const c=climateAt(camera.targetX,camera.targetZ),ink=colorAt(c,'ink'),paper=colorAt(c,'sky');
+      const blend=1-Math.exp(-2.3*dt); uiInk=mix(uiInk,ink,blend); uiPaper=mix(uiPaper,paper,blend);
+      const root=document.documentElement;
+      root.style.setProperty('--ink',rgb(uiInk)); root.style.setProperty('--ink-rgb',uiInk.map(Math.round).join(','));
+      root.style.setProperty('--paper',rgb(uiPaper)); root.style.setProperty('--paper-rgb',uiPaper.map(Math.round).join(','));
+      $('cameraName').textContent=stage.classList.contains('tiny') ? camera.label.name : `${camera.label.name} · ${camera.label.en}`;
+      $('variation').textContent=`VAR ${String(camera.cycle+1).padStart(2,'0')}`;
+      const current=c.t>.5 ? c.b : c.a;
+      const atFront=c.a!==c.b && c.t>.08 && c.t<.92;
+      $('locationLabel').textContent=atFront ? `${styles[c.a].name} / ${styles[c.b].name}` : `${styles[current].name} / ${styles[current].en}`;
+      $('locationSub').textContent=started ? (atFront ? `${styles[c.a].en} TO ${styles[c.b].en}` : 'SOMEWHERE, ON THE WAY') : `DEPARTURE NO. ${String(current+1).padStart(2,'0')}`;
+      $('compassNeedle').style.transform=`rotate(${-camera.current.yaw}deg)`;
+      const minutes=Math.floor(flightTime/60),seconds=Math.floor(flightTime%60);
+      $('journeyMeter').textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')} / ${Math.max(0,(travel-origin)/1000).toFixed(2)} KM`;
+      updatePoetry();
+    }
+    async function acquireWakeLock() {
+      if (!started || document.hidden || !navigator.wakeLock || wakeLock || wakeRequest) return;
+      wakeRequest=true;
+      try {
+        const lock=await navigator.wakeLock.request('screen');
+        if (!started) { await lock.release(); return; }
+        wakeLock=lock; lock.addEventListener('release',()=>{ if (wakeLock===lock) wakeLock=null; });
+      } catch (error) { /* Permission and battery policies must never block the journey. */ }
+      finally { wakeRequest=false; }
+    }
+    async function enterFullscreen(quiet=false) {
+      const element=document.documentElement;
+      try {
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+          if (element.requestFullscreen) await element.requestFullscreen({navigationUI:'hide'});
+          else if (element.webkitRequestFullscreen) await element.webkitRequestFullscreen();
+          else { if (!quiet) toast('此设备暂不支持全屏，可以在当前窗口继续飞行。'); return; }
+        }
+        try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (error) { /* CSS rotation remains available when orientation lock is denied. */ }
+      } catch (error) { if (!quiet) toast('全屏未获允许，旅程仍会在当前窗口继续。'); }
+      acquireWakeLock();
+    }
+    async function toggleFullscreen() {
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        try { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) await document.webkitExitFullscreen(); } catch (error) { toast('可使用浏览器的退出全屏操作。'); }
+      } else await enterFullscreen();
+    }
+    function syncFullscreen() {
+      const active=Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+      $('fullscreenButton').setAttribute('aria-pressed',String(active)); $('fullscreenButton').setAttribute('aria-label',active ? '退出全屏' : '进入全屏');
+      if (!active && screen.orientation && screen.orientation.unlock) { try { screen.orientation.unlock(); } catch(error) {} }
+      requestAnimationFrame(resize);
+    }
+    function beginJourney() {
+      if (started) return;
+      started=true; paused=false; flightTime=0; origin=travel; lastPoem=-1;
+      stage.classList.add('flying'); stage.classList.remove('paused'); $('intro').inert=true;
+      $('pauseButton').setAttribute('aria-pressed','false'); $('pauseButton').setAttribute('aria-label','暂停旅程');
+      camera.reset(); if (reducedMotion) camera.setMode('manual');
+      if (!sound.touched || sound.enabled) sound.setEnabled(true,false);
+      enterFullscreen(true); acquireWakeLock();
+      updateHint(); updatePoetry(); canvas.focus({preventScroll:true}); needsRender=true;
+    }
+    function returnHome() {
+      if (!started) return;
+      started=false; paused=false; stage.classList.remove('flying','paused'); $('intro').inert=false;
+      camera.setMode('auto'); pointer.down=false; pointer.inside=false; pointers.clear();
+      const c=climateAt(camera.targetX,camera.targetZ); selectedClimate=c.t>.5 ? c.b : c.a; setClimateSelection();
+      $('poetry').style.opacity='0'; if (wakeLock) wakeLock.release().catch(()=>{});
+      $('beginButton').focus({preventScroll:true}); needsRender=true;
+    }
+    function togglePause() {
+      if (!started) return;
+      paused=!paused; stage.classList.toggle('paused',paused);
+      $('pauseButton').setAttribute('aria-pressed',String(paused)); $('pauseButton').setAttribute('aria-label',paused ? '继续旅程' : '暂停旅程');
+      $('pauseButton').title=paused ? '继续旅程 [Space]' : '暂停旅程 [Space]';
+      needsRender=true;
+    }
+    function openAbout() {
+      if (!$('aboutOverlay').hidden) return;
+      lastFocused=document.activeElement; $('aboutOverlay').hidden=false;
+      pointer.inside=false; pointer.down=false; pointers.clear();
+      for (const element of document.querySelectorAll('.topbar,.intro,.footer,#world')) element.inert=true;
+      $('closeAboutButton').focus({preventScroll:true});
+    }
+    function closeAbout() {
+      $('aboutOverlay').hidden=true;
+      for (const element of document.querySelectorAll('.topbar,.footer,#world')) element.inert=false;
+      $('intro').inert=started;
+      if (lastFocused && !lastFocused.inert) lastFocused.focus({preventScroll:true});
+      lastFrame=performance.now();
+    }
+
+    $('beginButton').addEventListener('click',beginJourney);
+    $('homeButton').addEventListener('click',returnHome);
+    $('soundButton').addEventListener('click',()=>sound.setEnabled(!sound.enabled));
+    $('poemButton').addEventListener('click',togglePoetry);
+    $('pauseButton').addEventListener('click',togglePause);
+    $('autoCameraButton').addEventListener('click',()=>camera.setMode('auto'));
+    $('manualCameraButton').addEventListener('click',()=>camera.setMode('manual'));
+    $('fullscreenButton').addEventListener('click',toggleFullscreen);
+    $('aboutButton').addEventListener('click',openAbout);
+    $('closeAboutButton').addEventListener('click',closeAbout);
+    $('aboutOverlay').addEventListener('click',event=>{ if(event.target===$('aboutOverlay')) closeAbout(); });
+    const climateButtons=Array.from(document.querySelectorAll('.climate'));
+    climateButtons.forEach((button,index)=>{
+      button.addEventListener('click',()=>selectClimate(Number(button.dataset.climate)));
+      button.addEventListener('keydown',event=>{
+        if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key)) return;
+        event.preventDefault();
+        const next=event.key==='Home' ? 0 : event.key==='End' ? climateButtons.length-1 : mod(index+(['ArrowRight','ArrowDown'].includes(event.key) ? 1 : -1),climateButtons.length);
+        climateButtons[next].click(); climateButtons[next].focus({preventScroll:true});
+      });
+    });
+
+    function startGesture() {
+      const points=Array.from(pointers.values());
+      if (points.length>=2) {
+        gesture={pinch:true,gap:Math.max(15,Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y)),distance:camera.manual.distance,observe:camera.observe};
+        pointer.down=false; pointer.inside=false;
+      } else if (points.length===1) gesture={pinch:false,x:points[0].x,y:points[0].y,yaw:camera.manual.yaw,pitch:camera.manual.pitch};
+      else gesture=null;
+    }
+    canvas.addEventListener('pointerdown',event=>{
+      if (event.pointerType==='mouse' && event.button!==0) return;
+      event.preventDefault(); const point=stagePoint(event); pointers.set(event.pointerId,point);
+      try { canvas.setPointerCapture(event.pointerId); } catch(error) {}
+      startGesture();
+      if ((camera.mode==='auto' || !started) && pointers.size===1) { pointer.down=true; inputWind(point); }
+      else { pointer.inside=false; stage.classList.add('dragging'); }
+      canvas.focus({preventScroll:true});
+    });
+    canvas.addEventListener('pointermove',event=>{
+      const point=stagePoint(event);
+      if (pointers.has(event.pointerId)) pointers.set(event.pointerId,point);
+      if (pointers.size>=2 && gesture && gesture.pinch) {
+        const points=Array.from(pointers.values()),gap=Math.max(15,Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y));
+        if (camera.mode==='manual') camera.manual.distance=clamp(gesture.distance*gesture.gap/gap,470,3300);
+        else { camera.observe=clamp(gesture.observe+(gesture.gap-gap)*1.6,-180,620); camera.lastWheel=visualTime; }
+        return;
+      }
+      if (started && camera.mode==='manual' && pointers.has(event.pointerId) && gesture && !gesture.pinch) {
+        camera.manual.yaw=gesture.yaw+(point.x-gesture.x)*.24;
+        camera.manual.pitch=clamp(gesture.pitch+(point.y-gesture.y)*.18,8,87);
+      } else inputWind(point);
+    });
+    function releasePointer(event) {
+      pointers.delete(event.pointerId); pointer.down=pointers.size===1 && camera.mode==='auto';
+      if (!pointers.size) { stage.classList.remove('dragging'); pointer.last=visualTime-.7; if (event.pointerType!=='mouse' || event.type==='pointercancel') pointer.inside=false; }
+      else if (pointers.size===1 && camera.mode==='auto') inputWind(Array.from(pointers.values())[0]);
+      try { if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId); } catch(error) {}
+      startGesture();
+    }
+    canvas.addEventListener('pointerup',releasePointer);
+    canvas.addEventListener('pointercancel',releasePointer);
+    canvas.addEventListener('lostpointercapture',event=>{ if (pointers.has(event.pointerId)) releasePointer(event); });
+    canvas.addEventListener('pointerleave',()=>{ if (!pointer.down) pointer.inside=false; });
+    canvas.addEventListener('wheel',event=>{
+      event.preventDefault(); const delta=event.deltaY*(event.deltaMode===1 ? 16 : event.deltaMode===2 ? H : 1);
+      if (started && camera.mode==='manual') camera.manual.distance=clamp(camera.manual.distance*Math.exp(clamp(delta,-250,250)*.0015),470,3300);
+      else { camera.observe=clamp(camera.observe+delta*.55,-180,620); camera.lastWheel=visualTime; }
+    },{passive:false});
+    canvas.addEventListener('contextmenu',event=>event.preventDefault());
+    document.addEventListener('keydown',event=>{
+      if (!$('aboutOverlay').hidden) {
+        if (event.key==='Escape') { event.preventDefault(); closeAbout(); }
+        else if (event.key==='Tab') { event.preventDefault(); $('closeAboutButton').focus(); }
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const key=event.key.toLowerCase();
+      if (key==='m') { event.preventDefault(); sound.setEnabled(!sound.enabled); }
+      else if (key==='p' && started) { event.preventDefault(); togglePoetry(); }
+      else if (key==='c' && started) { event.preventDefault(); camera.setMode(camera.mode==='auto' ? 'manual' : 'auto'); }
+      else if (key==='f') { event.preventDefault(); toggleFullscreen(); }
+      else if (key===' ' && started && event.target.tagName!=='BUTTON') { event.preventDefault(); togglePause(); }
+      else if (key==='escape') { pointer.down=false; pointer.inside=false; pointers.clear(); }
+    });
+    document.addEventListener('fullscreenchange',syncFullscreen);
+    document.addEventListener('webkitfullscreenchange',syncFullscreen);
+    document.addEventListener('visibilitychange',()=>{
+      lastFrame=performance.now();
+      pointer.down=false; pointer.inside=false; pointers.clear(); sound.visibility(document.hidden);
+      if (!document.hidden) { acquireWakeLock(); needsRender=true; }
+    });
+    window.addEventListener('pagehide',()=>{ sound.visibility(true); if(wakeLock) wakeLock.release().catch(()=>{}); });
+    window.addEventListener('pageshow',()=>{ lastFrame=performance.now(); sound.visibility(false); acquireWakeLock(); });
+    window.addEventListener('resize',resize);
+    if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+
+    function frame(stamp) {
+      const wallDt=lastFrame ? clamp((stamp-lastFrame)/1000,0,.12) : 1/60; lastFrame=stamp;
+      const dt=paused || document.hidden || !$('aboutOverlay').hidden ? 0 : wallDt;
+      if (dt>0) {
+        visualTime+=dt;
+        if (started) flightTime+=dt;
+        const speed=started ? (108+Math.sin(visualTime*.031)*3+(noise1(travel/3500,145)-.5)*7)*(reducedMotion ? .64 : 1) : (reducedMotion ? 3 : 9);
+        travel+=speed*dt;
+        camera.update(dt);
+        const steps=Math.max(1,Math.ceil(dt/.025)),step=dt/steps;
+        for (let i=0;i<steps;i++) { updateWind(step); flock.update(step); }
+        renderer.updateParticles(dt);
+      }
+      if (dt>0 || needsRender || previewFade>0) {
+        renderer.render(); needsRender=false;
+        if (previewSnapshot && previewFade>0) {
+          previewFade=Math.max(0,previewFade-wallDt/1.9);
+          ctx.globalAlpha=smoother(previewFade); ctx.drawImage(previewSnapshot,0,0,W,H); ctx.globalAlpha=1;
+          if (previewFade===0) previewSnapshot=null;
+        }
+      }
+      uiTick+=wallDt;
+      if (uiTick>.12) { updateUI(uiTick); sound.update(); uiTick=0; }
+      requestAnimationFrame(frame);
+    }
+    resize(); updateHint(); updateUI(.1); camera.buildBasis(); renderer.render();
+    requestAnimationFrame(frame);
+  })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" async></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d141c3a99edb7c',t:'MTc4OTc0NDAxMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

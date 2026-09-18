@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Godzilla — Legendary 3D</title>
+<style>
+  html,body{margin:0;height:100%;background:#05070a;overflow:hidden;
+            font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;}
+  canvas{display:block;width:100%;height:100%;cursor:grab;}
+  canvas:active{cursor:grabbing;}
+  #hud{position:fixed;left:18px;bottom:16px;color:#3d5566;font-size:11.5px;
+       letter-spacing:.14em;pointer-events:none;user-select:none;text-transform:uppercase}
+  #title{position:fixed;left:18px;top:16px;color:#4a6070;font-size:12px;
+       letter-spacing:.4em;pointer-events:none;user-select:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">G O D Z I L L A</div>
+<div id="hud">拖动旋转 · 滚轮缩放</div>
+<script>
+"use strict";
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', {antialias:true, alpha:false, premultipliedAlpha:false});
+if(!gl){ document.body.innerHTML = '<p style="color:#fff;padding:20px">WebGL 不可用</p>'; throw new Error('no webgl'); }
+
+function m4mul(a,b){
+  const o = new Float32Array(16);
+  for(let c=0;c<4;c++){
+    const b0=b[c*4], b1=b[c*4+1], b2=b[c*4+2], b3=b[c*4+3];
+    o[c*4  ] = a[0]*b0 + a[4]*b1 + a[8 ]*b2 + a[12]*b3;
+    o[c*4+1] = a[1]*b0 + a[5]*b1 + a[9 ]*b2 + a[13]*b3;
+    o[c*4+2] = a[2]*b0 + a[6]*b1 + a[10]*b2 + a[14]*b3;
+    o[c*4+3] = a[3]*b0 + a[7]*b1 + a[11]*b2 + a[15]*b3;
+  }
+  return o;
+}
+function m4trans(x,y,z){ return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]); }
+function m4scale(x,y,z){ return new Float32Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]); }
+function m4rotX(a){ const c=Math.cos(a), s=Math.sin(a);
+  return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]); }
+function m4rotY(a){ const c=Math.cos(a), s=Math.sin(a);
+  return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); }
+function m4rotZ(a){ const c=Math.cos(a), s=Math.sin(a);
+  return new Float32Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]); }
+function m4compose(p, r, s){
+  let m = m4trans(p[0],p[1],p[2]);
+  m = m4mul(m, m4rotZ(r[2]));
+  m = m4mul(m, m4rotY(r[1]));
+  m = m4mul(m, m4rotX(r[0]));
+  m = m4mul(m, m4scale(s[0],s[1],s[2]));
+  return m;
+}
+function m4persp(fovy, aspect, near, far){
+  const f = 1/Math.tan(fovy/2), nf = 1/(near-far);
+  return new Float32Array([
+    f/aspect,0,0,0, 0,f,0,0,
+    0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0
+  ]);
+}
+function m4lookAt(eye, ctr, up){
+  let zx=eye[0]-ctr[0], zy=eye[1]-ctr[1], zz=eye[2]-ctr[2];
+  let l = Math.hypot(zx,zy,zz)||1; zx/=l; zy/=l; zz/=l;
+  let xx = up[1]*zz - up[2]*zy, xy = up[2]*zx - up[0]*zz, xz = up[0]*zy - up[1]*zx;
+  l = Math.hypot(xx,xy,xz)||1; xx/=l; xy/=l; xz/=l;
+  const yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+  return new Float32Array([
+    xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0,
+    -(xx*eye[0]+xy*eye[1]+xz*eye[2]),
+    -(yx*eye[0]+yy*eye[1]+yz*eye[2]),
+    -(zx*eye[0]+zy*eye[1]+zz*eye[2]), 1
+  ]);
+}
+function normalMat3(m){
+  const a00=m[0],a01=m[1],a02=m[2];
+  const a10=m[4],a11=m[5],a12=m[6];
+  const a20=m[8],a21=m[9],a22=m[10];
+  const b01 = a22*a11 - a12*a21;
+  const b11 = -a22*a10 + a12*a20;
+  const b21 = a21*a10 - a11*a20;
+  let det = a00*b01 + a01*b11 + a02*b21;
+  if(!det) return new Float32Array([1,0,0, 0,1,0, 0,0,1]);
+  det = 1/det;
+  const i00 = b01*det;
+  const i01 = (-a22*a01 + a02*a21)*det;
+  const i02 = ( a12*a01 - a02*a11)*det;
+  const i10 = b11*det;
+  const i11 = ( a22*a00 - a02*a20)*det;
+  const i12 = (-a12*a00 + a02*a10)*det;
+  const i20 = b21*det;
+  const i21 = (-a21*a00 + a01*a20)*det;
+  const i22 = ( a11*a00 - a01*a10)*det;
+  return new Float32Array([i00,i10,i20, i01,i11,i21, i02,i12,i22]);
+}
+
+const VS = `
+attribute vec3 aPos;
+attribute vec3 aNrm;
+uniform mat4 uProj, uView, uModel;
+uniform mat3 uNrmMat;
+varying vec3 vN; varying vec3 vW; varying vec3 vL;
+void main(){
+  vec4 wp = uModel * vec4(aPos, 1.0);
+  vW = wp.xyz; vL = aPos;
+  vN = uNrmMat * aNrm;
+  gl_Position = uProj * uView * wp;
+}`;
+
+const FS = `
+precision highp float;
+varying vec3 vN; varying vec3 vW; varying vec3 vL;
+uniform vec3 uColor; uniform vec3 uCam; uniform vec3 uLight;
+uniform float uEmissive; uniform float uShine;
+float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+void main(){
+  vec3 N = vN;
+  float nl = length(N);
+  if(nl < 0.001) N = vec3(0.0,1.0,0.0); else N /= nl;
+  if(!gl_FrontFacing) N = -N;
+  vec3 V = normalize(uCam - vW);
+  vec3 L = normalize(uLight);
+  vec3 H = normalize(L + V);
+  float diff = max(dot(N, L), 0.0);
+  float spec = pow(max(dot(N, H), 0.0), uShine) * 0.45;
+  float rim  = pow(1.0 - max(dot(N, V), 0.0), 2.6);
+  vec3 q = floor(vL * 34.0);
+  float n = hash21(q.xy + q.z * 0.137);
+  float bump = 0.86 + 0.30 * n;
+  vec3 skyAmb = mix(vec3(0.05,0.07,0.10), vec3(0.12,0.15,0.19), N.y*0.5+0.5);
+  vec3 col = uColor * (0.35 + 0.95 * diff * bump) + skyAmb * uColor * 1.6;
+  col += vec3(1.0,0.96,0.90) * spec;
+  col += vec3(0.32,0.55,0.90) * rim * 0.55;
+  col += uColor * uEmissive;
+  float d = length(uCam - vW);
+  float f = clamp((d - 8.0) / 26.0, 0.0, 0.92);
+  col = mix(col, vec3(0.018,0.024,0.038), f);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const A = { pos: gl.getAttribLocation(prog,'aPos'), nrm: gl.getAttribLocation(prog,'aNrm') };
+const U = {
+  proj: gl.getUniformLocation(prog,'uProj'), view: gl.getUniformLocation(prog,'uView'),
+  model: gl.getUniformLocation(prog,'uModel'), nrmMat: gl.getUniformLocation(prog,'uNrmMat'),
+  color: gl.getUniformLocation(prog,'uColor'), cam: gl.getUniformLocation(prog,'uCam'),
+  light: gl.getUniformLocation(prog,'uLight'), emissive: gl.getUniformLocation(prog,'uEmissive'),
+  shine: gl.getUniformLocation(prog,'uShine')
+};
+
+gl.enable(gl.DEPTH_TEST);
+gl.disable(gl.CULL_FACE);
+gl.clearColor(0.018,0.024,0.038,1);
+
+function makeMesh(verts, faces){
+  const n = verts.length / 3;
+  const nrm = new Float32Array(verts.length);
+  for(let i=0;i<faces.length;i+=3){
+    const a=faces[i]*3, b=faces[i+1]*3, c=faces[i+2]*3;
+    const e1x=verts[b]-verts[a], e1y=verts[b+1]-verts[a+1], e1z=verts[b+2]-verts[a+2];
+    const e2x=verts[c]-verts[a], e2y=verts[c+1]-verts[a+1], e2z=verts[c+2]-verts[a+2];
+    const nx = e1y*e2z - e1z*e2y, ny = e1z*e2x - e1x*e2z, nz = e1x*e2y - e1y*e2x;
+    nrm[a]+=nx; nrm[a+1]+=ny; nrm[a+2]+=nz;
+    nrm[b]+=nx; nrm[b+1]+=ny; nrm[b+2]+=nz;
+    nrm[c]+=nx; nrm[c+1]+=ny; nrm[c+2]+=nz;
+  }
+  for(let i=0;i<n;i++){
+    const x=nrm[i*3], y=nrm[i*3+1], z=nrm[i*3+2];
+    const l = Math.hypot(x,y,z) || 1;
+    nrm[i*3]=x/l; nrm[i*3+1]=y/l; nrm[i*3+2]=z/l;
+  }
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+  const nrmBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.STATIC_DRAW);
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(faces), gl.STATIC_DRAW);
+  return { posBuf, nrmBuf, idxBuf, count: faces.length, indexed: true };
+}
+
+function makeMeshFlat(verts, faces){
+  const nTri = faces.length / 3;
+  const pos = new Float32Array(nTri * 9), nrm = new Float32Array(nTri * 9);
+  for(let t=0;t<nTri;t++){
+    const a=faces[t*3]*3, b=faces[t*3+1]*3, c=faces[t*3+2]*3;
+    const ax=verts[a], ay=verts[a+1], az=verts[a+2];
+    const bx=verts[b], by=verts[b+1], bz=verts[b+2];
+    const cx=verts[c], cy=verts[c+1], cz=verts[c+2];
+    const e1x=bx-ax, e1y=by-ay, e1z=bz-az;
+    const e2x=cx-ax, e2y=cy-ay, e2z=cz-az;
+    let nx = e1y*e2z - e1z*e2y, ny = e1z*e2x - e1x*e2z, nz = e1x*e2y - e1y*e2x;
+    const l = Math.hypot(nx,ny,nz);
+    if(l < 0.0001){ nx=0; ny=1; nz=0; } else { nx/=l; ny/=l; nz/=l; }
+    pos[t*9+0]=ax; pos[t*9+1]=ay; pos[t*9+2]=az;
+    pos[t*9+3]=bx; pos[t*9+4]=by; pos[t*9+5]=bz;
+    pos[t*9+6]=cx; pos[t*9+7]=cy; pos[t*9+8]=cz;
+    for(let k=0;k<3;k++){ nrm[t*9+k*3+0]=nx; nrm[t*9+k*3+1]=ny; nrm[t*9+k*3+2]=nz; }
+  }
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+  const nrmBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.STATIC_DRAW);
+  return { posBuf, nrmBuf, idxBuf: null, count: nTri * 3, indexed: false };
+}
+
+function sphereGeo(segU, segV){
+  segU = segU||22; segV = segV||14;
+  const verts=[], faces=[];
+  for(let v=0;v<=segV;v++){
+    const phi = v/segV*Math.PI, sp = Math.sin(phi), cp = Math.cos(phi);
+    for(let u=0;u<=segU;u++){
+      const th = u/segU*Math.PI*2;
+      verts.push(sp*Math.cos(th), cp, sp*Math.sin(th));
+    }
+  }
+  for(let v=0;v<segV;v++) for(let u=0;u<segU;u++){
+    const a = v*(segU+1)+u, b = a+segU+1;
+    faces.push(a, b, a+1, a+1, b, b+1);
+  }
+  return makeMesh(verts, faces);
+}
+
+function sphereGeoFlat(segU, segV){
+  const verts=[], faces=[];
+  for(let v=0;v<=segV;v++){
+    const phi = v/segV*Math.PI, sp = Math.sin(phi), cp = Math.cos(phi);
+    for(let u=0;u<=segU;u++){
+      const th = u/segU*Math.PI*2;
+      verts.push(sp*Math.cos(th), cp, sp*Math.sin(th));
+    }
+  }
+  for(let v=0;v<segV;v++) for(let u=0;u<segU;u++){
+    const a = v*(segU+1)+u, b = a+segU+1;
+    faces.push(a, b, a+1, a+1, b, b+1);
+  }
+  return makeMeshFlat(verts, faces);
+}
+
+function coneGeo(rTop, rBot, len, seg, capBot){
+  seg = seg||16; capBot = capBot!==false;
+  const verts=[], faces=[];
+  for(let i=0;i<=seg;i++){
+    const th = i/seg*Math.PI*2, c = Math.cos(th), s = Math.sin(th);
+    verts.push(c*rTop, 0, s*rTop);
+    verts.push(c*rBot, -len, s*rBot);
+  }
+  for(let i=0;i<seg;i++){ const a = i*2; faces.push(a,a+1,a+2, a+2,a+1,a+3); }
+  if(capBot && rBot > 0.0005){
+    const cIdx = verts.length/3;
+    verts.push(0, -len, 0);
+    for(let i=0;i<seg;i++) faces.push(cIdx, i*2+1, i*2+3);
+  }
+  return makeMesh(verts, faces);
+}
+
+function profileGeo(profile, seg, capBottom, capTop){
+  seg = seg||24;
+  const verts=[], faces=[];
+  const N = profile.length;
+  for(let i=0;i<N;i++){
+    const p = profile[i];
+    const rzF = p.rzF !== undefined ? p.rzF : p.rz;
+    const rzB = p.rzB !== undefined ? p.rzB : p.rz;
+    for(let u=0;u<=seg;u++){
+      const th = u/seg*Math.PI*2;
+      const c = Math.cos(th), s = Math.sin(th);
+      const rz = s >= 0 ? rzF : rzB;
+      verts.push(p.x + c*p.rx, p.y, p.z + s*rz);
+    }
+  }
+  for(let i=0;i<N-1;i++) for(let u=0;u<seg;u++){
+    const a = i*(seg+1)+u, b = a+seg+1;
+    faces.push(a, b, a+1, a+1, b, b+1);
+  }
+  if(capBottom){
+    const c = verts.length/3;
+    verts.push(profile[0].x, profile[0].y, profile[0].z);
+    for(let u=0;u<seg;u++) faces.push(c, u+1, u);
+  }
+  if(capTop){
+    const base = (N-1)*(seg+1);
+    const c = verts.length/3;
+    const lp = profile[N-1];
+    verts.push(lp.x, lp.y, lp.z);
+    for(let u=0;u<seg;u++) faces.push(c, base+u, base+u+1);
+  }
+  return makeMesh(verts, faces);
+}
+
+function finGeo(w, h, t){
+  const v = [-t,-w,0, t,-w,0, t,w,0, -t,w,0, 0,h*0.15,-h];
+  const f = [0,1,4, 1,2,4, 2,3,4, 3,0,4, 0,3,2, 0,2,1];
+  return makeMesh(v, f);
+}
+
+function planeGeo(size){
+  const s = size/2;
+  return makeMesh([-s,0,-s, s,0,-s, s,0,s, -s,0,s], [0,1,2, 0,2,3]);
+}
+
+const BALL = sphereGeo(22, 14);
+const BALL_LP = sphereGeoFlat(10, 6);
+
+const TORSO = profileGeo([
+  {y:0.94, x:0, z:-0.22, rx:0.28, rz:0.42},
+  {y:1.06, x:0, z:-0.20, rx:0.40, rz:0.56},
+  {y:1.24, x:0, z:-0.18, rx:0.47, rz:0.66},
+  {y:1.44, x:0, z:-0.12, rx:0.58, rz:0.76},
+  {y:1.66, x:0, z:-0.04, rx:0.73, rz:0.80},
+  {y:1.86, x:0, z:0.00,  rx:0.70, rz:0.78},
+  {y:2.06, x:0, z:0.05,  rx:0.61, rz:0.68},
+  {y:2.28, x:0, z:0.10,  rx:0.58, rz:0.64},
+  {y:2.50, x:0, z:0.14,  rx:0.53, rzF:0.54, rzB:0.58},
+  {y:2.62, x:0, z:0.16,  rx:0.50, rzF:0.50, rzB:0.58},
+  {y:2.70, x:0, z:0.18,  rx:0.48, rzF:0.46, rzB:0.58}
+], 26, true, true);
+
+const NECK = profileGeo([
+  {y:2.68, x:0, z:0.18, rx:0.48, rzF:0.46, rzB:0.58},
+  {y:2.86, x:0, z:0.28, rx:0.44, rzF:0.42, rzB:0.54},
+  {y:3.04, x:0, z:0.40, rx:0.36, rzF:0.36, rzB:0.48},
+  {y:3.22, x:0, z:0.52, rx:0.30, rzF:0.32, rzB:0.44}
+], 22, false, false);
+
+const NECK_LINK  = coneGeo(0.24, 0.28, 0.20, 18, true);
+const NECK_LINK2 = coneGeo(0.28, 0.32, 0.20, 18, true);
+const NECK_LINK3 = coneGeo(0.32, 0.38, 0.28, 18, true);
+
+const PUBIS = sphereGeo(18, 12);
+const SHOULDER_BLEND = sphereGeo(16, 12);
+const JOINT_FILL = sphereGeo(16, 12);
+const THIGH = coneGeo(0.42, 0.30, 0.92, 18, true);
+const SHIN  = coneGeo(0.30, 0.20, 0.85, 18, true);
+const UARM  = coneGeo(0.17, 0.145, 0.46, 14, true);
+const FARM  = coneGeo(0.15, 0.125, 0.44, 14, true);
+const FOOT_GEO = coneGeo(0.20, 0.30, 0.22, 14, true);
+
+const TAIL_N = 14, TAIL_LEN = 0.30, TAIL = [];
+for(let i=0;i<TAIL_N;i++){
+  const t0 = i/TAIL_N, t1 = (i+1)/TAIL_N;
+  const r0 = 0.44*Math.pow(1-t0, 0.72) + 0.025;
+  const r1 = 0.44*Math.pow(1-t1, 0.72) + 0.025;
+  TAIL.push(coneGeo(r0, r1, TAIL_LEN, 14, i < TAIL_N-1));
+}
+
+const FIN_BIG   = finGeo(0.16, 0.62, 0.040);
+const FIN_MED   = finGeo(0.14, 0.50, 0.034);
+const FIN_SMALL = finGeo(0.11, 0.36, 0.028);
+const FIN_TINY  = finGeo(0.08, 0.24, 0.022);
+const FIN_MICRO = finGeo(0.055, 0.16, 0.016);
+const FIN_NANO  = finGeo(0.040, 0.11, 0.012);
+const GROUND = planeGeo(400);
+
+const C_SKIN  = [0.115, 0.135, 0.095];
+const C_BELLY = [0.150, 0.165, 0.120];
+const C_FIN   = [0.22,  0.235, 0.205];
+const C_FIN2  = [0.28,  0.285, 0.255];
+const C_FINGER = [0.145, 0.165, 0.120];
+const C_CLAW  = [0.145, 0.165, 0.125];
+const C_EYE   = [1.0,   0.55,  0.10];
+const C_GROUND= [0.035, 0.042, 0.052];
+
+const drawList = [];
+function push(mesh, color, world, emissive, shine){
+  drawList.push({ mesh, color, world, emissive: emissive||0, shine: shine||44 });
+}
+
+const FIN_SPOTS = [
+  { y:1.16, z:-0.72, m:FIN_SMALL, rot:-0.30 },
+  { y:1.40, z:-0.80, m:FIN_MED,   rot:-0.18 },
+  { y:1.66, z:-0.78, m:FIN_BIG,   rot:-0.02 },
+  { y:1.92, z:-0.68, m:FIN_BIG,   rot: 0.12 },
+  { y:2.18, z:-0.52, m:FIN_MED,   rot: 0.22 },
+  { y:2.44, z:-0.41, m:FIN_MED,   rot: 0.30 },
+  { y:2.66, z:-0.30, m:FIN_SMALL, rot: 0.38 },
+  { y:2.72, z:-0.40, m:FIN_TINY,  rot: 0.44, rx:0.12 },
+  { y:2.88, z:-0.26, m:FIN_MICRO, rot: 0.50, rx:0.09 },
+  { y:3.03, z:-0.10, m:FIN_MICRO, rot: 0.55, rx:0.07 },
+  { y:3.16, z:0.04,  m:FIN_NANO,  rot: 0.60, rx:0.05 }
+];
+
+const ROOT_Y = 0.37, L_THIGH = 0.92, L_SHIN = 0.85;
+const HIP_Y = 1.42, HIP_Z = -0.20;
+const HIP_X = 0.455;
+const ANKLE_GROUND_Y = -0.12, ANKLE_BACK_Z = -0.55, ANKLE_FRONT_Z = 0.50, ANKLE_LIFT = 0.18;
+const SWING_PORTION = 0.45, EASE_POW = 1.25;
+const HAND_AXIS_TWIST = 0.55, HAND_WRIST_PITCH = 0.35, ARM_SHOULDER_PITCH = -0.15, FIN_SPLAY = 0.38;
+const TAIL_BASE_Y = 1.36, TAIL_BASE_Z = -0.55, TAIL_BASE_ROT = 0.85;
+const BROW_YAW = 0.12;
+
+const LINK_CENTER    = [0, 3.073, 0.051];
+const LINK_FWD_SHIFT = 0.30;
+const LINK_TILT      = -0.32;
+
+function solveLegIK(ankleY, ankleZ){
+  const dy = ankleY - HIP_Y, dz = ankleZ - HIP_Z;
+  let dist = Math.sqrt(dy*dy + dz*dz);
+  const maxDist = (L_THIGH + L_SHIN) * 0.995;
+  const minDist = Math.abs(L_THIGH - L_SHIN) * 1.005;
+  dist = Math.max(minDist, Math.min(maxDist, dist));
+  const phi = Math.atan2(dz, -dy);
+  const cosAlpha = (L_THIGH*L_THIGH + dist*dist - L_SHIN*L_SHIN) / (2*L_THIGH*dist);
+  const alpha = Math.acos(Math.max(-1, Math.min(1, cosAlpha)));
+  const hip = -(phi + alpha);
+  const cosBeta = (L_THIGH*L_THIGH + L_SHIN*L_SHIN - dist*dist) / (2*L_THIGH*L_SHIN);
+  const beta = Math.acos(Math.max(-1, Math.min(1, cosBeta)));
+  const knee = Math.PI - beta;
+  return { hip, knee };
+}
+function legAngles(p){
+  let t = (p / (2*Math.PI)) % 1; if (t < 0) t += 1;
+  let ankleY, ankleZ, swingWeight;
+  if (t < SWING_PORTION){
+    const u = t / SWING_PORTION;
+    const e = Math.pow(u, EASE_POW);
+    ankleZ = ANKLE_BACK_Z + (ANKLE_FRONT_Z - ANKLE_BACK_Z) * e;
+    const liftShape = Math.pow(Math.sin(Math.PI * e), 0.75);
+    ankleY = ANKLE_GROUND_Y + ANKLE_LIFT * liftShape;
+    swingWeight = Math.sin(Math.PI * u);
+  } else {
+    const u = (t - SWING_PORTION) / (1 - SWING_PORTION);
+    ankleZ = ANKLE_FRONT_Z + (ANKLE_BACK_Z - ANKLE_FRONT_Z) * u;
+    ankleY = ANKLE_GROUND_Y;
+    swingWeight = 0;
+  }
+  const { hip, knee } = solveLegIK(ankleY, ankleZ);
+  const ankleBase = -(hip + knee);
+  const relaxFactor = 1 - 0.35 * swingWeight;
+  return { hip, knee, ankle: ankleBase * relaxFactor };
+}
+
+function buildFrame(T){
+  drawList.length = 0;
+  const ph = T * 2.0;
+  const bob  = Math.sin(ph*2) * 0.035 - 0.02;
+  const swayX = Math.sin(ph) * 0.045;
+  const rollZ = Math.sin(ph) * 0.030;
+  const yawY  = Math.sin(ph*0.5) * 0.05;
+  const root = m4compose([swayX, bob + ROOT_Y, 0], [0, yawY, rollZ], [1,1,1]);
+
+  push(TORSO, C_SKIN, root, 0, 34);
+  push(NECK, C_SKIN, root, 0, 34);
+
+  push(PUBIS, C_SKIN, m4mul(root, m4compose(
+    [0, 1.18, -0.12], [0.30, 0, 0], [0.34, 0.25, 0.44]
+  )), 0, 40);
+
+  const cNew = [LINK_CENTER[0], LINK_CENTER[1], LINK_CENTER[2] + LINK_FWD_SHIFT];
+  const linkTransform = m4mul(
+    m4trans(cNew[0], cNew[1], cNew[2]),
+    m4mul(
+      m4rotX(LINK_TILT),
+      m4trans(-LINK_CENTER[0], -LINK_CENTER[1], -LINK_CENTER[2])
+    )
+  );
+
+  const neckW1 = m4mul(root, m4mul(linkTransform, m4compose(
+    [0, 3.30, 0.30], [+1.00, 0, 0], [1, 1, 1]
+  )));
+  push(NECK_LINK, C_SKIN, neckW1, 0, 30);
+  const neckW2 = m4mul(neckW1, m4compose(
+    [0, -0.20, 0], [-0.15, 0, 0], [1, 1, 1]
+  ));
+  push(NECK_LINK2, C_SKIN, neckW2, 0, 30);
+  const neckW3 = m4mul(neckW2, m4compose(
+    [0, -0.20, 0], [-0.15, 0, 0], [1, 1, 1]
+  ));
+  push(NECK_LINK3, C_SKIN, neckW3, 0, 30);
+
+  const nod  = Math.sin(ph*2 + 0.6) * 0.035 - 0.06;
+  const headYaw = Math.sin(ph*0.5 + 1.2) * 0.06;
+  const headPivot = m4mul(root,
+    m4mul(m4trans(0, 3.30, 0.54), m4mul(m4rotY(headYaw), m4rotX(nod))));
+
+  push(BALL_LP, C_SKIN, m4mul(headPivot, m4compose(
+    [0, 0.095, 0.06], [0,0,0], [0.305, 0.21, 0.285])), 0, 50);
+  push(BALL_LP, C_SKIN, m4mul(headPivot, m4compose(
+    [0, 0.058, 0.32], [0,0,0], [0.22, 0.162, 0.285])), 0, 50);
+  push(BALL_LP, C_BELLY, m4mul(headPivot, m4compose(
+    [0, -0.115, 0.32], [0,0,0], [0.17, 0.071, 0.285])), 0, 50);
+  const browL = m4mul(headPivot, m4compose(
+    [ 0.17, 0.18, 0.25], [0, -BROW_YAW, 0.10], [0.071, 0.033, 0.142]));
+  const browR = m4mul(headPivot, m4compose(
+    [-0.17, 0.18, 0.25], [0,  BROW_YAW,-0.10], [0.071, 0.033, 0.142]));
+  push(BALL_LP, C_SKIN, browL, 0, 60);
+  push(BALL_LP, C_SKIN, browR, 0, 60);
+
+  /* ★ 眼睛缩小：0.0315/0.0285 → 0.026/0.0235（缩小约 17%） */
+  const eyeL = m4mul(headPivot, m4compose(
+    [ 0.18, 0.125, 0.265], [0,0,0], [0.026, 0.0235, 0.026]));
+  const eyeR = m4mul(headPivot, m4compose(
+    [-0.18, 0.125, 0.265], [0,0,0], [0.026, 0.0235, 0.026]));
+  push(BALL_LP, C_EYE, eyeL, 1.8, 100);
+  push(BALL_LP, C_EYE, eyeR, 1.8, 100);
+
+  for(let side=0; side<2; side++){
+    const sgn = side === 0 ? 1 : -1;
+    const p = ph + (side === 0 ? 0 : Math.PI);
+    const a = legAngles(p);
+    const hipW = m4mul(root, m4compose(
+      [HIP_X*sgn, HIP_Y, HIP_Z], [a.hip, 0, 0.055*sgn], [1,1,1]));
+    push(JOINT_FILL, C_SKIN, m4mul(root, m4compose(
+      [HIP_X*sgn, HIP_Y, HIP_Z], [0,0,0], [0.34, 0.46, 0.46])), 0, 28);
+    push(THIGH, C_SKIN, hipW, 0, 30);
+    push(JOINT_FILL, C_SKIN, m4mul(hipW, m4compose(
+      [0, -L_THIGH + 0.03, 0.01], [0,0,0], [0.30, 0.31, 0.30])), 0, 28);
+    const kneeW = m4mul(hipW, m4compose([0,-L_THIGH,0], [a.knee, 0, 0], [1,1,1]));
+    push(SHIN, C_SKIN, kneeW, 0, 30);
+    const ankleW = m4mul(kneeW, m4compose([0,-L_SHIN,0], [a.ankle, 0, 0], [1,1,1]));
+    push(JOINT_FILL, C_SKIN, m4mul(ankleW, m4compose(
+      [0, -0.02, 0.02], [0,0,0], [0.21, 0.19, 0.22])), 0, 28);
+    push(FOOT_GEO, C_SKIN, m4mul(ankleW, m4compose(
+      [0, -0.02, 0.03], [0.08, 0, 0], [1, 1, 1])), 0, 30);
+    const toeBase = m4mul(ankleW, m4compose([0, -0.18, 0.18], [0,0,0], [1,1,1]));
+
+    push(BALL, C_CLAW, m4mul(toeBase, m4compose(
+      [-0.08*sgn, 0, 0.02], [0.35, -0.60*sgn, 0.0], [0.11, 0.10, 0.26])), 0, 85);
+    push(BALL, C_CLAW, m4mul(toeBase, m4compose(
+      [0, 0, 0.06], [0.35, 0.0, 0.0], [0.10, 0.09, 0.24])), 0, 85);
+    push(BALL, C_CLAW, m4mul(toeBase, m4compose(
+      [0.08*sgn, 0, 0.02], [0.35, 0.60*sgn, 0.0], [0.085, 0.075, 0.20])), 0, 85);
+    push(BALL, C_CLAW, m4mul(toeBase, m4compose(
+      [0.16*sgn, 0, -0.03], [0.35, 0.90*sgn, 0.0], [0.055, 0.048, 0.14])), 0, 85);
+    push(BALL, C_CLAW, m4mul(toeBase, m4compose(
+      [-0.16*sgn, 0, -0.09], [0.35, -1.39*sgn, 0.0], [0.10, 0.09, 0.23])), 0, 85);
+  }
+
+  const SHOULDER_X = 0.505;
+  const SHOULDER_BLEND_X = 0.425;
+  for(let side=0; side<2; side++){
+    const sgn = side === 0 ? 1 : -1;
+    const swing = Math.sin(ph + 0.8 + side*0.4) * 0.06;
+    push(SHOULDER_BLEND, C_SKIN, m4mul(root, m4compose(
+      [SHOULDER_BLEND_X*sgn, 2.34, 0.42], [0,0,0], [0.26, 0.28, 0.26])), 0, 40);
+    const shW = m4mul(root, m4compose(
+      [SHOULDER_X*sgn, 2.36, 0.50],
+      [ARM_SHOULDER_PITCH + swing, 0, 0.35*sgn], [1,1,1]));
+    push(UARM, C_SKIN, shW, 0, 30);
+    push(JOINT_FILL, C_SKIN, m4mul(shW, m4compose(
+      [0, -0.46 + 0.02, 0], [0,0,0], [0.155, 0.16, 0.155])), 0, 28);
+    const elW = m4mul(shW, m4compose([0,-0.46,0], [-0.50, 0, -0.55*sgn], [1,1,1]));
+    push(FARM, C_SKIN, elW, 0, 30);
+    const handBase = m4mul(m4mul(elW, m4trans(0, -0.44, 0.03)), m4rotX(HAND_WRIST_PITCH));
+    const handPivot = m4mul(handBase, m4rotY(HAND_AXIS_TWIST * sgn));
+    push(BALL, C_SKIN, m4mul(handPivot, m4compose(
+      [0, -0.09, -0.02], [0, 0, Math.PI/2], [0.175, 0.15, 0.095])), 0, 40);
+    const fingerPivot = m4mul(handBase, m4rotY(0.70 * sgn));
+    push(BALL, C_FINGER, m4mul(fingerPivot, m4compose(
+      [-0.08*sgn, -0.34, 0.00], [0.32, 0, 0.10*sgn], [0.048, 0.15, 0.048])), 0, 70);
+    push(BALL, C_FINGER, m4mul(fingerPivot, m4compose(
+      [0.00, -0.30, 0.02], [0.30, 0, 0], [0.045, 0.135, 0.045])), 0, 70);
+    push(BALL, C_FINGER, m4mul(fingerPivot, m4compose(
+      [0.08*sgn, -0.27, 0.00], [0.32, 0, -0.10*sgn], [0.044, 0.122, 0.044])), 0, 70);
+    push(BALL, C_FINGER, m4mul(handBase, m4compose(
+      [-0.115*sgn, -0.20, -0.03], [0.20, 0, -0.55*sgn], [0.049, 0.116, 0.049])), 0, 70);
+  }
+
+  let tailW = m4mul(root, m4compose([0, TAIL_BASE_Y, TAIL_BASE_Z], [TAIL_BASE_ROT, 0, 0], [1,1,1]));
+  for(let i=0;i<TAIL_N;i++){
+    push(TAIL[i], C_SKIN, tailW, 0, 30);
+    if(i < 6){
+      const r = 0.44*Math.pow(1 - i/TAIL_N, 0.72) + 0.02;
+      const fg = i < 2 ? FIN_MED : (i < 4 ? FIN_SMALL : FIN_TINY);
+      const fl = Math.sin(ph*0.9 - i*0.5) * 0.05;
+      push(fg, C_FIN, m4mul(tailW, m4compose(
+        [0, -0.10, -r*0.72], [-0.30 + fl, 0, 0], [1, 1 - i*0.05, 1 - i*0.05])), 0, 60);
+      push(fg, C_FIN, m4mul(tailW, m4compose(
+        [r*0.42, -0.10, -r*0.62], [-0.30 + fl, -0.35, 0.15], [0.68, 0.68, 0.68])), 0, 60);
+      push(fg, C_FIN, m4mul(tailW, m4compose(
+        [-r*0.42, -0.10, -r*0.62], [-0.30 + fl, 0.35, -0.15], [0.68, 0.68, 0.68])), 0, 60);
+    }
+    let bend;
+    if (i < 4) bend = 0.065 + Math.sin(ph*0.95 - i*0.42) * 0.020;
+    else if (i < 9) bend = 0.035 + Math.sin(ph*0.95 - i*0.42) * 0.014;
+    else bend = 0.014 + Math.sin(ph*0.95 - i*0.42) * 0.008;
+    tailW = m4mul(tailW, m4mul(m4trans(0, -TAIL_LEN, 0), m4rotX(bend)));
+  }
+
+  for(let i=0;i<FIN_SPOTS.length;i++){
+    const s = FIN_SPOTS[i];
+    const fl = Math.sin(ph*2 - i*0.5) * 0.012;
+    push(s.m, i % 2 ? C_FIN2 : C_FIN, m4mul(root, m4compose(
+      [0, s.y, s.z], [s.rot + 0.42 + fl, 0, 0], [1,1,1])), 0, 60);
+    const rx = s.rx !== undefined ? s.rx : (i < 2 ? 0.17 : (i < 5 ? 0.24 : 0.15));
+    push(s.m, C_FIN, m4mul(root, m4compose(
+      [rx, s.y - 0.03, s.z + 0.01],
+      [s.rot + 0.45 + fl, -FIN_SPLAY, 0.18], [0.62, 0.62, 0.62])), 0, 60);
+    push(s.m, C_FIN, m4mul(root, m4compose(
+      [-rx, s.y - 0.03, s.z + 0.01],
+      [s.rot + 0.45 + fl, FIN_SPLAY, -0.18], [0.62, 0.62, 0.62])), 0, 60);
+  }
+
+  push(GROUND, C_GROUND, m4trans(0, -0.02, 0), 0, 4);
+}
+
+const camTarget = [0, 2.25, 0.25];
+let camTheta = 0.78, camPhi = 1.32, camDist = 10.0;
+let drag = false, lastX = 0, lastY = 0, idle = 0;
+
+canvas.addEventListener('pointerdown', e=>{
+  drag = true; idle = 0;
+  lastX = e.clientX; lastY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', e=>{
+  if(!drag) return;
+  camTheta -= (e.clientX - lastX) * 0.006;
+  camPhi   -= (e.clientY - lastY) * 0.005;
+  camPhi = Math.max(0.35, Math.min(1.62, camPhi));
+  lastX = e.clientX; lastY = e.clientY; idle = 0;
+});
+canvas.addEventListener('pointerup', e=>{
+  drag = false;
+  try{ canvas.releasePointerCapture(e.pointerId); }catch(_){}
+});
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  camDist *= Math.pow(1.0015, e.deltaY);
+  camDist = Math.max(3.2, Math.min(22, camDist));
+  idle = 0;
+}, {passive:false});
+window.addEventListener('keydown', e=>{
+  if(e.key === 'ArrowLeft')  camTheta -= 0.06;
+  if(e.key === 'ArrowRight') camTheta += 0.06;
+  if(e.key === 'ArrowUp')    camPhi = Math.max(0.35, camPhi - 0.05);
+  if(e.key === 'ArrowDown')  camPhi = Math.min(1.62, camPhi + 0.05);
+});
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const W = Math.round(w*dpr), H = Math.round(h*dpr);
+  if(canvas.width !== W || canvas.height !== H){
+    canvas.width = W; canvas.height = H;
+  }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  return canvas.width / canvas.height;
+}
+
+const LIGHT_DIR = (()=>{ const v = [-0.42, 0.82, 0.42];
+  const l = Math.hypot(v[0],v[1],v[2]); return [v[0]/l, v[1]/l, v[2]/l]; })();
+
+let startTime = performance.now();
+let prevTime = startTime;
+
+function render(now){
+  const aspect = resize();
+  const dt = Math.min((now - prevTime) / 1000, 0.05);
+  prevTime = now;
+  const T = (now - startTime) / 1000;
+  if(!drag){ idle += dt; if(idle > 1.2) camTheta += dt * 0.055; }
+  const sp = Math.sin(camPhi), cp = Math.cos(camPhi);
+  const eye = [
+    camTarget[0] + camDist * sp * Math.cos(camTheta),
+    camTarget[1] + camDist * cp,
+    camTarget[2] + camDist * sp * Math.sin(camTheta)
+  ];
+  const proj = m4persp(42 * Math.PI/180, aspect, 0.1, 220);
+  const view = m4lookAt(eye, camTarget, [0,1,0]);
+  buildFrame(T);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(U.proj, false, proj);
+  gl.uniformMatrix4fv(U.view, false, view);
+  gl.uniform3fv(U.cam, eye);
+  gl.uniform3fv(U.light, LIGHT_DIR);
+  for(let i=0;i<drawList.length;i++){
+    const d = drawList[i];
+    gl.uniformMatrix4fv(U.model, false, d.world);
+    gl.uniformMatrix3fv(U.nrmMat, false, normalMat3(d.world));
+    gl.uniform3fv(U.color, d.color);
+    gl.uniform1f(U.emissive, d.emissive);
+    gl.uniform1f(U.shine, d.shine);
+    gl.bindBuffer(gl.ARRAY_BUFFER, d.mesh.posBuf);
+    gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(A.pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER, d.mesh.nrmBuf);
+    gl.vertexAttribPointer(A.nrm, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(A.nrm);
+    if(d.mesh.indexed === false) gl.drawArrays(gl.TRIANGLES, 0, d.mesh.count);
+    else {
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.mesh.idxBuf);
+      gl.drawElements(gl.TRIANGLES, d.mesh.count, gl.UNSIGNED_SHORT, 0);
+    }
+  }
+  requestAnimationFrame(render);
+}
+resize();
+requestAnimationFrame(render);
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d13e87d91293b4',t:'MTc4OTc0Mzg3OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -1,0 +1,2329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>过山车 · VERTIGO</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e14; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: #eef4fb; -webkit-font-smoothing: antialiased; user-select: none;
+  }
+  #gl { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  #gl:active { cursor: grabbing; }
+
+  /* 暗角 */
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0) 42%, rgba(0,0,0,.30) 78%, rgba(0,0,0,.62) 100%);
+  }
+
+  #hud {
+    position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    transition: opacity .35s ease;
+  }
+  #hud.hidden { opacity: 0; }
+
+  /* 标题 */
+  #title {
+    position: absolute; top: 22px; left: 26px;
+    font-size: 13px; letter-spacing: .34em; font-weight: 600;
+    color: rgba(255,255,255,.82);
+    text-shadow: 0 2px 14px rgba(0,0,0,.7);
+  }
+  #title span { color: #ff6a4d; }
+  #title small {
+    display: block; margin-top: 6px; font-size: 10px; letter-spacing: .18em;
+    color: rgba(255,255,255,.42); font-weight: 400;
+  }
+
+  /* 仪表 */
+  #gauge {
+    position: absolute; left: 26px; bottom: 26px;
+    display: flex; align-items: flex-end; gap: 26px;
+    padding: 16px 22px 14px;
+    background: linear-gradient(160deg, rgba(14,20,30,.62), rgba(10,14,22,.44));
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 16px;
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 18px 44px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .stat { text-align: left; }
+  .stat .v {
+    font-size: 34px; font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 18px rgba(0,0,0,.55);
+  }
+  .stat .u { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.45); margin-left: 3px; }
+  .stat .k {
+    margin-top: 7px; font-size: 10px; letter-spacing: .16em;
+    color: rgba(255,255,255,.40); text-transform: uppercase;
+  }
+  #speed { color: #ffffff; }
+  #gforce { color: #7fd7ff; }
+  #gforce.hot { color: #ff7a5c; }
+  #gforce.float { color: #9dff9d; }
+  #alt { color: rgba(255,255,255,.80); }
+
+  /* 速度条 */
+  #barwrap {
+    position: absolute; left: 26px; bottom: 14px; width: 268px; height: 3px;
+    background: rgba(255,255,255,.10); border-radius: 3px; overflow: hidden;
+  }
+  #bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #43e0ff, #ffd166 62%, #ff5a3c);
+    border-radius: 3px;
+    transition: width .08s linear;
+    box-shadow: 0 0 12px rgba(255,140,80,.55);
+  }
+
+  /* 右上：视角 / FPS */
+  #panel {
+    position: absolute; top: 22px; right: 26px; text-align: right;
+    font-size: 11px; letter-spacing: .1em; color: rgba(255,255,255,.55);
+    line-height: 1.9; text-shadow: 0 2px 10px rgba(0,0,0,.6);
+  }
+  #mode { color: rgba(255,255,255,.92); font-weight: 600; font-size: 12px; letter-spacing: .12em; }
+  #panel b { color: rgba(255,255,255,.80); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* 底部提示 */
+  #hint {
+    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 20px; align-items: center;
+    padding: 10px 20px; border-radius: 999px;
+    background: rgba(10,14,22,.42); border: 1px solid rgba(255,255,255,.09);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-size: 11.5px; letter-spacing: .06em; color: rgba(255,255,255,.62);
+    transition: opacity .8s ease, transform .8s ease;
+    white-space: nowrap;
+  }
+  #hint.fade { opacity: 0; transform: translateX(-50%) translateY(14px); }
+  kbd {
+    display: inline-block; min-width: 20px; padding: 2px 6px; margin-right: 4px;
+    font: inherit; font-size: 10.5px; text-align: center;
+    color: #dfe9f5; background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.16); border-radius: 5px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.35);
+  }
+
+  /* 载入 / 回退 */
+  #loading, #fallback {
+    position: fixed; inset: 0; z-index: 40; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; background: radial-gradient(ellipse at 50% 45%, #16202e, #070a10 72%);
+    transition: opacity .5s ease;
+  }
+  #fallback { display: none; text-align: center; padding: 32px; }
+  .spin {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.12); border-top-color: #ff6a4d;
+    animation: sp 0.9s linear infinite;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  #loading p, #fallback p { font-size: 12.5px; letter-spacing: .24em; color: rgba(255,255,255,.45); }
+  #fallback h2 { font-size: 17px; letter-spacing: .1em; color: #ff8a6d; margin-bottom: 8px; }
+  #fallback span { font-size: 12px; color: rgba(255,255,255,.5); line-height: 1.9; }
+
+  @media (max-width: 720px) {
+    #gauge { left: 14px; bottom: 16px; gap: 16px; padding: 12px 16px 10px; }
+    .stat .v { font-size: 25px; }
+    #barwrap { left: 14px; bottom: 8px; width: 200px; }
+    #title { left: 16px; top: 16px; }
+    #panel { right: 16px; top: 16px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="vignette"></div>
+
+<div id="hud">
+  <div id="title">过山车 <span>VERTIGO</span>
+    <small>PROCEDURAL ROLLER COASTER · WEBGL2</small>
+  </div>
+
+  <div id="panel">
+    <div id="mode">第一视角 · 车内</div>
+    <div>FPS <b id="fps">60</b></div>
+  </div>
+
+  <div id="gauge">
+    <div class="stat">
+      <div class="v"><span id="speed">0</span><span class="u">km/h</span></div>
+      <div class="k">速度</div>
+    </div>
+    <div class="stat">
+      <div class="v"><span id="gforce">1.00</span><span class="u">g</span></div>
+      <div class="k">过载</div>
+    </div>
+    <div class="stat">
+      <div class="v"><span id="alt">0</span><span class="u">m</span></div>
+      <div class="k">高度</div>
+    </div>
+  </div>
+  <div id="barwrap"><div id="bar"></div></div>
+
+  <div id="hint">
+    <span><kbd>1</kbd>第一视角</span>
+    <span><kbd>2</kbd>追逐</span>
+    <span><kbd>3</kbd>自由环视</span>
+    <span><kbd>拖动</kbd>旋转</span>
+    <span><kbd>滚轮</kbd>缩放</span>
+    <span><kbd>H</kbd>隐藏界面</span>
+  </div>
+</div>
+
+<div id="loading"><div class="spin"></div><p>正在生成轨道与地形…</p></div>
+<div id="fallback">
+  <h2>无法启动 3D 渲染</h2>
+  <p>你的浏览器或设备不支持 WebGL2。<br><span>请使用最新版 Chrome / Edge / Firefox / Safari 打开。</span></p>
+</div>
+
+<script>
+/* ===================================================================
+   过山车 · 单文件实现（无任何外部依赖）
+   =================================================================== */
+
+/* =====================================================================
+   过山车 · 核心模块（纯 JS，无任何外部依赖）
+   包含：向量/矩阵数学、参数化轨道生成、标架、网格生成、物理仿真
+   浏览器与 Node 预览脚本共用同一套代码
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   0. 常量与颜色工具
+   --------------------------------------------------------------------- */
+const DEG = Math.PI / 180;
+const WORLD_UP = [0, 1, 0];
+
+function srgb2lin(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function col(hex) {
+  const r = ((hex >> 16) & 255) / 255, g = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
+  return [srgb2lin(r), srgb2lin(g), srgb2lin(b)];
+}
+function shade(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
+
+const COLOR = {
+  rail: col(0xd93a2b),
+  spine: col(0xe9e9ec),
+  tie: col(0xc6c8cc),
+  support: col(0xf2f2f4),
+  supportDark: col(0xd2d4d8),
+  carBody: col(0xe8402f),
+  carTrim: col(0xf4f4f6),
+  wheel: col(0x2a2c30),
+  seat: col(0x30343a),
+};
+
+/* ---------------------------------------------------------------------
+   1. 向量工具（普通数组 [x,y,z]）
+   --------------------------------------------------------------------- */
+function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function vadd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function vmul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function vdot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function vcross(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function vlen(a) { return Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
+function vnorm(a) {
+  const l = vlen(a) || 1;
+  return [a[0] / l, a[1] / l, a[2] / l];
+}
+function vrot(v, axis, ang) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const k = vdot(axis, v) * (1 - c);
+  return [
+    v[0] * c + (axis[1] * v[2] - axis[2] * v[1]) * s + axis[0] * k,
+    v[1] * c + (axis[2] * v[0] - axis[0] * v[2]) * s + axis[1] * k,
+    v[2] * c + (axis[0] * v[1] - axis[1] * v[0]) * s + axis[2] * k,
+  ];
+}
+
+/* ---------------------------------------------------------------------
+   2. 4x4 矩阵（列主序）
+   --------------------------------------------------------------------- */
+function m4() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+
+function m4mul(a, b, out) {
+  out = out || new Float32Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = s;
+    }
+  }
+  return out;
+}
+
+function m4perspective(fovy, aspect, near, far, out) {
+  out = out || new Float32Array(16);
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  out.fill(0);
+  out[0] = f / aspect; out[5] = f;
+  out[10] = (far + near) * nf; out[11] = -1;
+  out[14] = 2 * far * near * nf;
+  return out;
+}
+
+function m4ortho(l, r, b, t, n, f, out) {
+  out = out || new Float32Array(16);
+  const lr = 1 / (l - r), bt = 1 / (b - t), nf = 1 / (n - f);
+  out.fill(0);
+  out[0] = -2 * lr; out[5] = -2 * bt; out[10] = 2 * nf; out[15] = 1;
+  out[12] = (l + r) * lr; out[13] = (t + b) * bt; out[14] = (f + n) * nf;
+  return out;
+}
+
+function m4lookAt(eye, center, up, out) {
+  out = out || new Float32Array(16);
+  let z = vnorm(vsub(eye, center));
+  if (vlen(z) < 1e-6) z = [0, 0, 1];
+  let x = vcross(up, z);
+  if (vlen(x) < 1e-6) { x = vcross([1, 0, 0], z); if (vlen(x) < 1e-6) x = vcross([0, 0, 1], z); }
+  x = vnorm(x);
+  const y = vcross(z, x);
+  out[0] = x[0]; out[1] = y[0]; out[2] = z[0]; out[3] = 0;
+  out[4] = x[1]; out[5] = y[1]; out[6] = z[1]; out[7] = 0;
+  out[8] = x[2]; out[9] = y[2]; out[10] = z[2]; out[11] = 0;
+  out[12] = -vdot(x, eye); out[13] = -vdot(y, eye); out[14] = -vdot(z, eye); out[15] = 1;
+  return out;
+}
+
+function m4fromFrame(pos, right, up, fwd, scale, out) {
+  out = out || new Float32Array(16);
+  const s = scale === undefined ? 1 : scale;
+  out[0] = right[0] * s; out[1] = right[1] * s; out[2] = right[2] * s; out[3] = 0;
+  out[4] = up[0] * s; out[5] = up[1] * s; out[6] = up[2] * s; out[7] = 0;
+  out[8] = fwd[0] * s; out[9] = fwd[1] * s; out[10] = fwd[2] * s; out[11] = 0;
+  out[12] = pos[0]; out[13] = pos[1]; out[14] = pos[2]; out[15] = 1;
+  return out;
+}
+
+function m4transformPoint(m, p) {
+  return [
+    m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+    m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+    m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14],
+    m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15],
+  ];
+}
+
+/* ---------------------------------------------------------------------
+   3. 参数化轨道生成
+   用 (位置, 偏航 yaw, 俯仰 pitch) 的动力学积分生成轨道，
+   所有过渡段曲率线性渐变（类回旋线），保证全程曲率连续、无突变。
+   --------------------------------------------------------------------- */
+const TP = {
+  liftTop: 56,              // 提升段最高点
+  pitchLift: 38 * DEG,
+  rLiftBase: 38, transLiftBase: 10,
+  rCrest: 30, transCrest: 12,
+  pitchDrop: -62 * DEG,
+  // 拉平半径必须小于回环底部半径：这样回环出口分支从进场轨道"下方"汇入，
+  // 列车在进场轨道上不会撞到出口分支（真实垂直回环即如此）
+  rPull: 26, transPull: 12,
+  loopBottom: 5.0,          // 回环入口高度
+  loopW: 25, loopH: 44,     // 闭合泪滴回环：宽 49m 高 44m；两侧接近竖直，顶部收窄 R≈10
+  loopK: 0.40, loopP: 5.0,
+  loopTwist: 2.8,           // 出口分支横向错开量（避免与进场轨道重合）
+  rTurn: 40,                // 大弯半径
+  transTurn: 22,
+  rHill: 48,                // 驼峰半径
+  pitchHill: 17 * DEG,
+};
+
+function makePathBuilder(p0, yaw0, pitch0) {
+  const DS = 0.2;
+  const pts = [];
+  const st = { p: p0.slice(), yaw: yaw0, pitch: pitch0 };
+  const push = () => pts.push([st.p[0], st.p[1], st.p[2]]);
+  push();
+
+  function advance(len, yr, pr) {
+    const n = Math.max(1, Math.round(len / DS));
+    const d = len / n;
+    for (let i = 0; i < n; i++) {
+      const pm = st.pitch + pr * d * 0.5, ym = st.yaw + yr * d * 0.5;
+      st.pitch += pr * d; st.yaw += yr * d;
+      const cp = Math.cos(pm);
+      st.p[0] += cp * Math.cos(ym) * d;
+      st.p[1] += Math.sin(pm) * d;
+      st.p[2] += cp * Math.sin(ym) * d;
+      push();
+    }
+  }
+  function ramp(len, yr0, yr1, pr0, pr1) {
+    const n = Math.max(2, Math.round(len / DS));
+    const d = len / n;
+    for (let i = 0; i < n; i++) {
+      const u = (i + 0.5) / n;
+      const yr = yr0 + (yr1 - yr0) * u, pr = pr0 + (pr1 - pr0) * u;
+      const pm = st.pitch + pr * d * 0.5, ym = st.yaw + yr * d * 0.5;
+      st.pitch += pr * d; st.yaw += yr * d;
+      const cp = Math.cos(pm);
+      st.p[0] += cp * Math.cos(ym) * d;
+      st.p[1] += Math.sin(pm) * d;
+      st.p[2] += cp * Math.sin(ym) * d;
+      push();
+    }
+  }
+  /** 俯仰角变化 dPitch（半径 R，两端各 trans 米渐变） */
+  function vertArc(dPitch, R, trans) {
+    const sgn = Math.sign(dPitch), need = Math.abs(dPitch), rate = 1 / R;
+    let t1 = trans, hold = need / rate - trans;
+    if (hold < 0) { t1 = need / rate; hold = 0; }
+    ramp(t1, 0, 0, 0, sgn * rate);
+    if (hold > 1e-6) advance(hold, 0, sgn * rate);
+    ramp(t1, 0, 0, sgn * rate, 0);
+  }
+  /** 偏航角变化 dYaw（半径 R，两端各 trans 米渐变），同时按 profile 调整俯仰 */
+  function horizArc(dYaw, R, trans, pitchTarget) {
+    const sgn = Math.sign(dYaw), need = Math.abs(dYaw), rate = 1 / R;
+    let t1 = trans, hold = need / rate - trans;
+    if (hold < 0) { t1 = need / rate; hold = 0; }
+    const pNow = st.pitch;
+    if (pitchTarget !== undefined) {
+      ramp(t1, 0, sgn * rate, 0, (pitchTarget - pNow) / t1);
+      if (hold > 1e-6) advance(hold, sgn * rate, 0);
+      ramp(t1, sgn * rate, 0, 0, -pitchTarget / t1);
+    } else {
+      ramp(t1, 0, sgn * rate, 0, 0);
+      if (hold > 1e-6) advance(hold, sgn * rate, 0);
+      ramp(t1, sgn * rate, 0, 0, 0);
+    }
+  }
+  /** 垂直回环：显式闭合泪滴形（底部宽、顶部紧），入口=出口且切向连续。
+      出口分支在回环平面外做一段平滑横向偏移（twist），使出口分支与进场轨道
+      在空间上错开——否则两者会在回环底部几乎重合（真实回环也是带轻微扭转的）。 */
+  function loopCurve(W0, H, k, p, steps, twist) {
+    const cp = Math.cos(st.pitch), sp = Math.sin(st.pitch);
+    const cy = Math.cos(st.yaw), sy = Math.sin(st.yaw);
+    const dir = [cp * cy, sp, cp * sy];
+    const upv = [-sp * cy, cp, -sp * sy];
+    const sidev = [-sy, 0, cy];               // 回环平面法向（横向）
+    const o = st.p.slice();
+    const smooth = (a, b, x) => { const u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
+    for (let i = 1; i <= steps; i++) {
+      const t = (i / steps) * Math.PI * 2;
+      const ly = H * (1 - Math.cos(t)) * 0.5;
+      const W = W0 * (1 - k * Math.pow(ly / H, p));
+      const lx = W * Math.sin(t);
+      // 出口分支（t > π）逐渐横向偏移，到出口达到最大并保持——这样出口分支
+      // 与进场轨道在空间上完全错开（回环出口比入口横向错开 twist 米）
+      let lz = 0;
+      if (twist > 0 && t > Math.PI) {
+        const u = (t - Math.PI) / Math.PI;
+        lz = twist * smooth(0.12, 0.86, u);
+      }
+      st.p[0] = o[0] + dir[0] * lx + upv[0] * ly + sidev[0] * lz;
+      st.p[1] = o[1] + dir[1] * lx + upv[1] * ly + sidev[1] * lz;
+      st.p[2] = o[2] + dir[2] * lx + upv[2] * ly + sidev[2] * lz;
+      push();
+    }
+  }
+  return { st, pts, advance, ramp, vertArc, horizArc, loopCurve };
+}
+
+/** 在临时构建器上测量一段俯仰弧的几何增量（精确设计用） */
+function measureVertArc(dPitch, R, trans, startPitch) {
+  const b = makePathBuilder([0, 0, 0], 0, startPitch || 0);
+  b.vertArc(dPitch, R, trans);
+  const e = b.pts[b.pts.length - 1];
+  return { dx: e[0], dy: e[1], n: b.pts.length };
+}
+
+function buildPathPoints() {
+  const B = makePathBuilder([-114, 6.3, 0], 0, 0);
+  const { st } = B;
+  const P = TP;
+
+  // 1) 站台直线
+  B.advance(24, 0, 0);
+
+  // 2) 提升段底部弧 → 爬升 → 顶部上半弧（到最高点）
+  B.vertArc(P.pitchLift, P.rLiftBase, P.transLiftBase);
+  const upCrest = measureVertArc(-P.pitchLift, P.rCrest, P.transCrest, P.pitchLift);
+  B.advance((P.liftTop - upCrest.dy - st.p[1]) / Math.sin(st.pitch), 0, 0);
+  B.vertArc(-P.pitchLift, P.rCrest, P.transCrest);   // 到顶点
+
+  // 3) 顶部下半弧 → 俯冲 → 拉平
+  B.vertArc(P.pitchDrop, P.rCrest, P.transCrest);
+  const pull = measureVertArc(-P.pitchDrop, P.rPull, P.transPull, P.pitchDrop);
+  const yPullStart = P.loopBottom - pull.dy;
+  B.advance((st.p[1] - yPullStart) / Math.sin(-st.pitch), 0, 0);
+  B.vertArc(-st.pitch, P.rPull, P.transPull);
+
+  // 4) 进入垂直回环
+  B.advance(8, 0, 0);
+  B.loopCurve(P.loopW, P.loopH, P.loopK, P.loopP, 900, P.loopTwist);
+
+  // 5) 出环直线
+  B.advance(26, 0, 0);
+
+  // 6) 东侧大弯：180° 水平弯 + 爬升
+  B.horizArc(Math.PI, P.rTurn, P.transTurn, 8 * DEG);
+
+  // 7) 返程直线（略降）
+  B.vertArc(-2 * DEG, 90, 14);
+  B.advance(24, 0, 0);
+  B.vertArc(2 * DEG, 90, 14);
+
+  // 8) 驼峰
+  B.vertArc(P.pitchHill, P.rHill, 20);
+  B.vertArc(-2 * P.pitchHill, P.rHill, 20);
+  B.vertArc(P.pitchHill, P.rHill, 20);
+
+  // 9) 下降到站台高度（对称求解，精确落到 6.3）
+  const th = 7 * DEG;
+  const d1 = measureVertArc(-th, 150, 18, 0).dy;
+  const y0 = st.p[1];
+  B.vertArc(-th, 150, 18);
+  const Ls = (y0 + 2 * d1 - 6.3) / Math.sin(th);
+  B.advance(Math.max(4, Ls), 0, 0);
+  B.vertArc(th, 150, 18);
+
+  // 10) 刹车直线 + 西侧大弯（180° 平弯）
+  B.advance(28, 0, 0);
+  B.horizArc(Math.PI, P.rTurn, P.transTurn, 0);
+
+  // 11) 平移使西侧大弯出口与起点重合
+  const pts = B.pts;
+  const end = pts[pts.length - 1];
+  const dx = pts[0][0] - end[0], dy = pts[0][1] - end[1], dz = pts[0][2] - end[2];
+  for (const p of pts) { p[0] += dx; p[1] += dy; p[2] += dz; }
+  pts.pop();
+  return pts;
+}
+
+/* ---------------------------------------------------------------------
+   4. 轨道采样：等弧长点 + 标架
+   --------------------------------------------------------------------- */
+let TERRAIN_CX = -10, TERRAIN_CZ = 45;
+
+function buildTrack(opts) {
+  opts = opts || {};
+  const N = opts.samples || 2400;
+  const g = 9.81;
+  const rawPts = buildPathPoints();
+  const M0 = rawPts.length;
+
+  /* --- 4.1 弧长参数化（原始稠密折线） --- */
+  const cum0 = new Float64Array(M0 + 1);
+  for (let i = 1; i <= M0; i++) {
+    const a = rawPts[i - 1], b = rawPts[i % M0];
+    cum0[i] = cum0[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  }
+  const rawLen = cum0[M0];
+
+  /* --- 4.2 均匀重采样到 ~0.2m --- */
+  const M = Math.ceil(rawLen / 0.2);
+  const rx = new Float64Array(M), ry = new Float64Array(M), rz = new Float64Array(M);
+  {
+    let j = 0;
+    for (let i = 0; i < M; i++) {
+      const target = (i / M) * rawLen;
+      while (j < M0 && cum0[j + 1] < target) j++;
+      const seg = cum0[j + 1] - cum0[j] || 1e-9;
+      const u = (target - cum0[j]) / seg;
+      const a = rawPts[j], b = rawPts[(j + 1) % M0];
+      rx[i] = a[0] + (b[0] - a[0]) * u;
+      ry[i] = a[1] + (b[1] - a[1]) * u;
+      rz[i] = a[2] + (b[2] - a[2]) * u;
+    }
+  }
+
+  /* --- 4.3 高斯平滑（沿弧长，闭合） --- */
+  const SIG = 1.8, KR = 26;
+  const kern = new Float64Array(2 * KR + 1);
+  {
+    const dsm = rawLen / M;
+    let sum = 0;
+    for (let k = -KR; k <= KR; k++) {
+      const w = Math.exp(-(k * k * dsm * dsm) / (2 * SIG * SIG));
+      kern[k + KR] = w; sum += w;
+    }
+    for (let k = 0; k < kern.length; k++) kern[k] /= sum;
+  }
+  const sx = new Float64Array(M), sy = new Float64Array(M), sz = new Float64Array(M);
+  for (let i = 0; i < M; i++) {
+    let ax = 0, ay = 0, az = 0;
+    for (let k = -KR; k <= KR; k++) {
+      const q = ((i + k) % M + M) % M, w = kern[k + KR];
+      ax += rx[q] * w; ay += ry[q] * w; az += rz[q] * w;
+    }
+    sx[i] = ax; sy[i] = ay; sz[i] = az;
+  }
+
+  /* --- 4.4 等弧长重采样到 N --- */
+  const cum = new Float64Array(M + 1);
+  for (let i = 1; i <= M; i++) {
+    const j = i % M;
+    cum[i] = cum[i - 1] + Math.hypot(sx[j] - sx[i - 1], sy[j] - sy[i - 1], sz[j] - sz[i - 1]);
+  }
+  const length = cum[M];
+  const pos = new Float32Array(N * 3);
+  {
+    let j = 0;
+    for (let i = 0; i < N; i++) {
+      const target = (i / N) * length;
+      while (j < M && cum[j + 1] < target) j++;
+      const seg = cum[j + 1] - cum[j] || 1e-9;
+      const u = (target - cum[j]) / seg;
+      const a = j, b = (j + 1) % M;
+      pos[i * 3] = sx[a] + (sx[b] - sx[a]) * u;
+      pos[i * 3 + 1] = sy[a] + (sy[b] - sy[a]) * u;
+      pos[i * 3 + 2] = sz[a] + (sz[b] - sz[a]) * u;
+    }
+  }
+  const ds = length / N;
+
+  /* --- 4.5 切向量 --- */
+  const tan = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const a = ((i - 1) % N + N) % N, b = (i + 1) % N;
+    const t = vnorm([
+      pos[b * 3] - pos[a * 3],
+      pos[b * 3 + 1] - pos[a * 3 + 1],
+      pos[b * 3 + 2] - pos[a * 3 + 2],
+    ]);
+    tan[i * 3] = t[0]; tan[i * 3 + 1] = t[1]; tan[i * 3 + 2] = t[2];
+  }
+
+  /* --- 4.6 曲率向量 --- */
+  const kap = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const a = ((i - 1) % N + N) % N, b = (i + 1) % N;
+    kap[i * 3] = (pos[b * 3] - 2 * pos[i * 3] + pos[a * 3]) / (ds * ds);
+    kap[i * 3 + 1] = (pos[b * 3 + 1] - 2 * pos[i * 3 + 1] + pos[a * 3 + 1]) / (ds * ds);
+    kap[i * 3 + 2] = (pos[b * 3 + 2] - 2 * pos[i * 3 + 2] + pos[a * 3 + 2]) / (ds * ds);
+  }
+  // 曲率平滑，抑制离散噪声
+  {
+    const KR2 = 5, tmp = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      let ax = 0, ay = 0, az = 0;
+      for (let k = -KR2; k <= KR2; k++) {
+        const q = ((i + k) % N + N) % N;
+        ax += kap[q * 3]; ay += kap[q * 3 + 1]; az += kap[q * 3 + 2];
+      }
+      const inv = 1 / (2 * KR2 + 1);
+      tmp[i * 3] = ax * inv; tmp[i * 3 + 1] = ay * inv; tmp[i * 3 + 2] = az * inv;
+    }
+    kap.set(tmp);
+  }
+
+  /* --- 4.7 平行移动标架 --- */
+  const upPT = new Float32Array(N * 3);
+  {
+    let u0 = vsub(WORLD_UP, vmul([tan[0], tan[1], tan[2]], vdot(WORLD_UP, [tan[0], tan[1], tan[2]])));
+    if (vlen(u0) < 1e-4) u0 = [1, 0, 0];
+    u0 = vnorm(u0);
+    upPT[0] = u0[0]; upPT[1] = u0[1]; upPT[2] = u0[2];
+    for (let i = 1; i <= N; i++) {
+      const ia = i - 1, ib = i % N;
+      const Ta = [tan[ia * 3], tan[ia * 3 + 1], tan[ia * 3 + 2]];
+      const Tb = [tan[ib * 3], tan[ib * 3 + 1], tan[ib * 3 + 2]];
+      let u = [upPT[ia * 3], upPT[ia * 3 + 1], upPT[ia * 3 + 2]];
+      const axis = vcross(Ta, Tb);
+      const al = vlen(axis);
+      if (al > 1e-7) {
+        const ang = Math.atan2(al, Math.max(-1, Math.min(1, vdot(Ta, Tb))));
+        u = vrot(u, vmul(axis, 1 / al), ang);
+      }
+      u = vnorm(vsub(u, vmul(Tb, vdot(u, Tb))));
+      if (ib !== 0) { upPT[ib * 3] = u[0]; upPT[ib * 3 + 1] = u[1]; upPT[ib * 3 + 2] = u[2]; }
+    }
+  }
+
+  /* --- 4.8 回环区间权重 --- */
+  function nearestIndexXZ(x, z) {
+    let best = 0, bd = 1e18;
+    for (let i = 0; i < N; i++) {
+      const dx = pos[i * 3] - x, dz = pos[i * 3 + 2] - z;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  // 回环检测：切向接近竖直的区段即回环两侧（俯冲段最陡仅 62°）
+  let firstV = -1, lastV = -1;
+  for (let i = 0; i < N; i++) {
+    if (Math.abs(tan[i * 3 + 1]) > 0.93) { if (firstV < 0) firstV = i; lastV = i; }
+  }
+  let loopTop = firstV;
+  for (let i = firstV; i <= lastV; i++) if (pos[i * 3 + 1] > pos[loopTop * 3 + 1]) loopTop = i;
+  const padN = Math.round(34 / ds), rampN = Math.round(14 / ds);
+  const loopA = ((firstV - padN) % N + N) % N;
+  const loopB = (lastV + padN) % N;
+  const loopSpan = ((lastV - firstV) + 2 * padN + N) % N;
+  const wLoop = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const dA = (i - loopA + N) % N;
+    let w = 0;
+    if (dA <= loopSpan) {
+      w = 1;
+      if (dA < rampN) w = dA / rampN;
+      else if (loopSpan - dA < rampN) w = (loopSpan - dA) / rampN;
+    }
+    wLoop[i] = w * w * (3 - 2 * w);
+  }
+
+  /* --- 4.9 世界竖直参考系的滚转角 --- */
+  const alignRoll = new Float32Array(N);
+  {
+    let prevRef = null, prevAng = 0;
+    for (let i = 0; i < N; i++) {
+      const T = [tan[i * 3], tan[i * 3 + 1], tan[i * 3 + 2]];
+      const d = vdot(WORLD_UP, T);
+      let ref;
+      if (Math.abs(d) < 0.985) ref = vnorm(vsub(WORLD_UP, vmul(T, d)));
+      else ref = prevRef || [1, 0, 0];
+      prevRef = ref;
+      const u = [upPT[i * 3], upPT[i * 3 + 1], upPT[i * 3 + 2]];
+      let ang = Math.atan2(vdot(vcross(u, ref), T), vdot(u, ref));
+      while (ang - prevAng > Math.PI) ang -= 2 * Math.PI;
+      while (ang - prevAng < -Math.PI) ang += 2 * Math.PI;
+      prevAng = ang;
+      alignRoll[i] = ang;
+    }
+  }
+
+  /* --- 4.10 自动倾斜 --- */
+  const bank = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const y = pos[i * 3 + 1];
+    const v2 = Math.max(40, 1.55 * g * (TP.liftTop - y));
+    const T = [tan[i * 3], tan[i * 3 + 1], tan[i * 3 + 2]];
+    let u = [upPT[i * 3], upPT[i * 3 + 1], upPT[i * 3 + 2]];
+    u = vrot(u, T, (1 - wLoop[i]) * alignRoll[i]);
+    const right = vcross(T, u);
+    const aLat = v2 * (kap[i * 3] * right[0] + kap[i * 3 + 2] * right[2]);
+    bank[i] = Math.max(-0.92, Math.min(0.92, Math.atan2(aLat, g)));
+  }
+  {
+    const BR = Math.round(10 / ds), tmp = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      let s = 0;
+      for (let k = -BR; k <= BR; k++) s += bank[((i + k) % N + N) % N];
+      tmp[i] = s / (2 * BR + 1);
+    }
+    bank.set(tmp);
+  }
+
+  /* --- 4.11 最终标架 --- */
+  const up = new Float32Array(N * 3), side = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const T = [tan[i * 3], tan[i * 3 + 1], tan[i * 3 + 2]];
+    let u = [upPT[i * 3], upPT[i * 3 + 1], upPT[i * 3 + 2]];
+    u = vnorm(vrot(u, T, (1 - wLoop[i]) * alignRoll[i] + bank[i]));
+    const r = vnorm(vcross(T, u));
+    up[i * 3] = u[0]; up[i * 3 + 1] = u[1]; up[i * 3 + 2] = u[2];
+    side[i * 3] = r[0]; side[i * 3 + 1] = r[1]; side[i * 3 + 2] = r[2];
+  }
+
+  /* --- 4.12 关键区间 --- */
+  const stationStart = 0;
+  const stationEnd = Math.round(22 / ds);
+  const liftStart = stationEnd;
+  let liftEnd = liftStart;
+  for (let i = liftStart; i < N; i++) if (pos[i * 3 + 1] > TP.liftTop - 1.2) { liftEnd = i; break; }
+  // 刹车段：西侧大弯之前
+  let westEntry = 0;
+  for (let i = N - 1; i > 0; i--) {
+    if (pos[i * 3 + 2] > 78) { westEntry = i; break; }
+  }
+  const brakeStart = (westEntry - Math.round(90 / ds) + N) % N;
+  const brakeEnd = (westEntry - Math.round(10 / ds) + N) % N;
+
+  // 地形中心
+  let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  for (let i = 0; i < N; i++) {
+    minX = Math.min(minX, pos[i * 3]); maxX = Math.max(maxX, pos[i * 3]);
+    minZ = Math.min(minZ, pos[i * 3 + 2]); maxZ = Math.max(maxZ, pos[i * 3 + 2]);
+  }
+  TERRAIN_CX = (minX + maxX) / 2; TERRAIN_CZ = (minZ + maxZ) / 2;
+
+  return {
+    N, ds, length, pos, tan, up, side, kap, bank,
+    loopA, loopB, loopTop, stationStart, stationEnd, liftStart, liftEnd,
+    brakeStart, brakeEnd, nearestIndexXZ,
+    bounds: { minX, maxX, minZ, maxZ },
+  };
+}
+
+/* ---------------------------------------------------------------------
+   5. 网格构建工具
+   --------------------------------------------------------------------- */
+function Mesh() { this.pos = []; this.nrm = []; this.col = []; this.ao = []; this.idx = []; }
+Mesh.prototype.vert = function (p, n, c, ao) {
+  this.pos.push(p[0], p[1], p[2]);
+  this.nrm.push(n[0], n[1], n[2]);
+  this.col.push(c[0], c[1], c[2]);
+  this.ao.push(ao === undefined ? 1 : ao);
+  return this.pos.length / 3 - 1;
+};
+/** 通用四边形：4 组法线 / 颜色 / AO，可指定对角线方向（0 → p0-p2，1 → p1-p3） */
+Mesh.prototype.quadV = function (p0, p1, p2, p3, n0, n1, n2, n3, c0, c1, c2, c3, a0, a1, a2, a3, diag) {
+  const fn = vcross(vsub(p1, p0), vsub(p2, p0));
+  const i0 = this.vert(p0, n0, c0, a0), i1 = this.vert(p1, n1, c1, a1);
+  const i2 = this.vert(p2, n2, c2, a2), i3 = this.vert(p3, n3, c3, a3);
+  const ccw = vdot(fn, n0) >= 0;
+  if ((diag | 0) === 0) {
+    if (ccw) this.idx.push(i0, i1, i2, i0, i2, i3);
+    else this.idx.push(i0, i2, i1, i0, i3, i2);
+  } else {
+    if (ccw) this.idx.push(i1, i2, i3, i1, i3, i0);
+    else this.idx.push(i1, i3, i2, i1, i0, i3);
+  }
+};
+Mesh.prototype.quad = function (p0, p1, p2, p3, n0, n1, n2, n3, c, ao, diag) {
+  this.quadV(p0, p1, p2, p3, n0, n1, n2, n3, c, c, c, c, ao, ao, ao, ao, diag);
+};
+/** 四边形，四个顶点各自颜色 / AO（用于地形与山体渐变） */
+Mesh.prototype.quadC = function (p0, p1, p2, p3, n0, n1, n2, n3, c0, c1, c2, c3, a0, a1, a2, a3, diag) {
+  this.quadV(p0, p1, p2, p3, n0, n1, n2, n3, c0, c1, c2, c3,
+    a0 === undefined ? 1 : a0, a1 === undefined ? 1 : a1,
+    a2 === undefined ? 1 : a2, a3 === undefined ? 1 : a3, diag);
+};
+Mesh.prototype.tri = function (p0, p1, p2, n, c, ao) {
+  const fn = vcross(vsub(p1, p0), vsub(p2, p0));
+  const i0 = this.vert(p0, n, c, ao), i1 = this.vert(p1, n, c, ao), i2 = this.vert(p2, n, c, ao);
+  if (vdot(fn, n) >= 0) this.idx.push(i0, i1, i2);
+  else this.idx.push(i0, i2, i1);
+};
+Mesh.prototype.build = function () {
+  return {
+    pos: new Float32Array(this.pos), nrm: new Float32Array(this.nrm),
+    col: new Float32Array(this.col), ao: new Float32Array(this.ao),
+    idx: new Uint32Array(this.idx), count: this.idx.length,
+  };
+};
+
+function circleProfile(r, segs) {
+  const out = [];
+  for (let i = 0; i < segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    out.push([r * Math.cos(a), r * Math.sin(a), Math.cos(a), Math.sin(a)]);
+  }
+  return out;
+}
+function rectProfile(hw, hh) {
+  return [
+    [hw, -hh, 1, 0], [hw, hh, 1, 0],
+    [hw, hh, 0, 1], [-hw, hh, 0, 1],
+    [-hw, hh, -1, 0], [-hw, -hh, -1, 0],
+    [-hw, -hh, 0, -1], [hw, -hh, 0, -1],
+  ];
+}
+
+function sweepProfile(m, track, offS, offU, profile, color, stride) {
+  const N = track.N, pos = track.pos, up = track.up, side = track.side;
+  stride = stride || 1;
+  const rings = Math.floor(N / stride);
+  const verts = [];
+  for (let r = 0; r <= rings; r++) {
+    const i = (r * stride) % N;
+    const P = [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
+    const U = [up[i * 3], up[i * 3 + 1], up[i * 3 + 2]];
+    const S = [side[i * 3], side[i * 3 + 1], side[i * 3 + 2]];
+    const C = vadd(P, vadd(vmul(S, offS), vmul(U, offU)));
+    const ring = [];
+    for (let k = 0; k < profile.length; k++) {
+      const pr = profile[k];
+      ring.push({
+        p: vadd(C, vadd(vmul(S, pr[0]), vmul(U, pr[1]))),
+        n: vnorm(vadd(vmul(S, pr[2]), vmul(U, pr[3]))),
+      });
+    }
+    verts.push(ring);
+  }
+  for (let r = 0; r < rings; r++) {
+    const A = verts[r], B = verts[r + 1];
+    for (let k = 0; k < profile.length; k++) {
+      const k2 = (k + 1) % profile.length;
+      m.quad(A[k].p, A[k2].p, B[k2].p, B[k].p, A[k].n, A[k2].n, B[k2].n, B[k].n, color);
+    }
+  }
+}
+
+function addBox(m, center, ax, ay, az, sx, sy, sz, color) {
+  const hx = sx / 2, hy = sy / 2, hz = sz / 2;
+  const c = [
+    [[-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz]],
+    [[hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [hx, -hy, hz]],
+    [[-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz], [hx, -hy, -hz]],
+    [[-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]],
+    [[-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz]],
+    [[-hx, hy, -hz], [-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz]],
+  ];
+  const norms = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+  const toW = (l) => vadd(center, vadd(vmul(ax, l[0]), vadd(vmul(ay, l[1]), vmul(az, l[2]))));
+  for (let f = 0; f < 6; f++) {
+    const n = vnorm(vadd(vmul(ax, norms[f][0]), vadd(vmul(ay, norms[f][1]), vmul(az, norms[f][2]))));
+    const q = c[f];
+    m.quad(toW(q[0]), toW(q[1]), toW(q[2]), toW(q[3]), n, n, n, n, color);
+  }
+}
+
+function addCylinder(m, p0, p1, r0, r1, segs, color, capTop, capBottom) {
+  let axis = vsub(p1, p0);
+  const len = vlen(axis);
+  if (len < 1e-6) return;
+  axis = vmul(axis, 1 / len);
+  const ref = Math.abs(axis[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const ex = vnorm(vcross(ref, axis));
+  const ey = vcross(axis, ex);
+  const ringA = [], ringB = [];
+  for (let i = 0; i < segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    const dir = vadd(vmul(ex, Math.cos(a)), vmul(ey, Math.sin(a)));
+    ringA.push({ p: vadd(p0, vmul(dir, r0)), n: dir });
+    ringB.push({ p: vadd(p1, vmul(dir, r1)), n: dir });
+  }
+  for (let i = 0; i < segs; i++) {
+    const j = (i + 1) % segs;
+    m.quad(ringA[i].p, ringA[j].p, ringB[j].p, ringB[i].p, ringA[i].n, ringA[j].n, ringB[j].n, ringB[i].n, color);
+  }
+  if (capTop) for (let i = 0; i < segs; i++) { const j = (i + 1) % segs; m.tri(p1, ringB[j].p, ringB[i].p, axis, color); }
+  if (capBottom) for (let i = 0; i < segs; i++) { const j = (i + 1) % segs; m.tri(p0, ringA[i].p, ringA[j].p, vmul(axis, -1), color); }
+}
+
+function addCone(m, base, apex, radius, segs, color) {
+  let axis = vsub(apex, base);
+  const len = vlen(axis);
+  if (len < 1e-6) return;
+  axis = vmul(axis, 1 / len);
+  const ref = Math.abs(axis[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const ex = vnorm(vcross(ref, axis));
+  const ey = vcross(axis, ex);
+  const ring = [];
+  for (let i = 0; i < segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    const dir = vadd(vmul(ex, Math.cos(a)), vmul(ey, Math.sin(a)));
+    ring.push({ p: vadd(base, vmul(dir, radius)), n: vnorm(vadd(dir, vmul(axis, radius / len))) });
+  }
+  for (let i = 0; i < segs; i++) {
+    const j = (i + 1) % segs;
+    m.tri(ring[i].p, ring[j].p, apex, vnorm(vadd(ring[i].n, ring[j].n)), color);
+  }
+  for (let i = 0; i < segs; i++) {
+    const j = (i + 1) % segs;
+    m.tri(base, ring[j].p, ring[i].p, vmul(axis, -1), color);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   6. 轨道 / 支撑 / 站台几何体
+   --------------------------------------------------------------------- */
+function buildTrackMesh(track) {
+  const m = new Mesh();
+  sweepProfile(m, track, -0.62, 0.44, circleProfile(0.105, 9), COLOR.rail, 2);
+  sweepProfile(m, track, 0.62, 0.44, circleProfile(0.105, 9), COLOR.rail, 2);
+  sweepProfile(m, track, 0, -0.52, rectProfile(0.40, 0.30), COLOR.spine, 2);
+
+  const N = track.N, pos = track.pos, up = track.up, side = track.side, tan = track.tan;
+  const step = Math.max(1, Math.round(2.0 / track.ds));
+  for (let i = 0; i < N; i += step) {
+    const P = [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
+    const U = [up[i * 3], up[i * 3 + 1], up[i * 3 + 2]];
+    const S = [side[i * 3], side[i * 3 + 1], side[i * 3 + 2]];
+    const T = [tan[i * 3], tan[i * 3 + 1], tan[i * 3 + 2]];
+    addBox(m, vadd(P, vmul(U, 0.26)), S, U, T, 1.52, 0.13, 0.34, COLOR.tie);
+    for (const s of [-1, 1]) {
+      addBox(m, vadd(P, vadd(vmul(S, s * 0.42), vmul(U, -0.10))), S, U, T, 0.16, 0.62, 0.22, COLOR.tie);
+    }
+  }
+  return m.build();
+}
+
+function buildSupportMesh(track) {
+  const m = new Mesh();
+  const N = track.N, pos = track.pos;
+  const step = Math.max(1, Math.round(11.0 / track.ds));
+
+  function trackBelow(x, z, topY) {
+    for (let i = 0; i < N; i += 3) {
+      const dx = pos[i * 3] - x, dz = pos[i * 3 + 2] - z;
+      if (dx * dx + dz * dz < 9) {
+        const y = pos[i * 3 + 1];
+        if (y < topY - 1.2 && y > 1.0) return true;
+      }
+    }
+    return false;
+  }
+  function column(x, y, z) {
+    const top = y - 0.86;
+    if (top < 3.0) return;
+    addCylinder(m, [x, 0, z], [x, top, z], 0.36, 0.24, 8, COLOR.support, false, false);
+    addBox(m, [x, 0.35, z], [1, 0, 0], [0, 1, 0], [0, 0, 1], 1.7, 0.7, 1.7, COLOR.supportDark);
+  }
+
+  for (let i = 0; i < N; i += step) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    if (y < 4.0) continue;
+    if (i >= track.loopA - 135 && i <= track.loopB + 135) continue;  // 回环及其进出口附近不设通用支撑
+    // 柱脚放在主梁正下方，柱顶取主梁最低点（考虑俯仰与倾斜）
+    const U = [track.up[i * 3], track.up[i * 3 + 1], track.up[i * 3 + 2]];
+    const S = [track.side[i * 3], track.side[i * 3 + 1], track.side[i * 3 + 2]];
+    const cx = x - 0.52 * U[0], cz = z - 0.52 * U[2];
+    const topY = y - (0.82 * Math.abs(U[1]) + 0.40 * Math.abs(S[1])) - 0.07;
+    if (topY < 3.0) continue;
+    if (trackBelow(cx, cz, y)) continue;
+    addCylinder(m, [cx, 0, cz], [cx, topY, cz], 0.36, 0.24, 8, COLOR.support, false, false);
+    addBox(m, [cx, 0.35, cz], [1, 0, 0], [0, 1, 0], [0, 0, 1], 1.7, 0.7, 1.7, COLOR.supportDark);
+  }
+
+  // 回环支撑：两侧立柱 + 人字形斜撑 + 中央立柱（全部位于回环平面内，不与轨道相交）
+  const top = track.loopTop;
+  let iA = -1, iB = -1;
+  for (let k = 0; k <= ((track.loopB - track.loopA + N) % N); k++) {
+    const i = (track.loopA + k) % N;
+    if (Math.abs(track.tan[i * 3 + 1]) > 0.94) { if (iA < 0) iA = i; iB = i; }
+  }
+  // 回环支撑：立柱全部位于回环平面之后（z 负侧），由横梁连到轨道；
+  // 从正面看立柱被轨道遮挡，不会出现"穿过轨道"的观感，也不存在几何相交。
+  if (iA >= 0 && iB >= 0 && iB !== iA) {
+    const A = [pos[iA * 3], pos[iA * 3 + 1], pos[iA * 3 + 2]];
+    const Bp = [pos[iB * 3], pos[iB * 3 + 1], pos[iB * 3 + 2]];
+    const T = [pos[top * 3], pos[top * 3 + 1], pos[top * 3 + 2]];
+    const zBack = -9.5;
+    const cols = [
+      { x: A[0], y: A[1], z: A[2] },
+      { x: Bp[0], y: Bp[1], z: Bp[2] },
+      { x: T[0], y: T[1], z: T[2] },
+    ];
+    for (const c of cols) {
+      const zz = c.z + zBack;
+      const topY = c.y - 0.75;
+      addCylinder(m, [c.x, 0, zz], [c.x, topY, zz], 0.55, 0.36, 10, COLOR.support, false, false);
+      addBox(m, [c.x, 0.45, zz], [1, 0, 0], [0, 1, 0], [0, 0, 1], 2.4, 0.9, 2.4, COLOR.supportDark);
+      // 横梁连到轨道（终点在轨道边缘外一点）
+      addCylinder(m, [c.x, topY, zz], [c.x, topY, c.z - 0.75], 0.28, 0.28, 8, COLOR.support, false, false);
+      // 斜撑增强结构感
+      addCylinder(m, [c.x, topY * 0.42, zz], [c.x, topY - 0.1, c.z - 1.6], 0.22, 0.20, 6, COLOR.support, false, false);
+      addCylinder(m, [c.x, topY * 0.42, zz], [c.x + 5.5, 0, zz], 0.22, 0.20, 6, COLOR.support, false, false);
+    }
+  }
+  return applyGroundAO(m.build(), 5.0, 0.42);
+}
+
+function buildStationMesh(track) {
+  const m = new Mesh();
+  const i0 = Math.round(11 / track.ds);
+  const P = [track.pos[i0 * 3], track.pos[i0 * 3 + 1], track.pos[i0 * 3 + 2]];
+  const S = [track.side[i0 * 3], track.side[i0 * 3 + 1], track.side[i0 * 3 + 2]];
+  const T = [track.tan[i0 * 3], track.tan[i0 * 3 + 1], track.tan[i0 * 3 + 2]];
+  const U = [0, 1, 0];
+  const at = (a, b, c) => vadd(P, vadd(vmul(T, a), vadd(vmul(S, b), vmul(U, c))));
+
+  addBox(m, at(0, 0, -1.15), T, S, U, 26, 12, 0.5, COLOR.supportDark);
+  for (const sx of [-11.5, -4, 4, 11.5]) {
+    for (const sz of [-5.2, 5.2]) {
+      addCylinder(m, at(sx, sz, -0.9), at(sx, sz, 3.4), 0.22, 0.22, 8, COLOR.support, false, false);
+    }
+  }
+  addBox(m, at(0, 0, 3.7), T, S, U, 27, 12.5, 0.45, col(0x2f5d8a));
+  for (const sz of [-5.4, 5.4]) {
+    addBox(m, at(0, sz, 0.15), T, S, U, 26, 0.16, 0.16, COLOR.tie);
+    for (let i = -12; i <= 12; i += 3) {
+      addCylinder(m, at(i, sz, -0.9), at(i, sz, 0.15), 0.07, 0.07, 5, COLOR.tie, false, false);
+    }
+  }
+  return applyGroundAO(m.build(), 4.5, 0.38);
+}
+
+/* ---------------------------------------------------------------------
+   7. 地形 / 树 / 山 / 湖
+   --------------------------------------------------------------------- */
+function hash2(x, y) {
+  const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+}
+function fbm(x, y) {
+  let s = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < 4; i++) { s += vnoise(x * f, y * f) * amp; amp *= 0.5; f *= 2.03; }
+  return s;
+}
+function terrainH(x, z) {
+  const r = Math.hypot(x - TERRAIN_CX, z - TERRAIN_CZ);
+  let flat = Math.min(1, Math.max(0, (r - 240) / 220));
+  flat = flat * flat * (3 - 2 * flat);
+  if (flat <= 0) return 0;
+  const n = fbm(x * 0.0032, z * 0.0032) - 0.5;
+  const n2 = fbm(x * 0.011 + 40, z * 0.011 - 20) - 0.5;
+  let h = (n * 55 + n2 * 8) * flat;
+  if (h < 0) h *= 0.35;
+  return h;
+}
+
+/** 依据“离地高度”给物体烘一层软 AO（柱脚 / 树根 / 岩石底部压暗），
+    纯离线计算，运行时零开销。 */
+function applyGroundAO(mesh, height, strength) {
+  const H = height || 5, K = strength === undefined ? 0.42 : strength;
+  const n = mesh.pos.length / 3;
+  for (let i = 0; i < n; i++) {
+    const x = mesh.pos[i * 3], y = mesh.pos[i * 3 + 1], z = mesh.pos[i * 3 + 2];
+    let t = Math.min(1, Math.max(0, (y - terrainH(x, z)) / H));
+    t = t * t * (3 - 2 * t);
+    mesh.ao[i] *= 1 - K * (1 - t);
+  }
+  return mesh;
+}
+
+function buildTerrainMesh() {
+  const m = new Mesh();
+  const SIZE = 3000, SEG = 224;
+  const half = SIZE / 2, step = SIZE / SEG;
+  const gA = col(0x4c7539), gB = col(0x6d9351), gC = col(0x8a8459), rockC = col(0x7b796f);
+  const mixv = (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+  const P = [], C = [], N = [], AO = [];
+  for (let i = 0; i <= SEG; i++) {
+    P[i] = []; C[i] = []; N[i] = []; AO[i] = [];
+    for (let j = 0; j <= SEG; j++) {
+      const x = TERRAIN_CX - half + i * step, z = TERRAIN_CZ - half + j * step;
+      P[i][j] = [x, terrainH(x, z), z];
+      const t = fbm(x * 0.02, z * 0.02);
+      const t2 = fbm(x * 0.006 + 11, z * 0.006 - 7);
+      const macro = fbm(x * 0.0035 + 31, z * 0.0035 - 17);
+      const k = Math.max(0, t2 - 0.58) * 1.7;
+      let c = mixv(gA, gB, Math.min(1, Math.max(0, t * 0.78 + macro * 0.34)));
+      c = mixv(c, gC, Math.min(1, k) * 0.5);
+      const sh = 0.90 + 0.19 * fbm(x * 0.085 + 3, z * 0.085 - 8);
+      C[i][j] = [c[0] * sh, c[1] * sh, c[2] * sh];
+    }
+  }
+  const normalAt = (i, j) => {
+    const i0 = Math.max(0, i - 1), i1 = Math.min(SEG, i + 1);
+    const j0 = Math.max(0, j - 1), j1 = Math.min(SEG, j + 1);
+    return vnorm(vcross(vsub(P[i][j1], P[i][j0]), vsub(P[i1][j], P[i0][j])));
+  };
+  for (let i = 0; i <= SEG; i++) for (let j = 0; j <= SEG; j++) N[i][j] = normalAt(i, j);
+  // 陡坡露出岩石
+  for (let i = 0; i <= SEG; i++) for (let j = 0; j <= SEG; j++) {
+    const rock = Math.min(1, Math.max(0, (0.80 - N[i][j][1]) / 0.32));
+    if (rock > 0) {
+      const c = C[i][j];
+      C[i][j] = [c[0] + (rockC[0] - c[0]) * rock * 0.85, c[1] + (rockC[1] - c[1]) * rock * 0.85,
+      c[2] + (rockC[2] - c[2]) * rock * 0.85];
+    }
+  }
+  // 地平线 AO：沿 8 个方向搜索最大遮挡仰角
+  const occ = new Float32Array((SEG + 1) * (SEG + 1));
+  const DIRS = 8, STEPS = 12;
+  for (let i = 0; i <= SEG; i++) for (let j = 0; j <= SEG; j++) {
+    const h0 = P[i][j][1];
+    let acc = 0;
+    for (let d = 0; d < DIRS; d++) {
+      const a = (d / DIRS) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      let ms = 0;
+      for (let s = 1; s <= STEPS; s++) {
+        const ii = Math.min(SEG, Math.max(0, Math.round(i + ca * s)));
+        const jj = Math.min(SEG, Math.max(0, Math.round(j + sa * s)));
+        const dh = P[ii][jj][1] - h0;
+        if (dh > 0) { const m2 = dh / (s * step); if (m2 > ms) ms = m2; }
+      }
+      acc += ms;
+    }
+    occ[i * (SEG + 1) + j] = acc / DIRS;
+  }
+  for (let i = 0; i <= SEG; i++) for (let j = 0; j <= SEG; j++) {
+    AO[i][j] = Math.min(1, Math.max(0.40, 1 - occ[i * (SEG + 1) + j] * 1.9));
+  }
+  // 交替对角线，打散四边形内部三角化造成的亮暗接缝
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < SEG; j++) {
+      m.quadC(P[i][j], P[i + 1][j], P[i + 1][j + 1], P[i][j + 1],
+        N[i][j], N[i + 1][j], N[i + 1][j + 1], N[i][j + 1],
+        C[i][j], C[i + 1][j], C[i + 1][j + 1], C[i][j + 1],
+        AO[i][j], AO[i + 1][j], AO[i + 1][j + 1], AO[i][j + 1], (i + j) & 1);
+    }
+  }
+  return m.build();
+}
+
+/** 多层山脊：每个方位角生成一条向内收拢的山脊，带噪声起伏与积雪。
+    分层（近处深、远处浅）+ 大气透视，营造纵深。 */
+function buildMountainMesh() {
+  const m = new Mesh();
+  const segs = 220;
+  const mixv = (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+
+  function range(seed, r0, r1, inRatio, h0, h1, rows, snowY, lowC, rockC, snowC) {
+    const grid = [], nrm = [];
+    for (let i = 0; i <= segs; i++) {
+      const a = (i % segs) / segs * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const n1 = fbm(ca * 2.2 + seed, sa * 2.2 - seed);
+      const n2 = fbm(ca * 4.9 - seed * 2, sa * 4.9 + seed);
+      const n3 = fbm(ca * 11.0 + seed * 3, sa * 11.0 - seed * 2);
+      const Rb = r0 + (r1 - r0) * n1;
+      const ridge = 0.5 + 0.5 * Math.sin(a * 2.7 + seed) + (n2 - 0.5) * 0.75 + (n3 - 0.5) * 0.35;
+      const hh = h0 + (h1 - h0) * Math.min(1, Math.max(0, ridge));
+      grid[i] = [];
+      for (let j = 0; j <= rows; j++) {
+        const t = j / rows, tt = Math.pow(t, 0.82);
+        const r = Rb * (1 - (1 - inRatio) * tt);
+        const rn = fbm(ca * 6.0 + seed * 4 + tt * 1.6, sa * 6.0 - seed * 4 + tt * 1.6) - 0.5;
+        const rn2 = fbm(ca * 15.0 - seed * 5 + tt * 3.2, sa * 15.0 + seed * 5 - tt * 3.2) - 0.5;
+        let y = hh * Math.pow(t, 0.92);
+        y += (rn * 0.95 + rn2 * 0.35) * hh * 0.22 * (0.28 + 0.72 * t);
+        const x = TERRAIN_CX + ca * r, z = TERRAIN_CZ + sa * r;
+        grid[i][j] = [x, terrainH(x, z) + y, z];
+      }
+    }
+    for (let i = 0; i <= segs; i++) {
+      nrm[i] = [];
+      for (let j = 0; j <= rows; j++) {
+        const im = (i - 1 + segs) % segs, ip = (i + 1) % segs;
+        const jm = Math.max(0, j - 1), jp = Math.min(rows, j + 1);
+        const du = vsub(grid[ip][j], grid[im][j]);
+        const dv = vsub(grid[i][jp], grid[i][jm]);
+        let n = vnorm(vcross(dv, du));
+        // 山体是从观察者（场景中心）看过去的“迎面坡”：
+        // 水平分量必须指向中心，垂直分量保持朝上，否则会被背面剔除或受光错误。
+        if (n[1] < 0) n = vmul(n, -1);
+        const rx = grid[i][j][0] - TERRAIN_CX, rz = grid[i][j][2] - TERRAIN_CZ;
+        if (n[0] * rx + n[2] * rz > 0) { n[0] = -n[0]; n[2] = -n[2]; }
+        nrm[i][j] = vnorm(n);
+      }
+    }
+    const colAt = (p, n) => {
+      const y = p[1];
+      const slope = Math.min(1, Math.max(0, 1 - n[1]));
+      const snow = Math.min(1, Math.max(0, (y - snowY) / 45)) * Math.min(1, Math.max(0, (0.62 - slope) / 0.34));
+      let c = mixv(lowC, rockC, Math.min(1, Math.max(0, (y - 18) / 72)));
+      c = mixv(c, rockC, Math.min(1, slope * 1.7));
+      c = mixv(c, snowC, snow * 0.94);
+      return c;
+    };
+    for (let i = 0; i < segs; i++) {
+      for (let j = 0; j < rows; j++) {
+        const p00 = grid[i][j], p10 = grid[i + 1][j], p11 = grid[i + 1][j + 1], p01 = grid[i][j + 1];
+        const n00 = nrm[i][j], n10 = nrm[i + 1][j], n11 = nrm[i + 1][j + 1], n01 = nrm[i][j + 1];
+        m.quadC(p00, p10, p11, p01, n00, n10, n11, n01,
+          colAt(p00, n00), colAt(p10, n10), colAt(p11, n11), colAt(p01, n01),
+          1, 1, 1, 1, (i + j) & 1);
+      }
+    }
+  }
+
+  // 近处山脉（偏绿、深）
+  range(1.7, 540, 760, 0.58, 30, 100, 8, 72,
+    col(0x4a6147), col(0x6c736c), col(0xe3ebf3));
+  // 远处山脉（更高、更淡，靠大气透视拉开层次）
+  range(5.3, 1020, 1360, 0.80, 150, 380, 9, 250,
+    col(0x5d6d78), col(0x7d8992), col(0xeef4fa));
+  return m.build();
+}
+
+function buildTreeMesh(count, avoid) {
+  const m = new Mesh();
+  const trunk = col(0x6b4a2f), leafA = col(0x2f5d2a), leafB = col(0x3f7a34), leafC = col(0x7a8f3a);
+  const rand = (s) => { const v = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return v - Math.floor(v); };
+  let placed = 0;
+  for (let t = 0; t < count * 80 && placed < count; t++) {
+    const x = TERRAIN_CX + (rand(t * 1.7) - 0.5) * 1240;
+    const z = TERRAIN_CZ + (rand(t * 3.1 + 5) - 0.5) * 1240;
+    const y = terrainH(x, z);
+    if (Math.hypot(x - TERRAIN_CX, z - TERRAIN_CZ) < 195) continue;
+    if (Math.hypot(x - 20, z - 150) < 72) continue;
+    let ok = true;
+    if (avoid) {
+      for (let i = 0; i < avoid.N; i += 2) {
+        const dx = avoid.pos[i * 3] - x, dz = avoid.pos[i * 3 + 2] - z;
+        if (dx * dx + dz * dz < 200) { ok = false; break; }
+      }
+    }
+    if (!ok) continue;
+    placed++;
+    const sc = 0.75 + rand(t * 5.3) * 1.2;
+    const conifer = rand(t * 7.7) > 0.42;
+    const H = (conifer ? 9 : 7) * sc;
+    const tint = 0.82 + rand(t * 13.7) * 0.36;
+    const tc = (c) => shade(c, tint);
+    const tx = (rand(t * 17.1) - 0.5) * 0.5, tz = (rand(t * 19.3) - 0.5) * 0.5;
+    addCylinder(m, [x, y - 0.5, z], [x + tx, y + H * 0.55, z + tz], 0.32 * sc, 0.19 * sc, 6, tc(trunk), false, false);
+    if (conifer) {
+      const lc = rand(t * 9.1) > 0.5 ? leafA : leafB;
+      for (let k = 0; k < 3; k++) {
+        addCone(m, [x + tx * k * 0.4, y + H * (0.28 + k * 0.22), z + tz * k * 0.4],
+          [x + tx * (k + 1) * 0.4, y + H * (0.62 + k * 0.24), z + tz * (k + 1) * 0.4],
+          (1.9 - k * 0.42) * sc, 7, tc(k === 0 ? leafA : lc));
+      }
+    } else {
+      const lc = rand(t * 11.3) > 0.5 ? leafB : leafC;
+      addCone(m, [x, y + H * 0.42, z], [x + tx, y + H * 1.02, z + tz], 2.3 * sc, 8, tc(lc));
+      addCone(m, [x, y + H * 0.5, z], [x + tx * 0.7, y + H * 0.95, z + tz * 0.7], 1.7 * sc, 8, tc(leafA));
+    }
+  }
+  return applyGroundAO(m.build(), 5.5, 0.5);
+}
+
+function buildRockMesh(count) {
+  const m = new Mesh();
+  const c = col(0x8a8b84), c2 = col(0x6e6f6a);
+  const rand = (s) => { const v = Math.sin(s * 45.9898 + 12.233) * 43758.5453; return v - Math.floor(v); };
+  let placed = 0;
+  for (let t = 0; t < count * 40 && placed < count; t++) {
+    const x = TERRAIN_CX + (rand(t * 1.3) - 0.5) * 1000, z = TERRAIN_CZ + (rand(t * 2.7 + 3) - 0.5) * 1000;
+    const r = Math.hypot(x - TERRAIN_CX, z - TERRAIN_CZ);
+    if (r < 185 || r > 700) continue;
+    if (Math.hypot(x - 20, z - 150) < 72) continue;
+    placed++;
+    const y = terrainH(x, z), sc = 0.8 + rand(t * 3.9) * 2.2;
+    const base = placed % 2 ? c : c2;
+    const tilt = vnorm([rand(t * 5.1) - 0.5, 0.55 + rand(t * 6.3) * 0.8, rand(t * 7.7) - 0.5]);
+    addCone(m, [x, y - 0.45 * sc, z], vadd([x, y, z], vmul(tilt, 1.5 * sc)), 1.45 * sc, 6, base);
+    // 第二块错位的岩体，打破圆锥感
+    const ox = (rand(t * 9.3) - 0.5) * 1.6 * sc, oz = (rand(t * 11.7) - 0.5) * 1.6 * sc;
+    addCone(m, [x + ox, y - 0.5 * sc, z + oz],
+      vadd([x + ox, y, z + oz], vmul(vnorm([ox, 0.7 * sc, oz]), 1.0 * sc)), 1.0 * sc, 5, shade(base, 0.86));
+  }
+  return applyGroundAO(m.build(), 2.4, 0.5);
+}
+
+function buildLakeMesh() {
+  const m = new Mesh();
+  const segs = 64, R = 62, cx = 20, cz = 150;
+  const c = col(0x2b4a63);
+  const ctr = [cx, 0.18, cz];
+  const ring = [];
+  for (let i = 0; i < segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    const rr = R * (0.94 + 0.045 * Math.sin(a * 2 + 1) + 0.02 * Math.sin(a * 3 + 2.2));
+    ring.push([cx + Math.cos(a) * rr, 0.18, cz + Math.sin(a) * rr]);
+  }
+  for (let i = 0; i < segs; i++) m.tri(ctr, ring[i], ring[(i + 1) % segs], [0, 1, 0], c);
+  return m.build();
+}
+
+/* ---------------------------------------------------------------------
+   8. 列车车厢
+   --------------------------------------------------------------------- */
+/* 车厢：原点位于"轨面平面"（走行轨顶面），车轮正好压在轨道上 */
+const CAR_LIFT = 0.545;
+function buildCarMesh() {
+  const m = new Mesh();
+  const L = 2.25, W = 1.5;
+  // 底盘（位于两条走行轨之间）
+  addBox(m, [0, 0.36, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], 1.02, 0.36, L * 0.96, COLOR.carTrim);
+  // 车身
+  addBox(m, [0, 0.77, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], W, 0.46, L, COLOR.carBody);
+  addBox(m, [0, 1.02, L * 0.43], [1, 0, 0], [0, 1, 0], [0, 0, 1], W * 0.86, 0.3, 0.3, COLOR.carBody);
+  addBox(m, [0, 1.02, -L * 0.43], [1, 0, 0], [0, 1, 0], [0, 0, 1], W * 0.86, 0.3, 0.3, COLOR.carBody);
+  // 车轮（骑在两条走行轨正上方）
+  for (const zz of [-L * 0.34, L * 0.34]) {
+    for (const xx of [-0.62, 0.62]) {
+      addCylinder(m, [xx - 0.09, 0.19, zz], [xx + 0.09, 0.19, zz], 0.19, 0.19, 10, COLOR.wheel, true, true);
+    }
+  }
+  // 座椅 + 乘客
+  const riderCols = [col(0x2f6fb5), col(0xb5502f), col(0x3f8a5a), col(0x8a5ab5), col(0xb58a2f), col(0x2f8ab5)];
+  let ri = 0;
+  for (const zz of [-0.52, 0.5]) {
+    for (const xx of [-0.35, 0.35]) {
+      addBox(m, [xx, 1.12, zz], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.52, 0.5, 0.44, COLOR.seat);
+      addBox(m, [xx, 1.44, zz - 0.2], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.46, 0.34, 0.14, COLOR.seat);
+      addBox(m, [xx, 1.42, zz + 0.02], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.4, 0.42, 0.3, riderCols[ri++ % riderCols.length]);
+      addBox(m, [xx, 1.73, zz + 0.02], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.25, 0.25, 0.25, col(0xd9a97f));
+      addBox(m, [xx, 1.77, zz - 0.24], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.38, 0.24, 0.12, COLOR.seat);
+      addBox(m, [xx, 1.5, zz + 0.16], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0.42, 0.1, 0.3, COLOR.wheel);
+    }
+  }
+  addCone(m, [0, 0.8, L * 0.5], [0, 0.8, L * 0.5 + 0.42], 0.66, 10, COLOR.carBody);
+  return m.build();
+}
+/** 车厢在世界坐标中的变换矩阵（原点抬到轨面） */
+function carMatrix(track, s) {
+  const p = poseAt(track, s);
+  return m4fromFrame(vadd(p.pos, vmul(p.up, CAR_LIFT)), vmul(p.side, -1), p.up, p.tan);
+}
+
+/* ---------------------------------------------------------------------
+   9. 物理仿真
+   --------------------------------------------------------------------- */
+function createPhysics(track) {
+  const g = 9.81, N = track.N, L = track.length;
+  let s = (track.stationStart / N) * L;
+  let v = 0;
+  const DRAG = 0.00009, ROLL = 0.045;
+
+  function step(dt) {
+    const t = ((s / L) * N) % N;
+    const i0 = Math.floor(t), i1 = (i0 + 1) % N, f = t - i0;
+    const dy = track.tan[i0 * 3 + 1] * (1 - f) + track.tan[i1 * 3 + 1] * f;
+    const si = i0;
+    const inRange = (a, b) => (a <= b) ? (si >= a && si < b) : (si >= a || si < b);
+    const inLift = inRange(track.liftStart, track.liftEnd);
+    const inStation = inRange(track.stationStart, track.stationEnd);
+    const inBrake = inRange(track.brakeStart, track.brakeEnd);
+
+    let a = -g * dy - DRAG * v * v - ROLL;
+    v += a * dt;
+    if (inLift) v += (5.5 - v) * Math.min(1, dt * 25.0);
+    else if (inStation) v += (1.6 - v) * Math.min(1, dt * 2.5);
+    else if (inBrake) v += (9.0 - v) * Math.min(1, dt * 1.1);
+    if (v < 0.3) v = 0.3;
+    if (v > 42) v = 42;
+    s += v * dt;
+    if (s > L) s -= L;
+    if (s < 0) s += L;
+  }
+  return {
+    get s() { return s; }, set s(val) { s = ((val % L) + L) % L; },
+    get v() { return v; }, set v(val) { v = val; },
+    get length() { return L; }, step,
+  };
+}
+
+function poseAt(track, sPos) {
+  const N = track.N, L = track.length;
+  const t = ((sPos / L) * N % N + N) % N;
+  const i0 = Math.floor(t), i1 = (i0 + 1) % N, f = t - i0;
+  const lerp3 = (arr) => [
+    arr[i0 * 3] * (1 - f) + arr[i1 * 3] * f,
+    arr[i0 * 3 + 1] * (1 - f) + arr[i1 * 3 + 1] * f,
+    arr[i0 * 3 + 2] * (1 - f) + arr[i1 * 3 + 2] * f,
+  ];
+  return {
+    pos: lerp3(track.pos), tan: vnorm(lerp3(track.tan)),
+    up: vnorm(lerp3(track.up)), side: vnorm(lerp3(track.side)),
+    kap: lerp3(track.kap), i0, i1, f,
+  };
+}
+
+
+
+/* =====================================================================
+   过山车 · WebGL2 PBR 渲染器 / 交互 / 物理主循环
+   （与 coaster-core.js 内联在同一作用域）
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   公共 GLSL 片段
+   --------------------------------------------------------------------- */
+const GLSL_CONST = `#define PI 3.14159265359
+#define EPS 1e-5
+/* 立方体贴图六面方向（与 GL 立方图约定一致） */
+vec3 cubeDir(int f, vec2 uv){
+  if (f == 0) return vec3( 1.0, -uv.y, -uv.x);
+  if (f == 1) return vec3(-1.0, -uv.y,  uv.x);
+  if (f == 2) return vec3( uv.x,  1.0,  uv.y);
+  if (f == 3) return vec3( uv.x, -1.0, -uv.y);
+  if (f == 4) return vec3( uv.x, -uv.y,  1.0);
+  return vec3(-uv.x, -uv.y, -1.0);
+}
+`;
+
+const GLSL_NOISE = `
+float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+             mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+/* 3 阶 fbm：比原来 5 阶更快，天空/云层仍足够细腻 */
+float fbm3(vec2 p){
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 3; i++) { s += vnoise(p) * a; p = p * 2.07 + 13.1; a *= 0.5; }
+  return s * 1.1428;
+}
+vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+`;
+
+/* 天空函数：瑞利渐变 + 太阳侧散射 + 日晕 + 可见云层
+   同时作为环境光、天空盒与大气透视的散射色来源。 */
+const GLSL_SKY = `
+uniform vec3 uSunDir, uSunColor;
+uniform float uTime;
+vec3 skyColor(vec3 dir, float withDisk){
+  float h = dir.y;
+  float up = clamp(h, 0.0, 1.0);
+  vec3 zenith  = vec3(0.020, 0.055, 0.185);
+  vec3 horizon = vec3(0.60, 0.68, 0.79);
+  vec3 col = mix(horizon, zenith, pow(up, 0.42));
+  col = mix(col, zenith * 0.82, pow(up, 1.6));
+
+  // 地平线附近的太阳侧前向散射（暖色雾带）
+  vec3 dh = normalize(vec3(dir.x, 0.0, dir.z) + EPS);
+  vec3 sh = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + EPS);
+  float fwd = max(0.0, dot(dh, sh));
+  float band = exp(-abs(h) * 6.0) * (0.30 + 0.70 * fwd * fwd);
+  col += uSunColor * 0.045 * band;
+
+  // 日晕：宽光晕 + 紧光环
+  float sd = max(0.0, dot(dir, uSunDir));
+  col += uSunColor * (0.045 * pow(sd, 3.0) + 0.28 * pow(sd, 14.0));
+  col += uSunColor * pow(sd, 3000.0) * 22.0 * withDisk;
+
+  // 地平线以下：地面方向的散射光
+  col = mix(col, vec3(0.20, 0.205, 0.19), clamp(-h * 3.2, 0.0, 1.0));
+
+  // 云层：两层低频 fbm，覆盖率适中，太阳侧有银边
+  if (h > 0.015) {
+    vec2 uv = dir.xz / (h + 0.18) * 1.15 + vec2(uTime * 0.0032, uTime * 0.0011);
+    float c  = fbm3(uv * 1.15);
+    float c2 = fbm3(uv * 3.10 + 19.0);
+    float dens = c * 0.74 + c2 * 0.36;
+    float cov = smoothstep(0.47, 0.71, dens);
+    float fade = smoothstep(0.015, 0.20, h);
+    float lit = smoothstep(0.30, 0.90, dens);
+    vec3 cloud = mix(vec3(0.34, 0.38, 0.46), vec3(1.16, 1.15, 1.12), lit);
+    cloud += uSunColor * (pow(sd, 6.0) * 0.15 + pow(sd, 64.0) * 0.20) * cov;
+    col = mix(col, cloud, cov * fade * 0.88);
+  }
+  return col;
+}
+`;
+
+/* ---------------------------------------------------------------------
+   主渲染着色器（Cook-Torrance PBR + IBL）
+   --------------------------------------------------------------------- */
+const VS_MAIN = `#version 300 es
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNrm;
+layout(location = 2) in vec3 aCol;
+layout(location = 3) in float aAO;
+uniform mat4 uVP, uModel;
+uniform mat3 uNormalMat;
+out vec3 vPos; out vec3 vNrm; out vec3 vCol; out float vAO;
+void main(){
+  vec4 wp = uModel * vec4(aPos, 1.0);
+  vPos = wp.xyz;
+  vNrm = uNormalMat * aNrm;
+  vCol = aCol;
+  vAO = aAO;
+  gl_Position = uVP * wp;
+}`;
+
+const FS_MAIN = `#version 300 es
+precision highp float;
+precision highp sampler2DShadow;
+in vec3 vPos; in vec3 vNrm; in vec3 vCol; in float vAO;
+uniform vec3 uCamPos, uFogColor;
+uniform float uFogDensity, uRough, uMetal, uUseTex, uTexScale, uTexTint;
+uniform float uShadowTexel, uShadowOn, uMaxMip, uEnvInt, uNormalScale, uSpecTint;
+uniform float uWater, uShadowNOff, uIrrLod, uTime;
+uniform vec3 uSunDir, uSunColor;
+uniform mat4 uLightVP;
+uniform sampler2D uTex, uNrmMap;
+uniform highp sampler2DShadow uShadowMap;
+uniform highp samplerCube uEnvMap, uIrrMap;
+out vec4 fragColor;
+${GLSL_CONST}
+${GLSL_NOISE}
+
+const vec2 POISSON[12] = vec2[12](
+  vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
+  vec2( 0.962,  0.195), vec2( 0.473, -0.480), vec2( 0.519, 0.767), vec2( 0.185, -0.893),
+  vec2( 0.507,  0.064), vec2( 0.896, -0.289), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+
+/* 阴影：法线偏移 + 旋转泊松 PCF，兼顾接触阴影与带状抑制 */
+float shadowAt(vec3 wp, vec3 N){
+  if (uShadowOn < 0.5) return 1.0;
+  vec4 sp = uLightVP * vec4(wp + N * uShadowNOff, 1.0);
+  vec3 p = sp.xyz / sp.w * 0.5 + 0.5;
+  if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
+  float ang = hash21(gl_FragCoord.xy * 1.7) * 6.2831853;
+  float ca = cos(ang), sa = sin(ang);
+  mat2 R = mat2(ca, -sa, sa, ca);
+  float s = 0.0, r = uShadowTexel * 2.6;
+  for (int i = 0; i < 12; i++){
+    vec2 o = R * POISSON[i] * r;
+    s += texture(uShadowMap, vec3(p.xy + o, p.z));
+  }
+  return s / 12.0;
+}
+
+float D_GGX(float NoH, float a){
+  float a2 = a * a;
+  float d = NoH * NoH * (a2 - 1.0) + 1.0;
+  return a2 / (PI * d * d);
+}
+float V_SmithGGX(float NoV, float NoL, float a){
+  float a2 = a * a;
+  float lv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
+  float ll = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
+  return 0.5 / max(lv + ll, 1e-4);
+}
+vec3 F_Schlick(float u, vec3 f0){ return f0 + (vec3(1.0) - f0) * pow(1.0 - u, 5.0); }
+vec3 EnvBRDF(vec3 f0, float r, float NoV){
+  const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+  const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+  vec4 rr = r * c0 + c1;
+  float a004 = min(rr.x * rr.x, exp2(-9.28 * NoV)) * rr.x + rr.y;
+  vec2 ab = vec2(-1.04, 1.04) * a004 + rr.zw;
+  return f0 * ab.x + ab.y;
+}
+/* 水面波法线：三组方向波叠加，纯解析，开销极低 */
+vec3 waterNormal(vec2 p, float t){
+  vec2 k1 = vec2(0.92, 0.38), k2 = vec2(-0.55, 0.83), k3 = vec2(0.18, -0.98);
+  float p1 = dot(p, k1) * 0.55 + t * 0.85;
+  float p2 = dot(p, k2) * 0.92 - t * 1.15;
+  float p3 = dot(p, k3) * 1.85 + t * 1.90;
+  vec2 g = k1 * cos(p1) * 0.021 + k2 * cos(p2) * 0.032 + k3 * cos(p3) * 0.015;
+  return normalize(vec3(-g.x, 1.0, -g.y));
+}
+
+void main(){
+  vec3 V = normalize(uCamPos - vPos);
+  vec3 N = normalize(vNrm);
+  vec3 albedo = vCol;
+  float rough = clamp(uRough, 0.045, 1.0);
+  float metal = uMetal;
+  float ao = clamp(vAO, 0.0, 1.0);
+  bool isWater = uWater > 0.5;
+
+  if (uUseTex > 0.5) {
+    vec3 tx = texture(uTex, vPos.xz * uTexScale).rgb;
+    albedo *= tx * uTexTint;
+    vec3 nt = texture(uNrmMap, vPos.xz * uTexScale).xyz * 2.0 - 1.0;
+    N = normalize(N + vec3(nt.x, 0.0, nt.y) * uNormalScale);
+  }
+  if (isWater) {
+    N = waterNormal(vPos.xz * 0.42, uTime);
+    rough = 0.055;
+    albedo = vec3(0.014, 0.048, 0.066);
+  }
+  if (dot(N, V) < 0.0) N = -N;
+
+  // 高光抗锯齿：用屏幕空间法线变化量展宽粗糙度，抑制远处轨道闪烁
+  vec3 dN = fwidth(N);
+  rough = clamp(sqrt(rough * rough + dot(dN, dN) * 0.16), 0.02, 1.0);
+
+  float NoV = max(dot(N, V), 1e-4);
+  vec3 L = normalize(uSunDir);
+  vec3 H = normalize(L + V);
+  float NoL = max(dot(N, L), 0.0);
+  float NoH = max(dot(N, H), 0.0);
+  float VoH = max(dot(V, H), 0.0);
+  float sh = shadowAt(vPos, N);
+
+  float a = max(0.0016, rough * rough);
+  vec3 f0 = mix(vec3(0.04), albedo, metal);
+  vec3 F = F_Schlick(VoH, f0);
+  float D = D_GGX(NoH, a);
+  float Vis = V_SmithGGX(NoV, NoL, a);
+
+  vec3 specD = F * D * Vis * uSunColor * NoL * sh;
+  vec3 kd = (vec3(1.0) - F) * (1.0 - metal);
+  vec3 diffD = kd * albedo / PI * uSunColor * NoL * sh;
+
+  vec3 R = reflect(-V, N);
+  vec3 pre = textureLod(uEnvMap, R, rough * uMaxMip).rgb * uSpecTint;
+  vec3 irr = textureLod(uIrrMap, N, uIrrLod).rgb;
+  vec3 Fe = EnvBRDF(f0, rough, NoV);
+  vec3 specI = pre * Fe * uEnvInt * mix(1.0, ao, 0.7);
+  vec3 diffI = irr * albedo * (1.0 - metal) * uEnvInt * ao * (0.44 + 0.56 * sh);
+
+  vec3 color = specD + diffD + specI + diffI;
+
+  /* 大气透视：散射色取自天空立方图 → 与天空自然衔接，并带太阳侧暖雾 */
+  float dist = length(uCamPos - vPos);
+  vec3 vdir = (vPos - uCamPos) / max(dist, 1e-3);
+  float hFall = exp(-max(vPos.y, 0.0) * 0.010);
+  float opt = dist * uFogDensity * (0.72 + 0.78 * hFall);
+  float fog = 1.0 - exp(-opt * opt);
+  // 用已烘焙的天空立方图（模糊 mip）取散射色：一次纹理采样，含云与日晕
+  vec3 fogCol = mix(textureLod(uEnvMap, vdir, 3.0).rgb, uFogColor, 0.16);
+  color = mix(color, fogCol, clamp(fog, 0.0, 1.0));
+
+  color = aces(color);
+  fragColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+}`;
+
+const VS_DEPTH = `#version 300 es
+layout(location = 0) in vec3 aPos;
+uniform mat4 uLightVP, uModel;
+void main(){ gl_Position = uLightVP * uModel * vec4(aPos, 1.0); }`;
+
+const FS_DEPTH = `#version 300 es
+precision mediump float;
+void main(){}`;
+
+const VS_QUAD = `#version 300 es
+layout(location = 0) in vec2 aP;
+out vec2 vNdc;
+void main(){ vNdc = aP; gl_Position = vec4(aP, 0.0, 1.0); }`;
+
+const FS_SKY = `#version 300 es
+precision highp float;
+in vec2 vNdc;
+uniform vec3 uCamRight, uCamUp, uCamFwd;
+uniform float uTanHalf, uAspect;
+out vec4 outColor;
+${GLSL_CONST}
+${GLSL_NOISE}
+${GLSL_SKY}
+void main(){
+  vec3 dir = normalize(uCamFwd + uCamRight * (vNdc.x * uTanHalf * uAspect) + uCamUp * (vNdc.y * uTanHalf));
+  vec3 col = aces(skyColor(dir, 1.0));
+  outColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}`;
+
+/* 立方体贴图捕捉（生成 IBL 环境） */
+const FS_ENV = `#version 300 es
+precision highp float;
+in vec2 vNdc;
+uniform int uFace;
+out vec4 outColor;
+${GLSL_CONST}
+${GLSL_NOISE}
+${GLSL_SKY}
+void main(){
+  outColor = vec4(skyColor(normalize(cubeDir(uFace, vNdc)), 0.0), 1.0);
+}`;
+
+/* 余弦卷积 → 漫反射辐照度（一次性生成，运行时直接采样，零额外开销） */
+const FS_IRR = `#version 300 es
+precision highp float;
+in vec2 vNdc;
+uniform int uFace;
+uniform samplerCube uEnv;
+out vec4 outColor;
+${GLSL_CONST}
+${GLSL_NOISE}
+void main(){
+  vec3 N = normalize(cubeDir(uFace, vNdc));
+  vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 T = normalize(cross(up, N));
+  vec3 B = cross(N, T);
+  vec3 sum = vec3(0.0);
+  const int NS = 96;
+  for (int i = 0; i < NS; i++){
+    float u1 = (float(i) + 0.5) / float(NS);
+    float u2 = fract(sin(float(i) * 12.9898) * 43758.5453);
+    float phi = 6.2831853 * u1;
+    float cosT = sqrt(1.0 - u2);
+    float sinT = sqrt(u2);
+    vec3 d = T * (sinT * cos(phi)) + B * (sinT * sin(phi)) + N * cosT;
+    sum += textureLod(uEnv, d, 3.0).rgb;
+  }
+  outColor = vec4(sum / float(NS), 1.0);
+}`;
+
+/* ---------------------------------------------------------------------
+   GL 工具
+   --------------------------------------------------------------------- */
+function compile(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error('Shader compile error: ' + gl.getShaderInfoLog(s) + '\n' + src);
+  }
+  return s;
+}
+function program(gl, vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('Link error: ' + gl.getProgramInfoLog(p));
+  return p;
+}
+function uniformLocs(gl, p, names) {
+  const o = {};
+  for (const n of names) o[n] = gl.getUniformLocation(p, n);
+  return o;
+}
+function uploadMesh(gl, m) {
+  const n = m.pos.length / 3;
+  const inter = new Float32Array(n * 10);
+  const ao = m.ao || null;
+  for (let i = 0; i < n; i++) {
+    inter[i * 10] = m.pos[i * 3]; inter[i * 10 + 1] = m.pos[i * 3 + 1]; inter[i * 10 + 2] = m.pos[i * 3 + 2];
+    inter[i * 10 + 3] = m.nrm[i * 3]; inter[i * 10 + 4] = m.nrm[i * 3 + 1]; inter[i * 10 + 5] = m.nrm[i * 3 + 2];
+    inter[i * 10 + 6] = m.col[i * 3]; inter[i * 10 + 7] = m.col[i * 3 + 1]; inter[i * 10 + 8] = m.col[i * 3 + 2];
+    inter[i * 10 + 9] = ao ? ao[i] : 1;
+  }
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 40, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 40, 12);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 40, 24);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 40, 36);
+  const ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+  return { vao, count: m.idx.length };
+}
+
+/* 程序化草地：反照率 + 法线贴图 */
+function makeGroundTextures(gl) {
+  const S = 256;
+  const noiseFn = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const h = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+    return h(xi, yi) * (1 - u) * (1 - v) + h(xi + 1, yi) * u * (1 - v) +
+      h(xi, yi + 1) * (1 - u) * v + h(xi + 1, yi + 1) * u * v;
+  };
+  const height = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      let n = 0, amp = 0.5, f = 0.055;
+      for (let o = 0; o < 6; o++) { n += noiseFn(x * f, y * f) * amp; amp *= 0.5; f *= 2.05; }
+      height[y * S + x] = n;
+    }
+  }
+  const cvA = document.createElement('canvas'); cvA.width = cvA.height = S;
+  const cvN = document.createElement('canvas'); cvN.width = cvN.height = S;
+  const cA = cvA.getContext('2d'), cN = cvN.getContext('2d');
+  const iA = cA.createImageData(S, S), iN = cN.createImageData(S, S);
+  const dA = iA.data, dN = iN.data;
+  const at = (x, y) => height[((y % S + S) % S) * S + ((x % S + S) % S)];
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const n = height[y * S + x];
+      const g = 0.70 + n * 0.62;
+      const i = (y * S + x) * 4;
+      dA[i] = Math.min(255, 255 * 0.40 * g);
+      dA[i + 1] = Math.min(255, 255 * 0.74 * g);
+      dA[i + 2] = Math.min(255, 255 * 0.29 * g);
+      dA[i + 3] = 255;
+      const dx = (at(x + 1, y) - at(x - 1, y)) * 5.5;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * 5.5;
+      const nx = -dx, ny = -dy, nz = 1;
+      const l = Math.hypot(nx, ny, nz);
+      dN[i] = (nx / l * 0.5 + 0.5) * 255;
+      dN[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+      dN[i + 2] = (nz / l * 0.5 + 0.5) * 255;
+      dN[i + 3] = 255;
+    }
+  }
+  cA.putImageData(iA, 0, 0);
+  cN.putImageData(iN, 0, 0);
+  const mk = (cv) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const ext = gl.getExtension('EXT_texture_filter_anisotropic');
+    if (ext) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, 8);
+    return t;
+  };
+  return { albedo: mk(cvA), normal: mk(cvN) };
+}
+
+/* ---------------------------------------------------------------------
+   主程序
+   --------------------------------------------------------------------- */
+function initApp() {
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl2', { antialias: true, powerPreference: 'high-performance' });
+  if (!gl) {
+    document.getElementById('fallback').style.display = 'flex';
+    document.getElementById('loading').style.display = 'none';
+    return;
+  }
+
+  /* ---- 场景数据 ---- */
+  const track = buildTrack();
+  const G = {
+    track: uploadMesh(gl, buildTrackMesh(track)),
+    support: uploadMesh(gl, buildSupportMesh(track)),
+    station: uploadMesh(gl, buildStationMesh(track)),
+    terrain: uploadMesh(gl, buildTerrainMesh()),
+    mountain: uploadMesh(gl, buildMountainMesh()),
+    tree: uploadMesh(gl, buildTreeMesh(320, track)),
+    rock: uploadMesh(gl, buildRockMesh(60)),
+    lake: uploadMesh(gl, buildLakeMesh()),
+    car: uploadMesh(gl, buildCarMesh()),
+  };
+  const physics = createPhysics(track);
+  const groundTex = makeGroundTextures(gl);
+
+  /* ---- 材质表（PBR） ---- */
+  const MAT = {
+    terrain: { rough: 0.90, metal: 0.00, tex: true, texScale: 0.052, texTint: 1.28, nrm: 1.15 },
+    mountain: { rough: 0.96, metal: 0.00, tex: false },
+    rock: { rough: 0.90, metal: 0.00, tex: false },
+    tree: { rough: 0.86, metal: 0.00, tex: false },
+    rail: { rough: 0.28, metal: 0.16, tex: false },
+    support: { rough: 0.38, metal: 0.10, tex: false },
+    station: { rough: 0.44, metal: 0.10, tex: false },
+    lake: { rough: 0.055, metal: 0.00, tex: false, envInt: 1.55, water: true },
+    car: { rough: 0.20, metal: 0.14, tex: false },
+  };
+
+  /* ---- 光照 ---- */
+  const sunEl = 24 * Math.PI / 180, sunAz = 246 * Math.PI / 180;
+  const sunDir = [Math.cos(sunEl) * Math.sin(sunAz), Math.sin(sunEl), Math.cos(sunEl) * Math.cos(sunAz)];
+  const sunColor = [6.2, 5.0, 3.6];
+  const fogColor = [0.36, 0.40, 0.45];
+  const fogDensity = 0.00042;
+
+  /* ---- 程序 ---- */
+  const progMain = program(gl, VS_MAIN, FS_MAIN);
+  const uM = uniformLocs(gl, progMain, ['uVP', 'uModel', 'uNormalMat', 'uLightVP', 'uCamPos', 'uSunDir',
+    'uSunColor', 'uFogColor', 'uFogDensity', 'uRough', 'uMetal', 'uUseTex', 'uTexScale', 'uTexTint',
+    'uShadowTexel', 'uShadowOn', 'uMaxMip', 'uEnvInt', 'uNormalScale', 'uSpecTint', 'uTime',
+    'uWater', 'uShadowNOff', 'uIrrLod', 'uTex', 'uNrmMap', 'uShadowMap', 'uEnvMap', 'uIrrMap']);
+  const progDepth = program(gl, VS_DEPTH, FS_DEPTH);
+  const uD = uniformLocs(gl, progDepth, ['uLightVP', 'uModel']);
+  const progSky = program(gl, VS_QUAD, FS_SKY);
+  const uS = uniformLocs(gl, progSky, ['uCamRight', 'uCamUp', 'uCamFwd', 'uTanHalf', 'uAspect',
+    'uSunDir', 'uSunColor', 'uTime']);
+  const progEnv = program(gl, VS_QUAD, FS_ENV);
+  const uE = uniformLocs(gl, progEnv, ['uFace', 'uSunDir', 'uSunColor', 'uTime']);
+  const progIrr = program(gl, VS_QUAD, FS_IRR);
+  const uI = uniformLocs(gl, progIrr, ['uFace', 'uEnv']);
+
+  /* ---- 全屏三角 ---- */
+  const skyVao = gl.createVertexArray();
+  gl.bindVertexArray(skyVao);
+  const skyVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, skyVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  /* ---- 环境立方体贴图（IBL） ---- */
+  const ENV_SIZE = 256;
+  const ENV_MIP = Math.log2(ENV_SIZE);
+  let envTex = null;
+  {
+    const hasFloat = !!gl.getExtension('EXT_color_buffer_float');
+    const internal = hasFloat ? gl.RGBA16F : gl.RGBA8;
+    const type = hasFloat ? gl.FLOAT : gl.UNSIGNED_BYTE;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+    for (let f = 0; f < 6; f++) {
+      gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, internal, ENV_SIZE, ENV_SIZE, 0, gl.RGBA, type, null);
+    }
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.useProgram(progEnv);
+    gl.uniform3fv(uE.uSunDir, sunDir);
+    gl.uniform3fv(uE.uSunColor, sunColor);
+    gl.uniform1f(uE.uTime, 0);
+    gl.bindVertexArray(skyVao);
+    gl.viewport(0, 0, ENV_SIZE, ENV_SIZE);
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+    for (let f = 0; f < 6; f++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, tex, 0);
+      gl.uniform1i(uE.uFace, f);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
+    envTex = tex;
+  }
+
+  /* ---- 漫反射辐照度（余弦卷积，一次性；运行时零开销） ---- */
+  const IRR_SIZE = 32;
+  let irrTex = null, irrOk = false;
+  {
+    const hasFloat = !!gl.getExtension('EXT_color_buffer_float');
+    const internal = hasFloat ? gl.RGBA16F : gl.RGBA8;
+    const type = hasFloat ? gl.FLOAT : gl.UNSIGNED_BYTE;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+    for (let f = 0; f < 6; f++) {
+      gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, internal, IRR_SIZE, IRR_SIZE, 0, gl.RGBA, type, null);
+    }
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.useProgram(progIrr);
+    gl.uniform1i(uI.uEnv, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, envTex);
+    gl.bindVertexArray(skyVao);
+    gl.viewport(0, 0, IRR_SIZE, IRR_SIZE);
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+    let ok = true;
+    for (let f = 0; f < 6; f++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { ok = false; break; }
+      gl.uniform1i(uI.uFace, f);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
+    if (ok) { irrTex = tex; irrOk = true; } else { gl.deleteTexture(tex); }
+  }
+  const irrMap = irrOk ? irrTex : envTex;
+  const irrLod = irrOk ? 0 : ENV_MIP * 0.82;
+
+  /* ---- 阴影贴图 ---- */
+  const maxTexSize = (gl.getParameter && gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 2048;
+  const SHADOW_SIZE = Math.min(3072, maxTexSize);
+  const shadowTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+  const shadowFb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowTex, 0);
+  gl.drawBuffers([gl.NONE]);
+  gl.readBuffer(gl.NONE);
+  const fbOk = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  const b = track.bounds;
+  const sceneCenter = [(b.minX + b.maxX) / 2, 22, (b.minZ + b.maxZ) / 2];
+  const sceneRadius = Math.max(Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) * 0.5 + 30, 150);
+
+  /* ---- 阴影相机：紧贴场景包围盒，换取更高的有效阴影分辨率 ---- */
+  const sPad = 45;
+  const sMinX = b.minX - sPad, sMaxX = b.maxX + sPad;
+  const sMinZ = b.minZ - sPad, sMaxZ = b.maxZ + sPad;
+  const sMinY = -2, sMaxY = 78;
+  const shadowCenter = [(sMinX + sMaxX) / 2, 20, (sMinZ + sMaxZ) / 2];
+  const lightDist = 600;
+  const lightEye = [
+    shadowCenter[0] + sunDir[0] * lightDist,
+    shadowCenter[1] + sunDir[1] * lightDist,
+    shadowCenter[2] + sunDir[2] * lightDist,
+  ];
+  const lightView = m4lookAt(lightEye, shadowCenter, [0, 1, 0]);
+  let sR = 150, sNear = 300, sFar = 900;
+  {
+    let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9, mnz = 1e9, mxz = -1e9;
+    for (const x of [sMinX, sMaxX]) for (const y of [sMinY, sMaxY]) for (const z of [sMinZ, sMaxZ]) {
+      const q = m4transformPoint(lightView, [x, y, z]);
+      mnx = Math.min(mnx, q[0]); mxx = Math.max(mxx, q[0]);
+      mny = Math.min(mny, q[1]); mxy = Math.max(mxy, q[1]);
+      mnz = Math.min(mnz, q[2]); mxz = Math.max(mxz, q[2]);
+    }
+    sR = Math.max(Math.abs(mnx), Math.abs(mxx), Math.abs(mny), Math.abs(mxy)) * 1.04 + 4;
+    sNear = Math.max(1, -mxz - 12);
+    sFar = -mnz + 12;
+  }
+  const lightVP = m4mul(m4ortho(-sR, sR, -sR, sR, sNear, sFar), lightView);
+  const shadowTexelWorld = (2 * sR) / SHADOW_SIZE;
+
+  /* ---- 相机 ---- */
+  const cam = {
+    pos: [-260, 150, 300], target: sceneCenter.slice(), up: [0, 1, 0],
+    mode: 0, orbitYaw: 0.7, orbitPitch: 0.42, orbitDist: 420,
+  };
+  const camTarget = { pos: cam.pos.slice(), target: cam.target.slice(), up: [0, 1, 0] };
+
+  /* ---- 输入 ---- */
+  let dragging = false, lastX = 0, lastY = 0, autoRotate = 0;
+  canvas.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; try { canvas.setPointerCapture(e.pointerId); } catch (x) { } });
+  canvas.addEventListener('pointerup', (e) => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (x) { } });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    if (cam.mode !== 2) setMode(2);
+    cam.orbitYaw -= dx * 0.006;
+    cam.orbitPitch = Math.max(0.03, Math.min(1.45, cam.orbitPitch + dy * 0.005));
+    autoRotate = 0;
+  });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (cam.mode !== 2) setMode(2);
+    cam.orbitDist = Math.max(60, Math.min(1400, cam.orbitDist * (1 + Math.sign(e.deltaY) * 0.12)));
+    autoRotate = 0;
+  }, { passive: false });
+
+  const modeNames = ['第一视角 · 车内', '追逐视角 · 跟随', '自由视角 · 环视'];
+  function setMode(m) {
+    if (cam.mode === m) return;
+    cam.mode = m;
+    if (m === 2) {
+      const d = Math.hypot(cam.pos[0] - sceneCenter[0], cam.pos[1] - sceneCenter[1], cam.pos[2] - sceneCenter[2]);
+      cam.orbitDist = Math.max(80, d);
+      cam.orbitPitch = Math.max(0.05, Math.min(1.4, Math.asin(Math.max(-1, Math.min(1, (cam.pos[1] - sceneCenter[1]) / d)))));
+      cam.orbitYaw = Math.atan2(cam.pos[0] - sceneCenter[0], cam.pos[2] - sceneCenter[2]);
+    }
+    document.getElementById('mode').textContent = modeNames[m];
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '1') setMode(0);
+    else if (e.key === '2') setMode(1);
+    else if (e.key === '3') setMode(2);
+    else if (e.key === 'h' || e.key === 'H') document.getElementById('hud').classList.toggle('hidden');
+  });
+
+  /* ---- 尺寸 ---- */
+  let W = 1, H = 1, dpr = 1, dprCap = 2;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, dprCap);
+    W = Math.max(2, Math.floor(canvas.clientWidth * dpr));
+    H = Math.max(2, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+  }
+  window.addEventListener('resize', resize);
+
+  /* ---- 绘制 ---- */
+  function drawMesh(mesh, model, opt) {
+    gl.uniformMatrix4fv(uM.uModel, false, model);
+    const nm = new Float32Array([
+      model[0], model[1], model[2], model[4], model[5], model[6], model[8], model[9], model[10],
+    ]);
+    for (let c = 0; c < 3; c++) {
+      const l = Math.hypot(nm[c * 3], nm[c * 3 + 1], nm[c * 3 + 2]) || 1;
+      nm[c * 3] /= l; nm[c * 3 + 1] /= l; nm[c * 3 + 2] /= l;
+    }
+    gl.uniformMatrix3fv(uM.uNormalMat, false, nm);
+    gl.uniform1f(uM.uRough, opt.rough);
+    gl.uniform1f(uM.uMetal, opt.metal);
+    gl.uniform1f(uM.uEnvInt, opt.envInt === undefined ? 1.0 : opt.envInt);
+    gl.uniform1f(uM.uSpecTint, opt.specTint === undefined ? 1.0 : opt.specTint);
+    gl.uniform1f(uM.uUseTex, opt.tex ? 1 : 0);
+    gl.uniform1f(uM.uWater, opt.water ? 1 : 0);
+    if (opt.tex) {
+      gl.uniform1f(uM.uTexScale, opt.texScale || 0.05);
+      gl.uniform1f(uM.uTexTint, opt.texTint || 1.0);
+      gl.uniform1f(uM.uNormalScale, opt.nrm === undefined ? 0.0 : opt.nrm);
+    }
+    gl.bindVertexArray(mesh.vao);
+    gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0);
+  }
+  function drawDepth(mesh, model) {
+    gl.uniformMatrix4fv(uD.uModel, false, model);
+    gl.bindVertexArray(mesh.vao);
+    gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0);
+  }
+
+  const carFrames = [];
+  const IDENT = m4();
+
+  /* ---- 主循环 ---- */
+  let lastT = performance.now(), timeAcc = 0;
+  let fpsAcc = 0, fpsCnt = 0, fpsShown = 60, lowFpsTime = 0;
+
+  function frame(now) {
+    const dtRaw = (now - lastT) / 1000;
+    lastT = now;
+    const dt = Math.min(0.05, Math.max(0.0005, dtRaw));
+    timeAcc += dt;
+
+    const steps = Math.max(1, Math.min(6, Math.ceil(dt / 0.0075)));
+    for (let i = 0; i < steps; i++) physics.step(dt / steps);
+
+    const NCAR = 6, GAP = 3.02;
+    carFrames.length = 0;
+    for (let i = 0; i < NCAR; i++) carFrames.push(poseAt(track, physics.s - i * GAP));
+
+    const lead = carFrames[0];
+    if (cam.mode === 0) {
+      camTarget.pos = vadd(vadd(lead.pos, vmul(lead.up, 1.12)), vmul(lead.tan, 0.55));
+      camTarget.target = vadd(vadd(lead.pos, vmul(lead.tan, 15)), vmul(lead.up, 1.0));
+      camTarget.up = lead.up;
+    } else if (cam.mode === 1) {
+      camTarget.pos = vadd(vadd(lead.pos, vmul(lead.tan, -11.5)), vmul(lead.up, 4.2));
+      camTarget.target = vadd(vadd(lead.pos, vmul(lead.tan, 7)), vmul(lead.up, 1.2));
+      camTarget.up = [0, 1, 0];
+    } else {
+      if (!dragging) autoRotate += dt * 0.045;
+      const yaw = cam.orbitYaw + autoRotate;
+      const cp = Math.cos(cam.orbitPitch), sp = Math.sin(cam.orbitPitch);
+      camTarget.pos = [
+        sceneCenter[0] + Math.sin(yaw) * cp * cam.orbitDist,
+        sceneCenter[1] + sp * cam.orbitDist,
+        sceneCenter[2] + Math.cos(yaw) * cp * cam.orbitDist,
+      ];
+      camTarget.target = sceneCenter.slice();
+      camTarget.up = [0, 1, 0];
+    }
+    const k = cam.mode === 0 ? 1 : (cam.mode === 1 ? 0.16 : 0.12);
+    for (let i = 0; i < 3; i++) {
+      cam.pos[i] += (camTarget.pos[i] - cam.pos[i]) * k;
+      cam.target[i] += (camTarget.target[i] - cam.target[i]) * (cam.mode === 0 ? 1 : 0.14);
+      cam.up[i] += (camTarget.up[i] - cam.up[i]) * (cam.mode === 0 ? 1.0 : 0.10);
+    }
+    if (cam.mode === 0) {
+      const shakeAmt = Math.max(0, (physics.v - 12) / 30) * 0.05;
+      const t = now * 0.001;
+      cam.pos[0] += Math.sin(t * 37.1) * shakeAmt;
+      cam.pos[1] += Math.sin(t * 29.7) * shakeAmt;
+      cam.pos[2] += Math.cos(t * 33.3) * shakeAmt;
+    }
+
+    resize();
+    gl.viewport(0, 0, W, H);
+
+    /* --- 阴影 pass --- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFb);
+    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1.6, 3.0);
+    gl.useProgram(progDepth);
+    gl.uniformMatrix4fv(uD.uLightVP, false, lightVP);
+    drawDepth(G.track, IDENT);
+    drawDepth(G.support, IDENT);
+    drawDepth(G.station, IDENT);
+    drawDepth(G.tree, IDENT);
+    drawDepth(G.rock, IDENT);
+    for (let i = cam.mode === 0 ? 1 : 0; i < carFrames.length; i++) {
+      const cf = carFrames[i];
+      drawDepth(G.car, carMatrix(track, physics.s - i * GAP));
+    }
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+
+    /* --- 主 pass --- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(fogColor[0], fogColor[1], fogColor[2], 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const aspect = W / H;
+    const fov = (cam.mode === 0 ? 78 : 52) * Math.PI / 180;
+    const proj = m4perspective(fov, aspect, 0.6, 4200);
+    const view = m4lookAt(cam.pos, cam.target, cam.up);
+    const vp = m4mul(proj, view);
+
+    /* 天空 */
+    gl.depthMask(false);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progSky);
+    const camFwd = vnorm(vsub(cam.target, cam.pos));
+    const camRight = vnorm(vcross(camFwd, cam.up));
+    const camUp = vcross(camRight, camFwd);
+    gl.uniform3fv(uS.uCamFwd, camFwd);
+    gl.uniform3fv(uS.uCamRight, camRight);
+    gl.uniform3fv(uS.uCamUp, camUp);
+    gl.uniform3fv(uS.uSunDir, sunDir);
+    gl.uniform3fv(uS.uSunColor, sunColor);
+    gl.uniform1f(uS.uTanHalf, Math.tan(fov / 2));
+    gl.uniform1f(uS.uAspect, aspect);
+    gl.uniform1f(uS.uTime, timeAcc);
+    gl.bindVertexArray(skyVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+
+    /* 几何 */
+    gl.useProgram(progMain);
+    gl.uniformMatrix4fv(uM.uVP, false, vp);
+    gl.uniformMatrix4fv(uM.uLightVP, false, lightVP);
+    gl.uniform3fv(uM.uCamPos, cam.pos);
+    gl.uniform3fv(uM.uSunDir, sunDir);
+    gl.uniform3fv(uM.uSunColor, sunColor);
+    gl.uniform3fv(uM.uFogColor, fogColor);
+    gl.uniform1f(uM.uFogDensity, fogDensity);
+    gl.uniform1f(uM.uShadowTexel, 1 / SHADOW_SIZE);
+    gl.uniform1f(uM.uShadowOn, fbOk ? 1 : 0);
+    gl.uniform1f(uM.uShadowNOff, shadowTexelWorld * 2.2);
+    gl.uniform1f(uM.uMaxMip, ENV_MIP);
+    gl.uniform1f(uM.uIrrLod, irrLod);
+    gl.uniform1f(uM.uTime, timeAcc);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, groundTex.albedo); gl.uniform1i(uM.uTex, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(uM.uShadowMap, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, groundTex.normal); gl.uniform1i(uM.uNrmMap, 2);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_CUBE_MAP, envTex); gl.uniform1i(uM.uEnvMap, 3);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_CUBE_MAP, irrMap); gl.uniform1i(uM.uIrrMap, 4);
+
+    drawMesh(G.terrain, IDENT, MAT.terrain);
+    drawMesh(G.mountain, IDENT, MAT.mountain);
+    drawMesh(G.rock, IDENT, MAT.rock);
+    drawMesh(G.tree, IDENT, MAT.tree);
+    drawMesh(G.track, IDENT, MAT.rail);
+    drawMesh(G.support, IDENT, MAT.support);
+    drawMesh(G.station, IDENT, MAT.station);
+    drawMesh(G.lake, IDENT, MAT.lake);
+    for (let i = cam.mode === 0 ? 1 : 0; i < carFrames.length; i++) {
+      const cf = carFrames[i];
+      drawMesh(G.car, carMatrix(track, physics.s - i * GAP), MAT.car);
+    }
+
+    /* HUD + 自适应分辨率 */
+    fpsAcc += dtRaw; fpsCnt++;
+    if (fpsAcc > 0.4) {
+      fpsShown = fpsCnt / fpsAcc; fpsAcc = 0; fpsCnt = 0;
+      if (fpsShown < 42) lowFpsTime += 0.4; else lowFpsTime = Math.max(0, lowFpsTime - 0.25);
+      if (lowFpsTime > 2.0 && dprCap > 1) { dprCap = 1; lowFpsTime = 0; }
+    }
+    updateHUD(lead);
+
+    requestAnimationFrame(frame);
+  }
+
+  /* ---- HUD ---- */
+  const elSpeed = document.getElementById('speed');
+  const elG = document.getElementById('gforce');
+  const elAlt = document.getElementById('alt');
+  const elBar = document.getElementById('bar');
+  const elFps = document.getElementById('fps');
+  const elHint = document.getElementById('hint');
+  function updateHUD(lead) {
+    const kmh = physics.v * 3.6;
+    elSpeed.textContent = kmh.toFixed(0);
+    const kv = Math.hypot(lead.kap[0], lead.kap[1], lead.kap[2]);
+    const aC = physics.v * physics.v * kv;
+    const kdir = kv > 1e-9 ? [lead.kap[0] / kv, lead.kap[1] / kv, lead.kap[2] / kv] : [0, 0, 0];
+    const gf = (aC * vdot(kdir, lead.up) + 9.81 * lead.up[1]) / 9.81;
+    elG.textContent = gf.toFixed(2);
+    elG.className = gf > 3.2 ? 'hot' : (gf < 0.35 ? 'float' : '');
+    elAlt.textContent = lead.pos[1].toFixed(0);
+    elBar.style.width = Math.min(100, (kmh / 125) * 100) + '%';
+    elFps.textContent = fpsShown.toFixed(0);
+  }
+  setTimeout(() => { if (elHint) elHint.classList.add('fade'); }, 9000);
+
+  /* ---- 启动 ---- */
+  resize();
+  setMode(0);
+  document.getElementById('loading').style.display = 'none';
+  requestAnimationFrame((t) => { lastT = t; requestAnimationFrame(frame); });
+}
+setTimeout(function () {
+  try { initApp(); }
+  catch (err) {
+    console.error(err);
+    document.getElementById('loading').style.display = 'none';
+    const fb = document.getElementById('fallback');
+    fb.style.display = 'flex';
+    const p = fb.querySelector('p');
+    if (p) p.innerHTML = '初始化失败<br><span>' + (err && err.message ? err.message : err) + '</span>';
+  }
+}, 60);
+
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d13feba9296db1',t:'MTc4OTc0MzkzNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

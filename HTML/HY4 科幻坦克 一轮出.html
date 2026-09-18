@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>REVENANT MK-VII · 重型科幻主战坦克 / Hard-Surface Showcase</title>
+<style>
+  :root{
+    --cy:#7fe7ff; --cy-dim:#3c7f93; --amber:#ffb457; --red:#ff6a5a;
+    --bg:#05080c; --panel:rgba(8,14,20,.72); --line:rgba(127,231,255,.22);
+    --txt:#c8dbe4; --txt-dim:#6c8794;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,"DejaVu Sans Mono",monospace;color:var(--txt)}
+  canvas{display:block;position:fixed;inset:0}
+
+  /* ---------- 扫描线 / 氛围 ---------- */
+  #grain{position:fixed;inset:0;pointer-events:none;z-index:5;
+    background:repeating-linear-gradient(180deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px);
+    mix-blend-mode:overlay}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;z-index:10;pointer-events:none}
+  .panel{background:var(--panel);border:1px solid var(--line);
+    backdrop-filter:blur(9px) saturate(1.2);-webkit-backdrop-filter:blur(9px);
+    box-shadow:0 10px 40px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.03);
+    }
+  .panel::before,.panel::after{content:"";position:absolute;width:9px;height:9px;border:1px solid var(--cy);opacity:.75}
+  .panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+  .panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+
+  #title{left:22px;top:22px;padding:14px 20px 13px;min-width:308px}
+  #title h1{font-size:19px;letter-spacing:.22em;color:#eaf7ff;font-weight:600}
+  #title h1 span{color:var(--cy)}
+  #title .sub{font-size:10px;letter-spacing:.30em;color:var(--cy-dim);margin-top:5px}
+  #title .spec{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:11px;
+    font-size:10.5px;color:var(--txt-dim);border-top:1px solid var(--line);padding-top:9px}
+  #title .spec b{color:var(--txt);font-weight:500;letter-spacing:.04em}
+
+  #ctrl{right:22px;top:22px;width:264px;padding:13px 15px 15px;pointer-events:auto}
+  #ctrl h2{font-size:10px;letter-spacing:.3em;color:var(--cy);margin-bottom:11px;
+    padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:9px 0;font-size:11px}
+  .row label{color:var(--txt-dim);letter-spacing:.08em;cursor:pointer;user-select:none}
+  .sw{width:42px;height:19px;border:1px solid var(--line);background:rgba(255,255,255,.03);
+    position:relative;cursor:pointer;flex:0 0 auto;transition:.18s}
+  .sw i{position:absolute;top:2px;left:2px;width:15px;height:13px;background:var(--txt-dim);
+    transition:.18s;display:block}
+  .sw.on{border-color:var(--cy);background:rgba(127,231,255,.10)}
+  .sw.on i{left:23px;background:var(--cy);box-shadow:0 0 10px var(--cy)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:112px;height:3px;background:rgba(255,255,255,.10);outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:15px;background:var(--cy);
+    box-shadow:0 0 8px rgba(127,231,255,.7);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:11px;height:15px;border:0;background:var(--cy);cursor:pointer}
+  .btn{flex:1;text-align:center;padding:6px 0;font-size:10px;letter-spacing:.16em;color:var(--txt-dim);
+    border:1px solid var(--line);cursor:pointer;transition:.16s;user-select:none}
+  .btn:hover{color:#eaf7ff;border-color:var(--cy);background:rgba(127,231,255,.10)}
+  .btn:active{transform:translateY(1px)}
+
+  #stats{left:22px;bottom:22px;padding:11px 15px;font-size:10.5px;min-width:238px}
+  #stats .k{color:var(--txt-dim);display:inline-block;width:96px;letter-spacing:.08em}
+  #stats .v{color:var(--cy)}
+  #stats .bar{height:3px;background:rgba(255,255,255,.07);margin-top:8px;position:relative;overflow:hidden}
+  #stats .bar i{position:absolute;inset:0 100% 0 0;background:linear-gradient(90deg,var(--cy),#fff);transition:width .2s}
+
+  #hint{right:22px;bottom:22px;font-size:10px;color:var(--txt-dim);letter-spacing:.1em;text-align:right;line-height:1.85}
+  #hint b{color:var(--cy);font-weight:500}
+
+  #crosshair{position:fixed;left:50%;top:50%;z-index:4;pointer-events:none;
+    width:150px;height:150px;margin:-75px 0 0 -75px;opacity:.18}
+  #crosshair div{position:absolute;background:var(--cy)}
+
+  /* ---------- 载入 ---------- */
+  #loader{position:fixed;inset:0;z-index:50;background:#04070a;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:16px;transition:opacity .7s}
+  #loader.done{opacity:0;pointer-events:none}
+  #loader .lt{font-size:11px;letter-spacing:.42em;color:var(--cy)}
+  #loader .lb{width:230px;height:2px;background:rgba(255,255,255,.08);overflow:hidden}
+  #loader .lb i{display:block;height:100%;width:36%;background:var(--cy);
+    animation:slide 1.05s cubic-bezier(.6,.05,.35,.95) infinite}
+  @keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(320%)}}
+  #loader .err{color:var(--red);font-size:11px;max-width:70vw;text-align:center;line-height:1.7}
+
+  @media (max-width:900px){
+    #title{min-width:0;left:12px;top:12px;padding:10px 14px}
+    #ctrl{right:12px;top:12px;width:210px}
+    #stats,#hint{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="grain"></div>
+
+<div id="crosshair">
+  <div style="left:0;top:74px;width:22px;height:1px"></div>
+  <div style="right:0;top:74px;width:22px;height:1px"></div>
+  <div style="left:74px;top:0;width:1px;height:22px"></div>
+  <div style="left:74px;bottom:0;width:1px;height:22px"></div>
+</div>
+
+<div class="hud panel" id="title">
+  <h1>REVENANT <span>MK-VII</span></h1>
+  <div class="sub">HEAVY ASSAULT PLATFORM // 硬表面程序化建模</div>
+  <div class="spec">
+    <b>主武器</b><span>ET-140 电热化学炮 140mm L/52</span>
+    <b>副武器</b><span>同轴 30mm 链炮 / 12.7mm RWS</span>
+    <b>挂载</b><span>2×三联装 反装甲导弹巢</span>
+    <b>装甲</b><span>纳米晶复合基甲 + 反应装甲阵列</span>
+    <b>动力</b><span>2200kW 燃气轮机 / 电传动</span>
+    <b>全重</b><span>68.4 t</span>
+  </div>
+</div>
+
+<div class="hud panel" id="ctrl">
+  <h2>CONTROL DECK</h2>
+  <div class="row"><label for="s-rot">自动环绕</label><div class="sw on" id="s-rot"><i></i></div></div>
+  <div class="row"><label for="s-drv">行驶模式</label><div class="sw" id="s-drv"><i></i></div></div>
+  <div class="row"><label for="s-tur">炮塔扫描</label><div class="sw on" id="s-tur"><i></i></div></div>
+  <div class="row"><label for="s-blm">辉光泛光</label><div class="sw on" id="s-blm"><i></i></div></div>
+  <div class="row"><label for="s-wfr">线框结构</label><div class="sw" id="s-wfr"><i></i></div></div>
+  <div class="row"><label for="s-clip">装甲剖切</label><input type="range" id="s-clip" min="0" max="100" value="0"></div>
+  <div class="row" style="margin-top:14px">
+    <div class="btn" id="b-reset">重置视角</div>
+    <div class="btn" id="b-shot" style="margin-left:8px">截图</div>
+  </div>
+</div>
+
+<div class="hud panel" id="stats">
+  <div><span class="k">帧率</span><span class="v" id="v-fps">--</span> FPS</div>
+  <div><span class="k">三角面</span><span class="v" id="v-tri">--</span></div>
+  <div><span class="k">绘制批次</span><span class="v" id="v-call">--</span></div>
+  <div><span class="k">几何体</span><span class="v" id="v-obj">--</span></div>
+  <div><span class="k">材质</span><span class="v" id="v-mat">--</span></div>
+  <div class="bar"><i id="v-bar"></i></div>
+</div>
+
+<div class="hud" id="hint">
+  <div><b>拖拽</b> 旋转 · <b>滚轮</b> 缩放 · <b>右键</b> 平移</div>
+  <div><b>R</b> 环绕 · <b>D</b> 行驶 · <b>T</b> 扫描 · <b>X</b> 线框 · <b>B</b> 泛光 · <b>H</b> 隐藏UI</div>
+</div>
+
+<div id="loader">
+  <div class="lt">BUILDING HARD-SURFACE GEOMETRY</div>
+  <div class="lb"><i></i></div>
+  <div class="err" id="lerr"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry }  from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer }      from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }          from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass }     from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass }          from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass }          from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass }            from 'three/addons/postprocessing/SMAAPass.js';
+import { RoomEnvironment }     from 'three/addons/environments/RoomEnvironment.js';
+
+/* ==========================================================================
+   0 · 工具函数
+   ========================================================================== */
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const D2R   = Math.PI / 180;
+
+// 固定种子随机（保证每次生成的细节完全一致）
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let _seed = 20260828;
+const rnd = mulberry32(_seed);
+const rr  = (a, b) => a + (b - a) * rnd();
+const rsign = () => (rnd() < 0.5 ? -1 : 1);
+
+/* ==========================================================================
+   1 · 程序化贴图（细节法线 / 粗糙度 / 编号水贴 / 地面网格 / 接触阴影）
+   ========================================================================== */
+function cv(size){ const c = document.createElement('canvas'); c.width = c.height = size; return c; }
+
+// 高度图 -> 法线图
+function heightToNormal(src, strength){
+  const s = src.width;
+  const sd = src.getContext('2d').getImageData(0, 0, s, s).data;
+  const out = cv(s), octx = out.getContext('2d');
+  const od = octx.createImageData(s, s);
+  const H = (x, y) => sd[(((y + s) % s) * s + ((x + s) % s)) * 4] / 255;
+  for (let y = 0; y < s; y++){
+    for (let x = 0; x < s; x++){
+      const dx = (H(x - 1, y) - H(x + 1, y)) * strength;
+      const dy = (H(x, y - 1) - H(x, y + 1)) * strength;
+      const l = Math.hypot(dx, dy, 1);
+      const i = (y * s + x) * 4;
+      od.data[i]     = (dx / l * 0.5 + 0.5) * 255;
+      od.data[i + 1] = (dy / l * 0.5 + 0.5) * 255;
+      od.data[i + 2] = (1 / l * 0.5 + 0.5) * 255;
+      od.data[i + 3] = 255;
+    }
+  }
+  octx.putImageData(od, 0, 0);
+  return out;
+}
+
+// 硬表面细节贴图组：面板缝 + 铆钉 + 划痕 + 磨损
+function makeDetailMaps(size = 512){
+  const h = cv(size), c = h.getContext('2d');
+  c.fillStyle = '#808080'; c.fillRect(0, 0, size, size);
+
+  // 细粒噪声
+  const img = c.getImageData(0, 0, size, size), d = img.data;
+  for (let i = 0; i < d.length; i += 4){
+    const v = 128 + (Math.random() - 0.5) * 30;
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+
+  // 面板缝（凹陷）
+  c.lineCap = 'round';
+  for (let i = 0; i < 26; i++){
+    c.strokeStyle = `rgba(30,30,30,${rr(0.45, 0.9)})`;
+    c.lineWidth = rr(1, 2.6);
+    c.beginPath();
+    const x0 = rr(0, size), y0 = rr(0, size), len = rr(size * 0.15, size * 0.7);
+    c.moveTo(x0, y0);
+    if (rnd() < 0.5) c.lineTo(x0 + len, y0 + rr(-3, 3));
+    else             c.lineTo(x0 + rr(-3, 3), y0 + len);
+    c.stroke();
+  }
+  // 矩形检修板
+  for (let i = 0; i < 7; i++){
+    const w = rr(size * 0.08, size * 0.22), hh = rr(size * 0.06, size * 0.18);
+    const x = rr(0, size - w), y = rr(0, size - hh);
+    c.strokeStyle = 'rgba(35,35,35,.8)'; c.lineWidth = 2;
+    c.strokeRect(x, y, w, hh);
+    c.strokeStyle = 'rgba(225,225,225,.22)'; c.lineWidth = 1;
+    c.strokeRect(x + 2, y + 2, w - 4, hh - 4);
+  }
+  // 铆钉 / 螺栓（凸起）
+  for (let i = 0; i < 130; i++){
+    const x = rr(0, size), y = rr(0, size), r = rr(2.2, 4.2);
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(235,235,235,.95)');
+    g.addColorStop(0.62, 'rgba(160,160,160,.55)');
+    g.addColorStop(1, 'rgba(90,90,90,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+  }
+  // 划痕
+  for (let i = 0; i < 40; i++){
+    c.strokeStyle = `rgba(215,215,215,${rr(0.1, 0.35)})`;
+    c.lineWidth = rr(0.5, 1.3);
+    c.beginPath();
+    const x = rr(0, size), y = rr(0, size);
+    c.moveTo(x, y); c.lineTo(x + rr(-40, 40), y + rr(-40, 40)); c.stroke();
+  }
+  const normalMap = heightToNormal(h, 1.9);
+
+  // 粗糙度图：由噪声 + 条状流锈构成
+  const rg = cv(size), rc = rg.getContext('2d');
+  rc.fillStyle = '#8a8a8a'; rc.fillRect(0, 0, size, size);
+  const ri = rc.getImageData(0, 0, size, size), rd = ri.data;
+  for (let i = 0; i < rd.length; i += 4){
+    const v = 120 + (Math.random() - 0.5) * 78;
+    rd[i] = rd[i + 1] = rd[i + 2] = v; rd[i + 3] = 255;
+  }
+  rc.putImageData(ri, 0, 0);
+  for (let i = 0; i < 18; i++){
+    const x = rr(0, size), y = rr(0, size), w = rr(6, 34), hh = rr(size * 0.1, size * 0.6);
+    const g = rc.createLinearGradient(x, y, x + w, y);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, `rgba(255,255,255,${rr(0.12, 0.3)})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    rc.fillStyle = g; rc.fillRect(x, y, w, hh);
+  }
+
+  // 污渍 / 色调变化（作为 color map 相乘）
+  const gc = cv(size), gx = gc.getContext('2d');
+  gx.fillStyle = '#ffffff'; gx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 90; i++){
+    const x = rr(0, size), y = rr(0, size), r = rr(10, 70);
+    const g = gx.createRadialGradient(x, y, 0, x, y, r);
+    const a = rr(0.04, 0.16);
+    g.addColorStop(0, `rgba(60,70,80,${a})`);
+    g.addColorStop(1, 'rgba(60,70,80,0)');
+    gx.fillStyle = g; gx.beginPath(); gx.arc(x, y, r, 0, TAU); gx.fill();
+  }
+  for (let i = 0; i < 22; i++){ // 边角磨损高光
+    const x = rr(0, size), y = rr(0, size), r = rr(4, 16);
+    const g = gx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${rr(0.1, 0.3)})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    gx.fillStyle = g; gx.beginPath(); gx.arc(x, y, r, 0, TAU); gx.fill();
+  }
+  return { normalMap, roughnessMap: rg, colorMap: gc };
+}
+
+// 地面全息网格
+function makeGridTexture(size = 512, cell = 64){
+  const c = cv(size), x = c.getContext('2d');
+  x.fillStyle = '#080b10'; x.fillRect(0, 0, size, size);
+  x.strokeStyle = 'rgba(96,158,196,.20)'; x.lineWidth = 1;
+  for (let i = 0; i <= size; i += cell / 2){
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, size); x.stroke();
+    x.beginPath(); x.moveTo(0, i); x.lineTo(size, i); x.stroke();
+  }
+  x.strokeStyle = 'rgba(132,214,255,.42)'; x.lineWidth = 1.6;
+  for (let i = 0; i <= size; i += cell * 2){
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, size); x.stroke();
+    x.beginPath(); x.moveTo(0, i); x.lineTo(size, i); x.stroke();
+  }
+  const img = x.getImageData(0, 0, size, size), d = img.data;
+  for (let i = 0; i < d.length; i += 4){
+    const n = (Math.random() - 0.5) * 14;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  x.putImageData(img, 0, 0);
+  return c;
+}
+
+// 背景渐变（等距柱面）
+function makeSkyTexture(){
+  const w = 32, h = 256, c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.00, '#0d1620');
+  g.addColorStop(0.42, '#0a1017');
+  g.addColorStop(0.62, '#070b10');
+  g.addColorStop(1.00, '#030507');
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  return c;
+}
+
+// 接触阴影（软投影贴片）
+function makeBlobTexture(size = 256){
+  const c = cv(size), x = c.getContext('2d');
+  const g = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0.00, 'rgba(0,0,0,.92)');
+  g.addColorStop(0.45, 'rgba(0,0,0,.55)');
+  g.addColorStop(0.78, 'rgba(0,0,0,.16)');
+  g.addColorStop(1.00, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, size, size);
+  return c;
+}
+
+// 车体编号水贴
+function makeNumberTexture(txt){
+  const s = 256, c = cv(s), x = c.getContext('2d');
+  x.clearRect(0, 0, s, s);
+  x.font = 'bold 168px "Arial Black", Impact, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.lineWidth = 12; x.strokeStyle = 'rgba(10,12,15,.9)';
+  x.strokeText(txt, s / 2, s / 2 + 6);
+  x.fillStyle = '#e8f4fa';
+  x.fillText(txt, s / 2, s / 2 + 6);
+  x.globalAlpha = 0.5;
+  x.fillStyle = '#8fd6ef';
+  x.fillText(txt, s / 2, s / 2 + 2);
+  x.globalAlpha = 1;
+  return c;
+}
+
+// 警示 / 标识水贴
+function makeHazardTexture(){
+  const s = 256, c = cv(s), x = c.getContext('2d');
+  x.clearRect(0, 0, s, s);
+  x.save();
+  x.beginPath(); x.rect(8, 96, 240, 64); x.clip();
+  for (let i = -260; i < 260; i += 34){
+    x.fillStyle = '#f2b23c';
+    x.beginPath();
+    x.moveTo(i, 96); x.lineTo(i + 17, 96); x.lineTo(i + 17 - 34, 160); x.lineTo(i - 34, 160);
+    x.closePath(); x.fill();
+    x.fillStyle = 'rgba(12,14,18,.85)';
+    x.beginPath();
+    x.moveTo(i + 17, 96); x.lineTo(i + 34, 96); x.lineTo(i, 160); x.lineTo(i - 17, 160);
+    x.closePath(); x.fill();
+  }
+  x.restore();
+  x.strokeStyle = 'rgba(230,240,246,.85)'; x.lineWidth = 5;
+  x.strokeRect(8, 96, 240, 64);
+  x.fillStyle = '#dfeaf1';
+  x.font = 'bold 30px monospace'; x.textAlign = 'center';
+  x.fillText('HIGH VOLTAGE', 128, 60);
+  x.font = 'bold 20px monospace';
+  x.fillText('RESTRICTED AREA', 128, 196);
+  return c;
+}
+
+function makeInsigniaTexture(){
+  const s = 256, c = cv(s), x = c.getContext('2d');
+  x.clearRect(0, 0, s, s);
+  x.strokeStyle = '#9fe4ff'; x.lineWidth = 9; x.lineJoin = 'miter';
+  x.beginPath();
+  x.moveTo(128, 30); x.lineTo(214, 96); x.lineTo(128, 162); x.lineTo(42, 96); x.closePath();
+  x.stroke();
+  x.fillStyle = 'rgba(159,228,255,.18)'; x.fill();
+  x.fillStyle = '#e9f7ff';
+  x.beginPath();
+  for (let i = 0; i < 10; i++){
+    const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 20 : 44;
+    const px = 128 + Math.cos(a) * r, py = 104 + Math.sin(a) * r;
+    i ? x.lineTo(px, py) : x.moveTo(px, py);
+  }
+  x.closePath(); x.fill();
+  x.fillStyle = '#0a1017';
+  x.font = 'bold 26px monospace'; x.textAlign = 'center';
+  x.fillText('MK-VII', 128, 214);
+  return c;
+}
+
+function tex(canvas, { srgb = false, rx = 3, ry = 3, aniso = 8 } = {}){
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(rx, ry);
+  t.anisotropy = aniso;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/* ==========================================================================
+   2 · 渲染器 / 场景 / 相机 / 灯光 / 环境
+   ========================================================================== */
+const canvas = document.getElementById('cv');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.06;
+renderer.localClippingEnabled = true;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x070b11, 22, 78);
+scene.background = (() => {
+  const t = new THREE.CanvasTexture(makeSkyTexture());
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+
+const camera = new THREE.PerspectiveCamera(34, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(11.5, 5.2, 13.5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.35, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.055;
+controls.minDistance = 5.5;
+controls.maxDistance = 46;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.55;
+
+// 环境光照（PMREM）
+const pmrem = new THREE.PMREMGenerator(renderer);
+pmrem.compileEquirectangularShader();
+const envRT = pmrem.fromScene(new RoomEnvironment(), 0.035);
+scene.environment = envRT.texture;
+pmrem.dispose();
+
+// 三点布光 + 轮廓光
+const hemi = new THREE.HemisphereLight(0x9dc6ff, 0x0a0d12, 0.35);
+scene.add(hemi);
+
+const keyLight = new THREE.DirectionalLight(0xfff1de, 3.1);
+keyLight.position.set(9.5, 13, 7.5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.near = 1;
+keyLight.shadow.camera.far = 46;
+keyLight.shadow.camera.left = -11;
+keyLight.shadow.camera.right = 11;
+keyLight.shadow.camera.top = 11;
+keyLight.shadow.camera.bottom = -11;
+keyLight.shadow.bias = -0.0006;
+keyLight.shadow.normalBias = 0.022;
+scene.add(keyLight);
+
+const rimLight = new THREE.DirectionalLight(0x63d2ff, 2.2);
+rimLight.position.set(-10, 6.5, -9);
+scene.add(rimLight);
+
+const fillLight = new THREE.DirectionalLight(0xff9a5c, 0.55);
+fillLight.position.set(-6, 3, 10);
+scene.add(fillLight);
+
+const bounce = new THREE.DirectionalLight(0x4f7fa8, 0.4);
+bounce.position.set(2, -3, -4);
+scene.add(bounce);
+
+/* ==========================================================================
+   3 · 材质库
+   ========================================================================== */
+const DET = makeDetailMaps(512);
+const TEX = {
+  normal:    tex(DET.normalMap,    { rx: 2.2, ry: 2.2 }),
+  rough:     tex(DET.roughnessMap, { rx: 2.2, ry: 2.2 }),
+  color:     tex(DET.colorMap,     { rx: 2.2, ry: 2.2, srgb: true })
+};
+
+const clipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 12);
+const ALL_MATS = [];
+
+function reg(m){
+  m.clippingPlanes = [clipPlane];
+  m.envMapIntensity = 0.62;
+  ALL_MATS.push(m);
+  return m;
+}
+function withDetail(m, scale = 0.55){
+  m.normalMap = TEX.normal;
+  m.normalScale = new THREE.Vector2(scale, scale);
+  m.roughnessMap = TEX.rough;
+  m.map = TEX.color;
+  return m;
+}
+
+const MAT = {
+  // 主装甲漆面（带清漆）
+  hull: reg(withDetail(new THREE.MeshPhysicalMaterial({
+    color: 0x4c545e, metalness: 0.92, roughness: 1.0,
+    clearcoat: 0.42, clearcoatRoughness: 0.38, sheen: 0.0
+  }), 0.62)),
+  // 深色结构件
+  dark: reg(withDetail(new THREE.MeshStandardMaterial({
+    color: 0x232830, metalness: 0.88, roughness: 1.0
+  }), 0.5)),
+  // 亮面装甲板
+  panel: reg(withDetail(new THREE.MeshPhysicalMaterial({
+    color: 0x6a757f, metalness: 0.9, roughness: 1.0,
+    clearcoat: 0.55, clearcoatRoughness: 0.3
+  }), 0.45)),
+  // 结构钢（螺栓 / 杆件）
+  steel: reg(withDetail(new THREE.MeshStandardMaterial({
+    color: 0x8b949c, metalness: 1.0, roughness: 0.72
+  }), 0.35)),
+  // 高亮金属（液压杆 / 炮口）
+  bright: reg(new THREE.MeshStandardMaterial({
+    color: 0xc3ccd4, metalness: 1.0, roughness: 0.22
+  })),
+  // 反应装甲块
+  era: reg(withDetail(new THREE.MeshStandardMaterial({
+    color: 0x39424c, metalness: 0.85, roughness: 0.9
+  }), 0.7)),
+  // 橡胶
+  rubber: reg(withDetail(new THREE.MeshStandardMaterial({
+    color: 0x16191d, metalness: 0.06, roughness: 0.96
+  }), 0.9)),
+  rubberDark: reg(new THREE.MeshStandardMaterial({
+    color: 0x0e1013, metalness: 0.04, roughness: 0.98
+  })),
+  // 履带
+  track: reg(withDetail(new THREE.MeshStandardMaterial({
+    color: 0x33383f, metalness: 0.95, roughness: 0.68
+  }), 0.55)),
+  // 玻璃 / 观瞄
+  glass: reg(new THREE.MeshPhysicalMaterial({
+    color: 0x0a1a26, metalness: 0.0, roughness: 0.045,
+    transparent: true, opacity: 0.88, clearcoat: 1.0, clearcoatRoughness: 0.03,
+    envMapIntensity: 2.4
+  })),
+  // 自发光
+  glowCyan: reg(new THREE.MeshStandardMaterial({
+    color: 0x071a22, emissive: 0x64e2ff, emissiveIntensity: 3.4, metalness: 0.2, roughness: 0.3
+  })),
+  glowAmber: reg(new THREE.MeshStandardMaterial({
+    color: 0x1a0f04, emissive: 0xffa23a, emissiveIntensity: 2.6, metalness: 0.2, roughness: 0.4
+  })),
+  glowRed: reg(new THREE.MeshStandardMaterial({
+    color: 0x1a0605, emissive: 0xff4a3a, emissiveIntensity: 2.4, metalness: 0.2, roughness: 0.4
+  })),
+  glowWhite: reg(new THREE.MeshStandardMaterial({
+    color: 0x101418, emissive: 0xdff2ff, emissiveIntensity: 4.2, metalness: 0.1, roughness: 0.2
+  })),
+  // 水贴
+  decal: reg(new THREE.MeshStandardMaterial({
+    map: tex(makeNumberTexture('07'), { srgb: true, rx: 1, ry: 1 }), transparent: true, alphaTest: 0.42,
+    metalness: 0.25, roughness: 0.62, polygonOffset: true, polygonOffsetFactor: -4,
+    side: THREE.DoubleSide
+  })),
+  hazard: reg(new THREE.MeshStandardMaterial({
+    map: tex(makeHazardTexture(), { srgb: true, rx: 1, ry: 1 }), transparent: true, alphaTest: 0.42,
+    metalness: 0.2, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -4,
+    side: THREE.DoubleSide
+  })),
+  insignia: reg(new THREE.MeshStandardMaterial({
+    map: tex(makeInsigniaTexture(), { srgb: true, rx: 1, ry: 1 }), transparent: true, alphaTest: 0.42,
+    metalness: 0.3, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4,
+    side: THREE.DoubleSide
+  }))
+};
+
+/* 地面 */
+const floorTex = tex(makeGridTexture(512, 128), { srgb: true, rx: 42, ry: 42 });
+const floorMat = reg(new THREE.MeshStandardMaterial({
+  map: floorTex, color: 0xffffff, metalness: 0.35, roughness: 0.52
+}));
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(240, 240, 1, 1), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// 接触阴影贴片
+const blob = new THREE.Mesh(
+  new THREE.PlaneGeometry(12.5, 6.2),
+  new THREE.MeshBasicMaterial({
+    map: new THREE.CanvasTexture(makeBlobTexture()), transparent: true,
+    depthWrite: false, opacity: 0.85, toneMapped: false
+  })
+);
+blob.rotation.x = -Math.PI / 2;
+blob.position.set(0.2, 0.012, 0);
+blob.scale.set(1, 1.35, 1);
+blob.renderOrder = 2;
+scene.add(blob);
+
+/* ==========================================================================
+   4 · 几何辅助 / 硬表面构件累加器
+   ========================================================================== */
+const GEO = {
+  bolt:      new THREE.CylinderGeometry(0.024, 0.024, 0.016, 6),
+  boltBig:   new THREE.CylinderGeometry(0.036, 0.036, 0.022, 6),
+  eraBlock:  null,
+  slat:      new THREE.BoxGeometry(0.42, 0.03, 0.05),
+  treadBlk:  new THREE.BoxGeometry(0.30, 0.045, 0.075),
+  tube:      new THREE.CylinderGeometry(0.055, 0.055, 0.30, 14, 1, true),
+  handle:    null
+};
+
+function rb(w, h, d, r = 0.02, seg = 1){
+  const rad = Math.min(r, Math.min(w, h, d) * 0.49);
+  return new RoundedBoxGeometry(w, h, d, seg, rad);
+}
+function box(w, h, d){ return new THREE.BoxGeometry(w, h, d); }
+function cyl(rt, rbn, h, s = 18, open = false){ return new THREE.CylinderGeometry(rt, rbn, h, s, 1, open); }
+function ball(r, s = 14){ return new THREE.SphereGeometry(r, s, Math.max(6, s >> 1)); }
+function tor(r, t, s = 12){ return new THREE.TorusGeometry(r, t, 6, s); }
+
+// 横断面挤出：profile = [[x,y]...]，沿 Z 挤出长度（X/Y 保持设计坐标，仅在挤出方向居中）
+function crossPlate(profile, length, bevel = 0.014){
+  const s = new THREE.Shape();
+  s.moveTo(profile[0][0], profile[0][1]);
+  for (let i = 1; i < profile.length; i++) s.lineTo(profile[i][0], profile[i][1]);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, {
+    depth: length, bevelEnabled: bevel > 0, bevelSize: bevel, bevelThickness: bevel,
+    bevelSegments: 1, steps: 1, curveSegments: 6
+  });
+  g.computeBoundingBox();
+  g.translate(0, 0, -(g.boundingBox.min.z + g.boundingBox.max.z) * 0.5);
+  return g;
+}
+const mirrorProfile = p => p.map(([x, y]) => [-x, y]).reverse();
+
+function normalizeGeo(g){
+  let n = g.index ? g.toNonIndexed() : g;
+  for (const k of Object.keys(n.attributes))
+    if (k !== 'position' && k !== 'normal' && k !== 'uv') n.deleteAttribute(k);
+  if (!n.attributes.uv){
+    const c = n.attributes.position.count;
+    n.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(c * 2), 2));
+  }
+  return n;
+}
+
+// 硬表面构件累加器：按材质分桶合并，极大降低 draw call
+class Part {
+  constructor(){ this.buckets = new Map(); }
+  add(geo, mat, pos, rot, scl){
+    const g = geo.clone();
+    if (scl) g.scale(scl[0], scl[1], scl[2]);
+    const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rot ? rot[0] : 0, rot ? rot[1] : 0, rot ? rot[2] : 0));
+    if (pos) m.setPosition(pos[0], pos[1], pos[2]);
+    g.applyMatrix4(m);
+    if (!this.buckets.has(mat)) this.buckets.set(mat, []);
+    this.buckets.get(mat).push(normalizeGeo(g));
+    return this;
+  }
+  // 沿一条直线排布铆钉 / 螺栓
+  bolts(from, to, n, mat = MAT.steel, geo = GEO.bolt, rot = [0, 0, 0]){
+    for (let i = 0; i < n; i++){
+      const t = n === 1 ? 0.5 : i / (n - 1);
+      this.add(geo, mat, [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)], rot);
+    }
+    return this;
+  }
+  // 环形阵列
+  ring(geo, mat, radius, n, center, axis = 'y', mat2 = null){
+    for (let i = 0; i < n; i++){
+      const a = i / n * TAU;
+      const p = center.slice();
+      const r = mat2 || mat;
+      if (axis === 'y')      this.add(geo, r, [p[0] + Math.cos(a) * radius, p[1], p[2] + Math.sin(a) * radius], [0, -a, 0]);
+      else if (axis === 'x') this.add(geo, r, [p[0], p[1] + Math.cos(a) * radius, p[2] + Math.sin(a) * radius], [a, 0, 0]);
+      else                   this.add(geo, r, [p[0] + Math.cos(a) * radius, p[1] + Math.sin(a) * radius, p[2]], [0, 0, a]);
+    }
+    return this;
+  }
+  toGroup(name = 'part'){
+    const grp = new THREE.Group(); grp.name = name;
+    for (const [mat, list] of this.buckets){
+      const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
+      if (!merged) continue;
+      merged.computeBoundingSphere();
+      const m = new THREE.Mesh(merged, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      m.frustumCulled = false;
+      grp.add(m);
+    }
+    this.buckets.clear();
+    return grp;
+  }
+  toGeometry(){
+    const arr = [];
+    for (const list of this.buckets.values()) arr.push(...list);
+    const g = mergeGeometries(arr, false);
+    this.buckets.clear();
+    return g;
+  }
+  get count(){ let n = 0; for (const l of this.buckets.values()) n += l.length; return n; }
+}
+
+// 沿路径生成管路 / 线缆
+function hose(points, radius = 0.03, seg = 40, rad = 8){
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(p[0], p[1], p[2])));
+  return new THREE.TubeGeometry(curve, seg, radius, rad, false);
+}
+
+/* ==========================================================================
+   5 · 主尺寸
+   ========================================================================== */
+const T = {
+  trackX: 1.52, trackW: 0.72, trackR: 0.62, trackBottom: 0.07,
+  sprocketZ: -2.42, idlerZ: 2.42,
+  hullTopY: 1.62, deckY: 1.74, turretY: 1.60, turretZ: 0.0
+};
+T.trackCY = T.trackBottom + T.trackR;
+
+/* ==========================================================================
+   6 · 履带行进系统
+   ========================================================================== */
+function buildTrackPath(){
+  const R = T.trackR, yc = T.trackCY, zR = T.sprocketZ, zF = T.idlerZ;
+  const bottom = T.trackBottom, top = T.trackBottom + 2 * R;
+  const pts = [];
+  const P = (z, y) => pts.push(new THREE.Vector3(0, y, z));
+  for (let i = 0; i <= 70; i++) P(lerp(zR, zF, i / 70), bottom);                       // 下支
+  for (let i = 1; i <= 44; i++){ const a = -Math.PI / 2 + Math.PI * i / 44;
+    P(zF + Math.cos(a) * R, yc + Math.sin(a) * R); }                                    // 前诱导轮弧
+  for (let i = 1; i <= 70; i++) P(lerp(zF, zR, i / 70), top);                           // 上支
+  for (let i = 1; i <= 44; i++){ const a = Math.PI / 2 + Math.PI * i / 44;
+    P(zR + Math.cos(a) * R, yc + Math.sin(a) * R); }                                    // 后主动轮弧
+
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  const total = cum[cum.length - 1] + pts[0].distanceTo(pts[pts.length - 1]);
+
+  const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+  function sample(s, out){
+    s = ((s % total) + total) % total;
+    // 二分查找
+    let lo = 0, hi = cum.length - 1;
+    while (lo < hi){ const mid = (lo + hi + 1) >> 1; if (cum[mid] <= s) lo = mid; else hi = mid - 1; }
+    const i0 = lo, i1 = (lo + 1) % pts.length;
+    const seg = (i1 === 0 ? total : cum[i1]) - cum[i0];
+    const t = seg > 0 ? (s - cum[i0]) / seg : 0;
+    out.pos.lerpVectors(pts[i0], pts[i1], t);
+    tmpA.copy(pts[i1]).sub(pts[i0]).normalize();
+    out.tan.copy(tmpA);
+    return out;
+  }
+  return { total, sample, length: pts.length };
+}
+
+const TRACK_PATH = buildTrackPath();
+
+function buildLinkGeometries(){
+  const body = new Part();
+  body.add(rb(0.70, 0.055, 0.205, 0.012), MAT.track, [0, 0, 0]);
+  body.add(rb(0.13, 0.10, 0.155, 0.012), MAT.track, [0, 0.073, 0]);            // 中央诱导齿
+  body.add(rb(0.085, 0.085, 0.125, 0.010), MAT.track, [0.265, 0.058, 0]);      // 外侧导向齿
+  body.add(rb(0.085, 0.085, 0.125, 0.010), MAT.track, [-0.265, 0.058, 0]);
+  body.add(rb(0.62, 0.032, 0.062, 0.008), MAT.track, [0, -0.040, 0.055], [0.20, 0, 0]); // 防滑筋
+  body.add(rb(0.62, 0.032, 0.062, 0.008), MAT.track, [0, -0.040, -0.055], [-0.20, 0, 0]);
+  body.add(rb(0.055, 0.045, 0.195, 0.010), MAT.track, [0.335, 0.012, 0]);      // 端连接齿
+  body.add(rb(0.055, 0.045, 0.195, 0.010), MAT.track, [-0.335, 0.012, 0]);
+  const pins = new Part();
+  pins.add(cyl(0.040, 0.040, 0.735, 10), MAT.bright, [0, 0.004, 0.1025], [0, 0, Math.PI / 2]);
+  pins.add(cyl(0.040, 0.040, 0.735, 10), MAT.bright, [0, 0.004, -0.1025], [0, 0, Math.PI / 2]);
+  return { bodyGeo: body.toGeometry(), pinGeo: pins.toGeometry() };
+}
+
+// 单个负重轮（原型）
+function makeRoadwheel(radius = 0.5){
+  const p = new Part();
+  const tire = cyl(radius, radius, 0.25, 24);
+  p.add(tire, MAT.rubber, [-0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(tire, MAT.rubber, [0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(radius * 0.86, radius * 0.86, 0.44, 20), MAT.dark, [0, 0, 0], [0, 0, Math.PI / 2]);
+  for (let i = 0; i < 26; i++){ // 胎面花纹
+    const a = i / 26 * TAU;
+    p.add(GEO.treadBlk, MAT.rubberDark, [0, Math.cos(a) * radius, Math.sin(a) * radius], [a, 0, 0]);
+  }
+  p.add(cyl(0.30, 0.30, 0.52, 18), MAT.panel, [0, 0, 0], [0, 0, Math.PI / 2]);      // 轮毂
+  p.add(cyl(0.34, 0.34, 0.06, 18), MAT.dark, [-0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.34, 0.34, 0.06, 18), MAT.dark, [0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.ring(GEO.bolt, MAT.steel, 0.215, 8, [-0.24, 0, 0], 'x', MAT.steel);
+  p.ring(GEO.bolt, MAT.steel, 0.215, 8, [0.24, 0, 0], 'x', MAT.steel);
+  p.add(cyl(0.095, 0.095, 0.56, 14), MAT.bright, [0, 0, 0], [0, 0, Math.PI / 2]);
+  return p.toGroup('wheel');
+}
+
+function makeSprocket(){
+  const p = new Part();
+  p.add(cyl(0.60, 0.60, 0.46, 20), MAT.dark, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.46, 0.46, 0.56, 18), MAT.panel, [0, 0, 0], [0, 0, Math.PI / 2]);
+  for (let i = 0; i < 15; i++){ // 齿
+    const a = i / 15 * TAU;
+    p.add(rb(0.10, 0.13, 0.17, 0.018), MAT.steel,
+      [0, Math.cos(a) * 0.635, Math.sin(a) * 0.635], [a, 0, 0]);
+  }
+  p.add(cyl(0.20, 0.20, 0.60, 14), MAT.bright, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.ring(GEO.bolt, MAT.steel, 0.33, 10, [-0.26, 0, 0], 'x');
+  p.ring(GEO.bolt, MAT.steel, 0.33, 10, [0.26, 0, 0], 'x');
+  return p.toGroup('sprocket');
+}
+
+function makeIdler(){
+  const p = new Part();
+  p.add(cyl(0.585, 0.585, 0.50, 22), MAT.panel, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.50, 0.50, 0.12, 20), MAT.dark, [-0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.50, 0.50, 0.12, 20), MAT.dark, [0.20, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.22, 0.22, 0.60, 16), MAT.dark, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.10, 0.10, 0.66, 12), MAT.bright, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.ring(GEO.bolt, MAT.steel, 0.33, 10, [-0.28, 0, 0], 'x');
+  p.ring(GEO.bolt, MAT.steel, 0.33, 10, [0.28, 0, 0], 'x');
+  return p.toGroup('idler');
+}
+
+function makeRoller(){
+  const p = new Part();
+  p.add(cyl(0.215, 0.215, 0.30, 16), MAT.rubber, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.14, 0.14, 0.36, 14), MAT.panel, [0, 0, 0], [0, 0, Math.PI / 2]);
+  p.add(cyl(0.055, 0.055, 0.44, 10), MAT.bright, [0, 0, 0], [0, 0, Math.PI / 2]);
+  return p.toGroup('roller');
+}
+
+function buildTrackAssembly(sx, wheelsOut){
+  const grp = new THREE.Group();
+  grp.position.x = sx * T.trackX;
+
+  const stat = new Part();
+  // 悬挂摇臂 + 液压减振
+  for (let i = 0; i < 6; i++){
+    const z = -1.85 + i * 0.74;
+    stat.add(rb(0.13, 0.11, 0.34, 0.02), MAT.dark, [sx * 1.02, 0.60, z + 0.16], [0, 0, -0.30]);
+    stat.add(cyl(0.055, 0.055, 0.40, 12), MAT.steel, [sx * 1.14, 0.94, z - 0.20], [-0.52, 0, 0]);
+    stat.add(cyl(0.030, 0.030, 0.34, 10), MAT.bright, [sx * 1.14, 1.14, z - 0.22], [-0.52, 0, 0]);
+    stat.add(rb(0.10, 0.10, 0.16, 0.02), MAT.dark, [sx * 1.20, 1.30, z - 0.26]);
+    stat.add(cyl(0.045, 0.045, 0.30, 10), MAT.dark, [sx * 1.05, 0.55, z], [0, 0, Math.PI / 2]); // 扭力轴
+  }
+  // 托带轮支架
+  for (let i = 0; i < 3; i++){
+    const z = -1.05 + i * 1.05;
+    stat.add(rb(0.16, 0.42, 0.14, 0.02), MAT.dark, [sx * 1.30, 1.05, z]);
+    stat.add(cyl(0.05, 0.05, 0.20, 10), MAT.steel, [sx * 1.16, 1.16, z], [0, 0, Math.PI / 2]);
+  }
+  // 主动轮 / 诱导轮 支座
+  stat.add(rb(0.34, 0.72, 0.40, 0.04), MAT.dark, [sx * 1.18, 0.86, T.sprocketZ - 0.30]);
+  stat.add(rb(0.30, 0.60, 0.36, 0.04), MAT.dark, [sx * 1.18, 0.80, T.idlerZ + 0.28]);
+  stat.add(rb(0.20, 0.30, 0.90, 0.03), MAT.dark, [sx * 1.30, 1.02, T.idlerZ - 0.55]);
+  grp.add(stat.toGroup('susp_' + sx));
+
+  // 负重轮
+  const wheelProto = makeRoadwheel(0.5);
+  for (let i = 0; i < 6; i++){
+    const w = wheelProto.clone();
+    w.position.set(0, 0.57, -1.85 + i * 0.74);
+    grp.add(w); wheelsOut.push(w);
+  }
+  // 托带轮
+  const rollerProto = makeRoller();
+  for (let i = 0; i < 3; i++){
+    const w = rollerProto.clone();
+    w.position.set(sx * 0.12, 1.14, -1.05 + i * 1.05);
+    grp.add(w); wheelsOut.push(w);
+  }
+  // 主动轮 / 诱导轮
+  const sp = makeSprocket().clone(); sp.position.set(0, T.trackCY, T.sprocketZ); grp.add(sp); wheelsOut.push(sp);
+  const id = makeIdler().clone();    id.position.set(0, T.trackCY, T.idlerZ);    grp.add(id); wheelsOut.push(id);
+
+  // 履带板（实例化）
+  const { bodyGeo, pinGeo } = buildLinkGeometries();
+  const N = Math.round(TRACK_PATH.total / 0.215);
+  const body = new THREE.InstancedMesh(bodyGeo, MAT.track, N);
+  const pin  = new THREE.InstancedMesh(pinGeo, MAT.bright, N);
+  body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  pin.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  body.castShadow = body.receiveShadow = true;
+  pin.castShadow = pin.receiveShadow = true;
+  body.frustumCulled = false; pin.frustumCulled = false;
+  grp.add(body, pin);
+
+  return { group: grp, body, pin, N };
+}
+
+// 履带板姿态：+Z 沿行进方向，+Y 始终指向履带环内侧（诱导齿朝内、防滑筋朝外）
+const _sm = { pos: new THREE.Vector3(), tan: new THREE.Vector3() };
+const _nrm = new THREE.Vector3(), _xax = new THREE.Vector3(), _mtx = new THREE.Matrix4();
+function updateTrackLinks(track, phase){
+  const step = TRACK_PATH.total / track.N;
+  for (let i = 0; i < track.N; i++){
+    TRACK_PATH.sample(phase + i * step, _sm);
+    const T = _sm.tan;
+    _nrm.set(0, T.z, -T.y);                 // 环内侧法线
+    _xax.crossVectors(_nrm, T);             // 履带宽度方向
+    _mtx.makeBasis(_xax, _nrm, T);
+    _mtx.setPosition(_sm.pos);
+    track.body.setMatrixAt(i, _mtx);
+    track.pin.setMatrixAt(i, _mtx);
+  }
+  track.body.instanceMatrix.needsUpdate = true;
+  track.pin.instanceMatrix.needsUpdate = true;
+}
+
+/* ==========================================================================
+   7 · 车体
+   ========================================================================== */
+function buildHull(){
+  const p = new Part();
+  const decal = new THREE.Group();
+  GEO.eraBlock = rb(0.30, 0.20, 0.11, 0.018);
+
+  /* --- 车底（V 形防雷底甲） --- */
+  p.add(crossPlate([[-0.86, 0.14], [0.86, 0.14], [1.18, 0.55], [-1.18, 0.55]], 6.5, 0.03), MAT.dark, [0, 0, -0.05]);
+  p.add(rb(1.72, 0.07, 6.2, 0.02), MAT.dark, [0, 0.13, -0.05]);
+  for (let i = 0; i < 6; i++) // 底部加强筋
+    p.add(rb(0.10, 0.16, 0.30, 0.02), MAT.dark, [0, 0.24, -2.6 + i * 1.05]);
+  p.add(rb(0.90, 0.06, 0.90, 0.02), MAT.panel, [0, 0.10, 0.3]);       // 底部检修盖
+  p.bolts([-0.42, 0.07, -0.12], [-0.42, 0.07, 0.72], 4);
+  p.bolts([0.42, 0.07, -0.12], [0.42, 0.07, 0.72], 4);
+
+  /* --- 下车体主体 --- */
+  p.add(rb(2.34, 0.64, 6.40, 0.045, 2), MAT.hull, [0, 0.86, -0.05]);
+  p.add(rb(2.40, 0.10, 6.30, 0.03), MAT.dark, [0, 1.19, -0.05]);      // 上层接缝压条
+  p.add(rb(2.42, 0.09, 6.44, 0.03), MAT.dark, [0, 0.56, -0.05]);
+
+  /* --- 上部战斗室 --- */
+  p.add(rb(2.90, 0.54, 4.80, 0.05, 2), MAT.hull, [0, 1.36, 0.85]);
+  p.add(rb(2.96, 0.08, 4.70, 0.03), MAT.dark, [0, 1.62, 0.85]);       // 顶部压条
+
+  /* --- 首上倾斜装甲（斜面与车顶、首下装甲精确对接） --- */
+  p.add(rb(2.86, 0.18, 1.16, 0.035, 2), MAT.hull, [0, 1.286, 2.731], [0.508, 0, 0]);
+  /* --- 首下装甲 --- */
+  p.add(rb(2.90, 0.62, 0.16, 0.03, 2), MAT.hull, [0, 0.86, 3.26], [-0.12, 0, 0]);
+  p.add(rb(2.30, 0.14, 0.40, 0.03), MAT.dark, [0, 0.52, 3.30], [-0.35, 0, 0]); // 推土铲支架根部
+
+  /* --- 侧裙板（左右对称：上甲板 + 外侧垂直装甲板，完整遮蔽履带上部） --- */
+  const skirt = [[1.35, 1.58], [1.95, 1.54], [1.95, 0.70], [1.87, 0.70], [1.87, 1.46], [1.35, 1.50]];
+  for (const sx of [1, -1]){
+    p.add(crossPlate(sx > 0 ? skirt : mirrorProfile(skirt), 6.15, 0.02), MAT.hull, [0, 0, -0.15]);
+    // 裙板上的储物箱
+    for (let i = 0; i < 3; i++){
+      const z = 1.85 - i * 1.62;
+      p.add(rb(0.40, 0.36, 1.10, 0.03, 2), MAT.panel, [sx * 1.60, 1.74, z], [0, sx * 0.04, 0]);
+      p.add(rb(0.42, 0.05, 1.12, 0.02), MAT.dark, [sx * 1.60, 1.93, z], [0, sx * 0.04, 0]);
+      for (let k = 0; k < 4; k++) // 箱体加强筋
+        p.add(rb(0.44, 0.035, 0.05, 0.01), MAT.dark, [sx * 1.60, 1.74, z - 0.44 + k * 0.29], [0, sx * 0.04, 0]);
+      p.add(rb(0.10, 0.08, 0.16, 0.015), MAT.steel, [sx * 1.42, 1.88, z + 0.2]); // 锁扣
+      p.add(rb(0.10, 0.08, 0.16, 0.015), MAT.steel, [sx * 1.42, 1.88, z - 0.2]);
+    }
+    // 裙板下沿的橡胶挡板
+    p.add(rb(0.07, 0.34, 6.0, 0.02), MAT.rubber, [sx * 1.95, 0.53, -0.15]);
+    // 外侧垂直装甲板上的反应装甲
+    for (let i = 0; i < 8; i++)
+      p.add(GEO.eraBlock, MAT.era, [sx * 1.995, 0.95, 2.55 - i * 0.62],
+        [rr(-0.05, 0.05), sx * Math.PI / 2, rr(-0.06, 0.06)]);
+  }
+
+  /* --- 车尾动力舱 --- */
+  p.add(rb(2.52, 0.34, 2.10, 0.04, 2), MAT.hull, [0, 1.56, -2.42]);
+  p.add(rb(2.60, 0.07, 2.00, 0.02), MAT.dark, [0, 1.73, -2.42]);
+  p.add(rb(2.90, 0.52, 0.18, 0.03, 2), MAT.hull, [0, 1.30, -3.48], [0.16, 0, 0]);  // 尾板
+  // 散热格栅（百叶）
+  for (let i = 0; i < 9; i++){
+    const z = -1.62 - i * 0.19;
+    p.add(rb(1.90, 0.035, 0.10, 0.012), MAT.dark, [0, 1.735, z], [-0.42, 0, 0]);
+  }
+  p.add(rb(2.10, 0.10, 1.86, 0.03), MAT.dark, [0, 1.70, -2.42]);                   // 格栅框
+  p.add(rb(2.14, 0.12, 0.10, 0.03), MAT.panel, [0, 1.71, -1.48]);
+  p.add(rb(2.14, 0.12, 0.10, 0.03), MAT.panel, [0, 1.71, -3.36]);
+  // 两个风扇舱
+  for (const sx of [1, -1]){
+    p.add(cyl(0.36, 0.36, 0.12, 20), MAT.dark, [sx * 0.62, 1.55, -2.42]);
+    p.add(tor(0.34, 0.03, 20), MAT.panel, [sx * 0.62, 1.60, -2.42], [Math.PI / 2, 0, 0]);
+    for (let i = 0; i < 9; i++){ // 扇叶
+      const a = i / 9 * TAU;
+      p.add(rb(0.30, 0.02, 0.09, 0.008), MAT.steel,
+        [sx * 0.62 + Math.cos(a) * 0.16, 1.55, -2.42 + Math.sin(a) * 0.16], [0, -a, 0.5]);
+    }
+    p.add(cyl(0.07, 0.07, 0.16, 12), MAT.bright, [sx * 0.62, 1.55, -2.42]);
+  }
+  // 排气口（自发光内胆 + 隔热罩）
+  for (const sx of [1, -1]){
+    p.add(rb(0.46, 0.30, 0.30, 0.03), MAT.dark, [sx * 0.72, 1.30, -3.52]);
+    p.add(rb(0.38, 0.22, 0.04, 0.01), MAT.glowAmber, [sx * 0.72, 1.30, -3.68]);
+    for (let i = 0; i < 4; i++)
+      p.add(rb(0.42, 0.02, 0.04, 0.008), MAT.steel, [sx * 0.72, 1.20 + i * 0.07, -3.70]);
+    p.add(rb(0.52, 0.05, 0.34, 0.02), MAT.panel, [sx * 0.72, 1.47, -3.54]);   // 隔热罩
+    p.add(cyl(0.045, 0.045, 0.20, 10), MAT.steel, [sx * 0.72, 1.52, -3.54]);
+  }
+  // 尾部牵引具 / 油桶 / 随车工具
+  p.add(rb(0.50, 0.14, 0.16, 0.02), MAT.dark, [0, 0.92, -3.56]);
+  p.add(rb(0.12, 0.12, 0.40, 0.02), MAT.steel, [0, 0.86, -3.70]);
+  for (const sx of [1, -1]){
+    p.add(cyl(0.19, 0.19, 0.62, 16), MAT.panel, [sx * 1.02, 1.66, -3.05], [0, 0, Math.PI / 2]);  // 备用油桶
+    p.add(tor(0.19, 0.025, 14), MAT.dark, [sx * 1.02, 1.66, -3.05], [0, 0, 0]);
+    p.add(cyl(0.05, 0.05, 0.10, 10), MAT.bright, [sx * 1.02, 1.90, -3.05]);
+    p.add(rb(0.10, 0.55, 0.06, 0.015), MAT.steel, [sx * 1.30, 1.10, -3.52]);   // 撬棍
+    p.add(rb(0.26, 0.34, 0.05, 0.015), MAT.steel, [sx * 1.52, 1.30, -3.54]);   // 铲
+  }
+  // 备用履带板
+  for (let i = 0; i < 5; i++)
+    p.add(rb(0.62, 0.07, 0.20, 0.015), MAT.track, [-0.35 + i * 0.005, 1.10 + i * 0.062, -3.62], [0.08, 0, 0.02 * i]);
+  // 拖缆
+  p.add(hose([[0.60, 0.98, -3.55], [0.95, 0.90, -3.20], [1.15, 0.86, -2.60], [1.05, 0.86, -2.20]], 0.032, 26, 8), MAT.dark);
+  p.add(hose([[-0.60, 0.98, -3.55], [-0.90, 0.92, -3.30], [-1.10, 0.90, -2.90]], 0.028, 18, 8), MAT.dark);
+
+  /* --- 前部：驾驶舱 / 大灯 / 牵引钩 --- */
+  // 驾驶员舱盖（贴合车顶平面）
+  p.add(rb(0.86, 0.10, 0.92, 0.03, 2), MAT.panel, [-0.62, 1.66, 1.55]);
+  p.add(tor(0.34, 0.03, 16), MAT.dark, [-0.62, 1.68, 1.55], [Math.PI / 2, 0, 0]);
+  p.add(rb(0.22, 0.06, 0.14, 0.015), MAT.steel, [-0.62, 1.64, 2.06]);   // 铰链
+  p.add(rb(0.16, 0.05, 0.30, 0.015), MAT.steel, [-0.62, 1.68, 1.16]);   // 把手
+  for (let i = 0; i < 3; i++){  // 潜望镜
+    const x = -1.00 + i * 0.30;
+    p.add(rb(0.24, 0.20, 0.14, 0.02), MAT.dark, [x, 1.70, 2.20]);
+    p.add(rb(0.19, 0.10, 0.02, 0.005), MAT.glass, [x, 1.71, 2.275]);
+  }
+  // 大灯组（安装于首下装甲板外表面）
+  for (const sx of [1, -1]){
+    p.add(rb(0.46, 0.22, 0.22, 0.03), MAT.dark, [sx * 1.02, 0.92, 3.42], [-0.12, 0, 0]);
+    p.add(cyl(0.085, 0.085, 0.05, 16), MAT.glowWhite, [sx * 1.02, 0.92, 3.545], [Math.PI / 2 - 0.12, 0, 0]);
+    p.add(rb(0.52, 0.06, 0.06, 0.02), MAT.steel, [sx * 1.02, 1.05, 3.47], [-0.12, 0, 0]);  // 防护栏
+    p.add(rb(0.10, 0.30, 0.10, 0.02), MAT.steel, [sx * 1.02, 0.74, 3.45]);
+    // 前牵引钩
+    p.add(rb(0.10, 0.16, 0.40, 0.025), MAT.steel, [sx * 0.62, 0.62, 3.34]);
+    p.add(tor(0.11, 0.035, 12), MAT.bright, [sx * 0.62, 0.56, 3.50], [0, Math.PI / 2, 0]);
+  }
+  // 前部警示条带
+  p.add(rb(2.30, 0.09, 0.03, 0.008), MAT.glowAmber, [0, 1.13, 3.362], [-0.12, 0, 0]);
+
+  /* --- 首上反应装甲阵列（沿斜面法线铺设） --- */
+  const glacisERA = [[3.131, 1.239], [2.891, 1.373], [2.651, 1.506], [2.411, 1.640]];
+  for (const [z, y] of glacisERA){
+    for (let j = 0; j < 6; j++){
+      p.add(GEO.eraBlock, MAT.era, [-1.15 + j * 0.46, y, z],
+        [-1.0628 + rr(-0.03, 0.03), rr(-0.05, 0.05), rr(-0.03, 0.03)]);
+    }
+  }
+
+  /* --- 表面细节：检修盖 / 螺栓排 / 把手 --- */
+  // 上甲板检修盖
+  for (const [x, z] of [[0.85, 2.05], [0.85, 0.35], [0.90, -0.75]]){
+    p.add(rb(0.56, 0.05, 0.62, 0.015), MAT.panel, [x, 1.645, z]);
+    p.bolts([x - 0.22, 1.66, z - 0.26], [x - 0.22, 1.66, z + 0.26], 4, MAT.steel);
+    p.bolts([x + 0.22, 1.66, z - 0.26], [x + 0.22, 1.66, z + 0.26], 4, MAT.steel);
+    p.add(rb(0.10, 0.05, 0.22, 0.012), MAT.steel, [x, 1.66, z + 0.20]);
+  }
+  // 侧面板缝螺栓
+  for (const sx of [1, -1]){
+    // 外侧装甲板螺栓排
+    p.bolts([sx * 1.962, 1.51, -2.90], [sx * 1.962, 1.51, 2.80], 18, MAT.steel, GEO.bolt, [0, 0, Math.PI / 2]);
+    p.bolts([sx * 1.962, 0.76, -2.90], [sx * 1.962, 0.76, 2.80], 18, MAT.steel, GEO.bolt, [0, 0, Math.PI / 2]);
+    // 登车把手（位于侧裙上甲板空档处）
+    for (const z of [2.55, 1.05, -0.58]){
+      p.add(tor(0.10, 0.022, 12), MAT.steel, [sx * 1.46, 1.60, z], [0, Math.PI / 2, 0]);
+      p.add(rb(0.04, 0.04, 0.12, 0.01), MAT.steel, [sx * 1.49, 1.60, z - 0.10]);
+      p.add(rb(0.04, 0.04, 0.12, 0.01), MAT.steel, [sx * 1.49, 1.60, z + 0.10]);
+    }
+    // 登车踏脚（挂于外侧板）
+    for (let i = 0; i < 3; i++)
+      p.add(rb(0.26, 0.05, 0.22, 0.012), MAT.dark, [sx * 2.00, 0.55 - i * 0.24, 0.0]);
+  }
+  // 首上吊环
+  for (const sx of [1, -1])
+    p.add(tor(0.07, 0.02, 12), MAT.steel, [sx * 0.95, 1.52, 2.28], [0.475, 0, 0]);
+
+  /* --- 水贴 --- */
+  const mk = (mat, w, h, pos, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    m.position.set(pos[0], pos[1], pos[2]);
+    if (rot) m.rotation.set(rot[0], rot[1], rot[2]);
+    decal.add(m);
+  };
+  for (const sx of [1, -1]){
+    mk(MAT.decal, 0.36, 0.36, [sx * 1.968, 1.28, 1.15], [0, sx * Math.PI / 2, 0]);
+  }
+  mk(MAT.hazard, 0.90, 0.45, [0, 0.90, 3.375], [-0.12, 0, 0]);
+
+  const grp = p.toGroup('hull');
+  grp.add(decal);
+  return grp;
+}
+
+/* ==========================================================================
+   8 · 炮塔
+   ========================================================================== */
+function buildTurret(){
+  const p = new Part();
+  const decal = new THREE.Group();
+  const O = Math.PI / 8;   // 八边形朝向修正
+
+  /* --- 炮塔环 --- */
+  p.add(cyl(1.16, 1.22, 0.16, 16), MAT.dark, [0, 0.08, 0]);
+  p.add(cyl(1.06, 1.06, 0.06, 16), MAT.panel, [0, 0.18, 0]);
+  p.ring(GEO.bolt, MAT.steel, 1.10, 20, [0, 0.17, 0]);
+
+  /* --- 塔体：八棱锥台（隐身多面体） --- */
+  p.add(cyl(1.02, 1.15, 0.44, 8), MAT.hull, [0, 0.40, 0], [0, O, 0]);
+  p.add(cyl(0.88, 1.02, 0.34, 8), MAT.hull, [0, 0.79, 0], [0, O, 0]);
+  p.add(cyl(0.92, 0.92, 0.09, 8), MAT.panel, [0, 0.98, 0], [0, O, 0]);
+  p.add(cyl(0.86, 0.86, 0.03, 8), MAT.dark, [0, 1.03, 0], [0, O, 0]);
+
+  /* --- 首上楔形装甲 --- */
+  p.add(rb(1.95, 0.50, 1.32, 0.045, 2), MAT.hull, [0, 0.52, 1.02], [0.45, 0, 0]);
+  p.add(rb(1.60, 0.07, 1.10, 0.02), MAT.panel, [0, 0.76, 1.02], [0.45, 0, 0]);
+  p.add(rb(2.05, 0.16, 0.30, 0.03), MAT.dark, [0, 0.30, 1.42], [0.45, 0, 0]);
+
+  /* --- 两侧附加装甲板（平整，用于水贴） --- */
+  for (const sx of [1, -1]){
+    p.add(rb(0.11, 0.44, 1.10, 0.03, 2), MAT.panel, [sx * 1.03, 0.40, 0.16], [0, sx * 0.10, 0]);
+    p.bolts([sx * 1.10, 0.24, -0.34], [sx * 1.10, 0.24, 0.62], 5, MAT.steel, GEO.bolt, [0, 0, Math.PI / 2]);
+    p.bolts([sx * 1.10, 0.56, -0.34], [sx * 1.10, 0.56, 0.62], 5, MAT.steel, GEO.bolt, [0, 0, Math.PI / 2]);
+    // 侧向观瞄窗
+    p.add(rb(0.06, 0.14, 0.22, 0.015), MAT.dark, [sx * 1.10, 0.66, 0.60]);
+    p.add(rb(0.03, 0.09, 0.16, 0.008), MAT.glass, [sx * 1.13, 0.66, 0.60]);
+  }
+
+  /* --- 反应装甲（炮塔首上斜面 + 侧面颊板） --- */
+  const wedgeERA = [[1.607, 0.584], [1.397, 0.685], [1.187, 0.787], [0.977, 0.888]];
+  for (const [z, y] of wedgeERA){
+    for (let j = 0; j < 4; j++)
+      p.add(GEO.eraBlock, MAT.era, [-0.66 + j * 0.44, y, z],
+        [-1.1208 + rr(-0.03, 0.03), rr(-0.04, 0.04), rr(-0.03, 0.03)]);
+  }
+  for (const sx of [1, -1]){
+    for (let i = 0; i < 3; i++)
+      p.add(GEO.eraBlock, MAT.era, [sx * 1.10, 0.36, -0.80 + i * 0.32], [0, sx * 0.10, 0.12]);
+  }
+
+  /* --- 炮盾 / 防盾 --- */
+  p.add(rb(1.00, 0.66, 0.52, 0.05, 2), MAT.hull, [0, 0.52, 1.30]);
+  p.add(cyl(0.30, 0.30, 0.46, 18), MAT.dark, [0, 0.52, 1.58], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.22, 0.22, 0.06, 18), MAT.panel, [0, 0.52, 1.79], [Math.PI / 2, 0, 0]);
+  p.add(rb(0.86, 0.10, 0.30, 0.02), MAT.dark, [0, 0.86, 1.30]);
+  p.add(rb(0.80, 0.44, 0.08, 0.02), MAT.rubber, [0, 0.52, 1.55]);  // 帆布罩
+
+  /* --- 尾舱 / 储物格栅 --- */
+  p.add(rb(1.78, 0.52, 0.84, 0.05, 2), MAT.hull, [0, 0.56, -1.20]);
+  p.add(rb(1.84, 0.08, 0.90, 0.02), MAT.dark, [0, 0.83, -1.20]);
+  for (let i = 0; i < 7; i++){   // 格栅栏
+    const x = -0.75 + i * 0.25;
+    p.add(rb(0.05, 0.30, 0.78, 0.012), MAT.steel, [x, 0.98, -1.20]);
+  }
+  p.add(rb(1.70, 0.05, 0.06, 0.012), MAT.steel, [0, 1.13, -1.20]);
+  for (const sx of [1, -1]){     // 泄压板
+    p.add(rb(0.62, 0.05, 0.44, 0.012), MAT.panel, [sx * 0.50, 0.84, -1.36], [0.10, 0, 0]);
+    p.bolts([sx * 0.28, 0.87, -1.52], [sx * 0.72, 0.87, -1.52], 5, MAT.steel);
+  }
+  // 尾舱杂物：卷捆 / 弹药箱 / 水壶
+  p.add(cyl(0.16, 0.16, 1.30, 14), MAT.dark, [0, 1.10, -1.20], [0, 0, Math.PI / 2]);
+  p.add(tor(0.17, 0.03, 12), MAT.dark, [-0.62, 1.10, -1.20], [0, Math.PI / 2, 0]);
+  for (const sx of [1, -1]){
+    p.add(rb(0.42, 0.26, 0.34, 0.025), MAT.panel, [sx * 0.82, 0.95, -1.10]);
+    p.add(rb(0.44, 0.04, 0.36, 0.012), MAT.dark, [sx * 0.82, 1.09, -1.10]);
+    p.add(rb(0.12, 0.06, 0.16, 0.012), MAT.steel, [sx * 0.82, 0.95, -0.92]);
+    p.add(cyl(0.10, 0.10, 0.30, 12), MAT.dark, [sx * 0.52, 1.05, -1.52], [Math.PI / 2, 0, 0]);
+  }
+
+  /* --- 车长塔 + 遥控武器站 --- */
+  p.add(cyl(0.44, 0.46, 0.24, 16), MAT.hull, [0.62, 1.10, -0.42]);
+  p.add(cyl(0.38, 0.38, 0.07, 16), MAT.panel, [0.62, 1.25, -0.42]);
+  p.ring(GEO.bolt, MAT.steel, 0.40, 12, [0.62, 1.20, -0.42]);
+  for (let i = 0; i < 6; i++){   // 周视潜望镜
+    const a = i / 6 * TAU;
+    p.add(rb(0.14, 0.13, 0.07, 0.015), MAT.dark,
+      [0.62 + Math.cos(a) * 0.44, 1.16, -0.42 + Math.sin(a) * 0.44], [0, -a, 0]);
+    p.add(rb(0.10, 0.07, 0.02, 0.005), MAT.glass,
+      [0.62 + Math.cos(a) * 0.49, 1.16, -0.42 + Math.sin(a) * 0.49], [0, -a, 0]);
+  }
+  // 舱盖（半开）
+  p.add(cyl(0.36, 0.36, 0.05, 16), MAT.panel, [0.62, 1.36, -0.62], [0.55, 0, 0]);
+  p.add(rb(0.10, 0.05, 0.20, 0.012), MAT.steel, [0.62, 1.34, -0.30]);
+  // RWS：12.7mm 机枪
+  const rws = new THREE.Group();
+  const rp = new Part();
+  rp.add(rb(0.34, 0.24, 0.40, 0.03, 2), MAT.hull, [0, 0, 0]);
+  rp.add(rb(0.30, 0.06, 0.34, 0.015), MAT.dark, [0, 0.14, 0]);
+  rp.add(cyl(0.10, 0.10, 0.34, 14), MAT.dark, [0, 0.02, 0.36], [Math.PI / 2, 0, 0]);
+  rp.add(cyl(0.035, 0.035, 0.95, 12), MAT.dark, [0.10, 0.02, 0.95], [Math.PI / 2, 0, 0]);
+  rp.add(cyl(0.055, 0.055, 0.16, 12), MAT.dark, [0.10, 0.02, 1.38], [Math.PI / 2, 0, 0]);
+  rp.add(rb(0.10, 0.14, 0.26, 0.02), MAT.dark, [-0.24, 0.02, -0.06]);   // 弹箱
+  rp.add(rb(0.14, 0.12, 0.16, 0.02), MAT.dark, [0.18, 0.20, 0.10]);     // 光电头
+  rp.add(cyl(0.045, 0.045, 0.03, 12), MAT.glass, [0.18, 0.20, 0.19], [Math.PI / 2, 0, 0]);
+  rp.add(rb(0.06, 0.05, 0.03, 0.006), MAT.glowRed, [0.30, 0.20, 0.10]);
+  rws.add(rp.toGroup('rws'));
+  rws.position.set(0.62, 1.46, -0.42);
+  rws.rotation.y = 0.35;
+
+  /* --- 炮长观瞄 / 车长独立热像 --- */
+  p.add(rb(0.40, 0.30, 0.52, 0.035, 2), MAT.hull, [-0.62, 1.10, 0.62]);
+  p.add(rb(0.34, 0.24, 0.06, 0.012), MAT.dark, [-0.62, 1.10, 0.90]);
+  p.add(cyl(0.095, 0.095, 0.04, 14), MAT.glass, [-0.62, 1.10, 0.93], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.05, 0.05, 0.02, 10), MAT.glowRed, [-0.62, 1.10, 0.955], [Math.PI / 2, 0, 0]);
+  p.add(rb(0.10, 0.18, 0.30, 0.02), MAT.dark, [-0.62, 1.28, 0.50]);   // 激光告警
+  p.add(rb(0.06, 0.10, 0.04, 0.006), MAT.glowCyan, [-0.62, 1.28, 0.66]);
+
+  /* --- 导弹发射巢 --- */
+  for (const sx of [1, -1]){
+    p.add(rb(0.46, 0.46, 1.24, 0.04, 2), MAT.hull, [sx * 1.12, 0.42, -0.30]);
+    p.add(rb(0.50, 0.06, 1.28, 0.02), MAT.dark, [sx * 1.12, 0.66, -0.30]);
+    p.add(rb(0.52, 0.50, 0.10, 0.02), MAT.dark, [sx * 1.12, 0.42, -0.94]); // 后端盖
+    for (let r = 0; r < 2; r++){
+      for (let c = 0; c < 3; c++){
+        const y = 0.55 - r * 0.24, z = -0.72 + c * 0.42;
+        p.add(cyl(0.088, 0.088, 0.62, 14, true), MAT.dark, [sx * 1.12, y, z], [Math.PI / 2, 0, 0]);
+        p.add(cyl(0.082, 0.082, 0.05, 14), MAT.era, [sx * 1.12, y, z + 0.33], [Math.PI / 2, 0, 0]); // 密封盖
+        p.add(cyl(0.10, 0.10, 0.04, 14), MAT.panel, [sx * 1.12, y, z + 0.30], [Math.PI / 2, 0, 0]);
+        p.add(cyl(0.075, 0.075, 0.03, 12), MAT.glowAmber, [sx * 1.12, y, z + 0.36], [Math.PI / 2, 0, 0]);
+      }
+    }
+    p.add(rb(0.14, 0.30, 0.20, 0.02), MAT.dark, [sx * 1.28, 0.42, -0.30]);
+  }
+
+  /* --- 烟幕弹发射器 --- */
+  for (const sx of [1, -1]){
+    for (let i = 0; i < 4; i++){
+      const z = 0.62 + (i % 2) * 0.20, y = 0.72 - Math.floor(i / 2) * 0.16;
+      p.add(cyl(0.062, 0.062, 0.34, 12), MAT.dark, [sx * 0.86, y, z], [1.05, sx * 0.28, 0]);
+      p.add(cyl(0.056, 0.056, 0.04, 12), MAT.panel, [sx * 0.86, y + 0.15, z + 0.19], [1.05, sx * 0.28, 0]);
+      p.add(cyl(0.048, 0.048, 0.03, 10), MAT.glowCyan, [sx * 0.86, y + 0.17, z + 0.21], [1.05, sx * 0.28, 0]);
+    }
+    p.add(rb(0.16, 0.44, 0.40, 0.03), MAT.hull, [sx * 0.86, 0.60, 0.58], [0, sx * 0.28, 0]);
+  }
+
+  /* --- 光电桅杆（可旋转雷达） --- */
+  const mast = new THREE.Group();
+  const mp = new Part();
+  mp.add(cyl(0.055, 0.075, 0.30, 12), MAT.dark, [0, 0.15, 0]);
+  mp.add(cyl(0.042, 0.042, 0.85, 12), MAT.steel, [0, 0.72, 0]);
+  mp.add(cyl(0.055, 0.055, 0.10, 12), MAT.panel, [0, 0.30, 0]);
+  mp.add(rb(0.60, 0.34, 0.09, 0.02), MAT.dark, [0, 1.20, 0.06]);          // AESA 面板
+  mp.add(rb(0.54, 0.28, 0.02, 0.006), MAT.panel, [0, 1.20, 0.115]);
+  for (let i = 0; i < 6; i++)
+    mp.add(rb(0.06, 0.24, 0.012, 0.004), MAT.glowCyan, [-0.22 + i * 0.088, 1.20, 0.125]);
+  mp.add(rb(0.16, 0.10, 0.16, 0.02), MAT.dark, [0.36, 1.20, 0]);
+  mp.add(cyl(0.03, 0.03, 0.05, 8), MAT.glowRed, [0.36, 1.28, 0]);
+  mp.add(cyl(0.03, 0.03, 0.14, 8), MAT.steel, [0, 1.42, 0]);
+  mp.add(ball(0.035, 10), MAT.glowAmber, [0, 1.50, 0]);
+  mast.add(mp.toGroup('mast'));
+  mast.position.set(0.80, 0.84, -1.05);
+  const radar = mast.children[0];  // 旋转部分由动画处理
+
+  /* --- 天线（置于塔顶平面内，避开舱盖与观瞄） --- */
+  for (const [ax, az, ah] of [[-0.45, -0.62, 1.35], [-0.78, 0.10, 1.05], [0.35, 0.60, 0.85]]){
+    p.add(cyl(0.05, 0.06, 0.10, 10), MAT.dark, [ax, 1.05, az]);           // 天线座
+    p.add(cyl(0.035, 0.035, 0.14, 10), MAT.bright, [ax, 1.14, az]);       // 弹簧
+    p.add(cyl(0.012, 0.012, ah, 8), MAT.dark, [ax, 1.22 + ah / 2, az]);   // 杆
+    p.add(ball(0.022, 8), MAT.glowCyan, [ax, 1.22 + ah, az]);
+  }
+
+  /* --- 塔顶细节：扶手 / 踏板 / 挂钩 --- */
+  for (const sx of [1, -1]){
+    p.add(tor(0.09, 0.02, 10), MAT.steel, [sx * 0.72, 1.06, 0.35], [0, Math.PI / 2, 0]);
+    p.add(rb(0.34, 0.04, 0.05, 0.01), MAT.steel, [sx * 0.55, 1.06, 0.55], [0, 0.7, 0]);
+  }
+  p.add(rb(0.30, 0.03, 0.22, 0.008), MAT.dark, [-0.30, 1.04, 0.20]);     // 检修口
+
+  /* --- 水贴 --- */
+  const mk = (mat, w, h, pos, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    m.position.set(pos[0], pos[1], pos[2]);
+    if (rot) m.rotation.set(rot[0], rot[1], rot[2]);
+    decal.add(m);
+  };
+  for (const sx of [1, -1]){
+    mk(MAT.decal, 0.32, 0.32, [sx * 1.096, 0.40, 0.32], [0, sx * (Math.PI / 2 + 0.10), 0]);
+  }
+  mk(MAT.insignia, 0.34, 0.34, [0, 0.56, -1.635], [0, Math.PI, 0]);
+
+  const grp = p.toGroup('turret');
+  grp.add(decal, rws, mast);
+  grp.userData.radar = radar;
+  grp.userData.rws = rws;
+  return grp;
+}
+
+/* ==========================================================================
+   9 · 主炮 / 武器组
+   ========================================================================== */
+function buildGun(){
+  const p = new Part();
+
+  /* --- 炮尾 / 摇架 --- */
+  p.add(rb(0.62, 0.52, 0.90, 0.04, 2), MAT.dark, [0, 0, -0.35]);
+  p.add(rb(0.50, 0.40, 0.50, 0.03), MAT.panel, [0, -0.10, -0.85]);       // 炮尾机匣
+  p.add(cyl(0.16, 0.16, 0.34, 14), MAT.dark, [0, -0.10, -1.10], [Math.PI / 2, 0, 0]);
+  p.add(rb(0.70, 0.14, 0.60, 0.02), MAT.steel, [0, -0.34, -0.30]);       // 反后坐导轨
+  p.add(cyl(0.05, 0.05, 0.66, 10), MAT.bright, [0.20, -0.34, -0.30], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.05, 0.05, 0.66, 10), MAT.bright, [-0.20, -0.34, -0.30], [Math.PI / 2, 0, 0]);
+
+  /* --- 炮管（带热护套 / 抽烟装置 / 炮口制退器） --- */
+  p.add(cyl(0.19, 0.21, 0.70, 20), MAT.dark, [0, 0, 0.40], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.105, 0.115, 4.60, 24), MAT.hull, [0, 0, 2.75], [Math.PI / 2, 0, 0]);
+  // 热护套分段
+  for (const [z, l] of [[1.45, 0.78], [2.35, 0.78], [3.25, 0.78]]){
+    p.add(cyl(0.145, 0.145, l, 22), MAT.panel, [0, 0, z], [Math.PI / 2, 0, 0]);
+    p.add(cyl(0.155, 0.155, 0.05, 22), MAT.dark, [0, 0, z - l / 2], [Math.PI / 2, 0, 0]);
+    p.add(cyl(0.155, 0.155, 0.05, 22), MAT.dark, [0, 0, z + l / 2], [Math.PI / 2, 0, 0]);
+    for (let i = 0; i < 5; i++)   // 护套固定箍
+      p.add(tor(0.148, 0.012, 16), MAT.dark, [0, 0, z - 0.32 + i * 0.16], [0, 0, 0]);
+  }
+  // 炮口基准系统
+  p.add(rb(0.12, 0.10, 0.20, 0.02), MAT.dark, [0, 0.16, 3.90]);
+  p.add(cyl(0.03, 0.03, 0.12, 10), MAT.bright, [0, 0.24, 3.90], [Math.PI / 2, 0, 0]);
+  // 抽烟装置
+  p.add(cyl(0.175, 0.175, 0.56, 22), MAT.hull, [0, 0, 4.30], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.185, 0.185, 0.06, 22), MAT.dark, [0, 0, 4.01], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.185, 0.185, 0.06, 22), MAT.dark, [0, 0, 4.59], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.13, 0.13, 0.62, 20), MAT.dark, [0, 0, 4.30], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 8; i++){   // 排烟孔
+    const a = i / 8 * TAU;
+    p.add(cyl(0.022, 0.022, 0.12, 8), MAT.dark,
+      [Math.cos(a) * 0.15, Math.sin(a) * 0.15, 4.62], [Math.PI / 2, 0, 0]);
+  }
+  // 炮口制退器（多室开槽）
+  p.add(cyl(0.135, 0.135, 0.30, 22), MAT.dark, [0, 0, 4.92], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.20, 0.20, 0.06, 22), MAT.panel, [0, 0, 5.02], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.20, 0.20, 0.06, 22), MAT.panel, [0, 0, 5.32], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 4; i++){
+    const a = i / 4 * TAU + Math.PI / 4;
+    p.add(rb(0.09, 0.30, 0.07, 0.01), MAT.panel,
+      [Math.cos(a) * 0.17, Math.sin(a) * 0.17, 5.17], [0, 0, a]);
+  }
+  p.add(cyl(0.21, 0.21, 0.05, 22), MAT.bright, [0, 0, 5.38], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.105, 0.105, 0.10, 20), MAT.dark, [0, 0, 5.42], [Math.PI / 2, 0, 0]);   // 炮口内膛
+
+  /* --- 同轴链炮 --- */
+  p.add(rb(0.26, 0.24, 0.60, 0.03), MAT.dark, [0.36, -0.10, 0.55]);
+  p.add(cyl(0.075, 0.075, 0.40, 14), MAT.dark, [0.36, -0.10, 1.05], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.045, 0.045, 1.55, 12), MAT.dark, [0.36, -0.10, 2.00], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.065, 0.065, 0.14, 12), MAT.bright, [0.36, -0.10, 2.78], [Math.PI / 2, 0, 0]);
+  for (let i = 0; i < 5; i++)   // 枪管散热槽
+    p.add(tor(0.058, 0.008, 12), MAT.dark, [0.36, -0.10, 2.30 + i * 0.09], [0, 0, 0]);
+  p.add(rb(0.20, 0.16, 0.30, 0.02), MAT.panel, [0.36, 0.06, 0.30]);      // 弹链箱
+  p.add(hose([[0.36, 0.06, 0.15], [0.30, -0.02, -0.10], [0.10, -0.20, -0.55]], 0.026, 18, 8), MAT.rubberDark);
+
+  /* --- 激光测距 / 横风传感器 --- */
+  p.add(rb(0.16, 0.14, 0.26, 0.02), MAT.dark, [-0.32, 0.22, 1.10]);
+  p.add(cyl(0.05, 0.05, 0.04, 10), MAT.glass, [-0.32, 0.22, 1.24], [Math.PI / 2, 0, 0]);
+  p.add(rb(0.06, 0.06, 0.02, 0.004), MAT.glowRed, [-0.32, 0.22, 1.265], [Math.PI / 2, 0, 0]);
+  p.add(cyl(0.018, 0.018, 0.34, 8), MAT.steel, [-0.20, 0.30, 1.90]);     // 横风杆
+  p.add(ball(0.032, 10), MAT.panel, [-0.20, 0.30, 2.06]);
+
+  return p.toGroup('gun');
+}
+
+/* ==========================================================================
+   10 · 装配
+   ========================================================================== */
+const tankRoot = new THREE.Group();
+const hull = buildHull();
+const turret = buildTurret();
+const gun = buildGun();
+
+gun.position.set(0, 0.52, 1.35);
+turret.add(gun);
+turret.position.set(0, T.turretY, T.turretZ);
+tankRoot.add(hull, turret);
+
+const wheels = [];
+const tracks = [];
+for (const sx of [1, -1]){
+  const t = buildTrackAssembly(sx, wheels);
+  tracks.push(t);
+  tankRoot.add(t.group);
+  updateTrackLinks(t, 0);
+}
+
+// 前大灯体积光锥
+for (const sx of [1, -1]){
+  const cone = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.62, 5.2, 18, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0x8fdcff, transparent: true, opacity: 0.035,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    })
+  );
+  cone.rotation.x = Math.PI / 2 - 0.12;
+  cone.position.set(sx * 1.02, 1.231, 6.126);
+  tankRoot.add(cone);
+}
+// 尾焰 / 动力核心辉光
+const coreGlow = new THREE.PointLight(0x35c8ff, 2.2, 4.5, 2);
+coreGlow.position.set(0, 1.62, -2.42);
+tankRoot.add(coreGlow);
+const exhaustGlow = new THREE.PointLight(0xff8a30, 1.6, 3.6, 2);
+exhaustGlow.position.set(0, 1.25, -3.6);
+tankRoot.add(exhaustGlow);
+
+scene.add(tankRoot);
+
+// 统计
+let objCount = 0, triCount = 0;
+tankRoot.traverse(o => {
+  if (!o.isMesh) return;
+  objCount++;
+  const g = o.geometry;
+  const n = g.index ? g.index.count : g.attributes.position.count;
+  triCount += (n / 3) * (o.isInstancedMesh ? o.count : 1);
+});
+
+/* ==========================================================================
+   11 · 后期处理
+   ========================================================================== */
+const GradeShader = {
+  uniforms: {
+    tDiffuse:    { value: null },
+    uTime:       { value: 0 },
+    uAberration: { value: 0.0016 },
+    uVignette:   { value: 1.05 },
+    uGrain:      { value: 0.030 }
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform float uTime, uAberration, uVignette, uGrain;
+    varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+    void main(){
+      vec2 uv = vUv;
+      vec2 dir = uv - 0.5;
+      float d = length(dir);
+      // 色散
+      float k = uAberration * d * 2.0;
+      vec3 col;
+      col.r = texture2D(tDiffuse, uv - dir * k).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv + dir * k).b;
+      // 暗角
+      float v = smoothstep(0.98, 0.28, d * uVignette);
+      col *= mix(0.42, 1.0, v);
+      // 颗粒
+      float g = hash(uv * 1024.0 + fract(uTime) * 57.0) - 0.5;
+      col += g * uGrain;
+      // 极淡扫描线
+      col *= 1.0 - 0.022 * step(0.5, fract(uv.y * 900.0));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+};
+
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+composer.setSize(innerWidth, innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.52, 0.62, 0.82);
+composer.addPass(bloom);
+
+const grade = new ShaderPass(GradeShader);
+composer.addPass(grade);
+
+composer.addPass(new OutputPass());
+
+const smaa = new SMAAPass(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio());
+composer.addPass(smaa);
+
+/* ==========================================================================
+   12 · 交互 / 状态
+   ========================================================================== */
+const state = { drive: false, turretScan: true, wire: false, bloomOn: true, clip: 0 };
+
+const $ = id => document.getElementById(id);
+function bindSwitch(id, get, set){
+  const el = $(id);
+  el.addEventListener('click', () => {
+    set(!get());
+    el.classList.toggle('on', get());
+  });
+  return el;
+}
+const swRot  = bindSwitch('s-rot', () => controls.autoRotate, v => controls.autoRotate = v);
+const swDrv  = bindSwitch('s-drv', () => state.drive, v => { state.drive = v; if (!v) { floorTex.offset.set(0, 0); } });
+const swTur  = bindSwitch('s-tur', () => state.turretScan, v => state.turretScan = v);
+const swBlm  = bindSwitch('s-blm', () => state.bloomOn, v => { state.bloomOn = v; bloom.enabled = v; });
+const swWfr  = bindSwitch('s-wfr', () => state.wire, v => {
+  state.wire = v;
+  ALL_MATS.forEach(m => { m.wireframe = v; });
+});
+
+$('s-clip').addEventListener('input', e => {
+  state.clip = e.target.value / 100;
+});
+$('b-reset').addEventListener('click', () => {
+  camera.position.set(11.5, 5.2, 13.5);
+  controls.target.set(0, 1.35, 0);
+});
+let shotPending = false;
+$('b-shot').addEventListener('click', () => { shotPending = true; });
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'r'){ swRot.click(); }
+  else if (k === 'd'){ swDrv.click(); }
+  else if (k === 't'){ swTur.click(); }
+  else if (k === 'x'){ swWfr.click(); }
+  else if (k === 'b'){ swBlm.click(); }
+  else if (k === 'h'){
+    const on = document.body.classList.toggle('hideui');
+    document.querySelectorAll('.hud').forEach(el => el.style.display = on ? 'none' : '');
+  }
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
+});
+
+/* ==========================================================================
+   13 · 动画循环
+   ========================================================================== */
+const clock = new THREE.Clock();
+let trackPhase = 0, fpsAcc = 0, fpsFrames = 0, fps = 0, intro = 0;
+const radarPart = turret.userData.radar;
+const rwsPart = turret.userData.rws;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // 入场推镜
+  if (intro < 1){
+    intro = Math.min(1, intro + dt / 2.4);
+    const e = 1 - Math.pow(1 - intro, 3);
+    const d = lerp(26, 15.2, e);
+    const a = -0.6 + e * 0.55;
+    camera.position.set(Math.cos(a) * d, lerp(9.5, 5.2, e), Math.sin(a) * d);
+    controls.target.set(0, lerp(2.4, 1.35, e), 0);
+  }
+
+  // 行驶
+  if (state.drive){
+    const v = 2.35;                       // m/s
+    trackPhase += v * dt;
+    for (const tr of tracks) updateTrackLinks(tr, trackPhase);
+    for (const w of wheels){
+      const r = w.name === 'roller' ? 0.215 : (w.name === 'sprocket' ? 0.60 : (w.name === 'idler' ? 0.585 : 0.5));
+      w.rotation.x += (v / r) * dt * (w.name === 'idler' ? 1 : 1);
+    }
+    floorTex.offset.y -= (v / 4) * dt;    // 地面相对后退
+    tankRoot.position.y = Math.sin(t * 21) * 0.006 + Math.sin(t * 7.3) * 0.004;
+    tankRoot.rotation.z = Math.sin(t * 5.1) * 0.0025;
+  } else {
+    tankRoot.position.y = Math.sin(t * 34) * 0.0016;   // 怠速震动
+    tankRoot.rotation.z *= 0.9;
+  }
+
+  // 炮塔扫描 / 火炮俯仰
+  if (state.turretScan){
+    turret.rotation.y = Math.sin(t * 0.19) * 0.42;
+    gun.rotation.x = -0.045 + Math.sin(t * 0.27 + 1.1) * 0.035;
+    if (radarPart) radarPart.rotation.y += dt * 1.15;
+    if (rwsPart) rwsPart.rotation.y = 0.35 + Math.sin(t * 0.33) * 0.55;
+  }
+  // 信标闪烁
+  coreGlow.intensity = 2.2 + Math.sin(t * 3.1) * 0.35;
+  exhaustGlow.intensity = 1.6 + Math.sin(t * 5.7) * 0.25;
+
+  // 剖切平面
+  clipPlane.constant = state.clip > 0.001 ? lerp(2.05, -2.05, state.clip) : 12;
+
+  // 后期
+  grade.uniforms.uTime.value = t;
+  grade.uniforms.uAberration.value = state.drive ? 0.0032 : 0.0016;
+
+  controls.update();
+  composer.render();
+
+  // 截图
+  if (shotPending){
+    shotPending = false;
+    try {
+      const a = document.createElement('a');
+      a.download = 'revenant-mkvii.png';
+      a.href = renderer.domElement.toDataURL('image/png');
+      a.click();
+    } catch (err){ /* 忽略 */ }
+  }
+
+  // 统计
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc >= 0.5){
+    fps = Math.round(fpsFrames / fpsAcc);
+    fpsAcc = 0; fpsFrames = 0;
+    $('v-fps').textContent = fps;
+    $('v-tri').textContent = renderer.info.render.triangles.toLocaleString();
+    $('v-call').textContent = renderer.info.render.calls;
+    $('v-obj').textContent = objCount;
+    $('v-mat').textContent = ALL_MATS.length;
+    $('v-bar').style.right = (100 - clamp(fps / 60 * 100, 4, 100)) + '%';
+  }
+}
+
+/* ==========================================================================
+   14 · 启动
+   ========================================================================== */
+function boot(){
+  $('loader').classList.add('done');
+  setTimeout(() => { const l = $('loader'); if (l) l.style.display = 'none'; }, 800);
+  animate();
+}
+requestAnimationFrame(boot);
+
+window.addEventListener('error', e => {
+  const el = $('lerr');
+  if (el) el.textContent = 'ERROR: ' + (e.message || e);
+});
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d143140b970ce6',t:'MTc4OTc0NDA2NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

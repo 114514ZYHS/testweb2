@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>池核 Poolcore</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%234a95cc'/><path d='M10 55 Q25 45 40 55 T70 55 T100 55' stroke='%23c8e4f5' stroke-width='5' fill='none'/><path d='M10 70 Q25 60 40 70 T70 70 T100 70' stroke='%23c8e4f5' stroke-width='5' fill='none' opacity='0.6'/><circle cx='50' cy='28' r='10' fill='%23f5d689'/></svg>">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000;font-family:'Segoe UI',sans-serif}
+canvas{display:block}
+
+#demo{
+  position:fixed;top:18px;left:24px;z-index:200;
+  font-size:28px;font-weight:700;letter-spacing:3px;
+  color:#fff;opacity:0.25;pointer-events:none;
+  text-shadow:0 2px 8px rgba(0,0,0,0.5);
+  user-select:none;
+}
+
+#menu{
+  position:fixed;inset:0;z-index:100;
+  background:linear-gradient(180deg,#1a3a52 0%,#0d1f2d 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:opacity 0.6s;
+}
+#menu h1{
+  font-size:72px;color:#c8e4f5;letter-spacing:12px;
+  text-shadow:0 0 30px rgba(120,180,220,0.6);
+  margin-bottom:8px;font-weight:300;
+}
+#menu .sub{font-size:16px;color:#7aa5c0;letter-spacing:6px;margin-bottom:60px;}
+#menu button{
+  padding:16px 60px;font-size:20px;letter-spacing:4px;
+  background:transparent;color:#c8e4f5;
+  border:1px solid #5a8faf;cursor:pointer;transition:all 0.3s;
+}
+#menu button:hover{
+  background:rgba(90,143,175,0.2);
+  box-shadow:0 0 20px rgba(120,180,220,0.4);
+}
+#menu.hidden{opacity:0;pointer-events:none;}
+</style>
+</head>
+<body>
+
+<div id="demo">DEMO</div>
+
+<div id="menu">
+  <h1>池核</h1>
+  <div class="sub">P O O L C O R E</div>
+  <button id="startBtn">开 始 游 戏</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+let scene, camera, renderer, controls, waterMesh, waterUniforms, causticsMesh;
+let moveForward=false, moveBack=false, moveLeft=false, moveRight=false;
+let velocity=new THREE.Vector3();
+const direction=new THREE.Vector3();
+const clock=new THREE.Clock();
+
+const GRAVITY = -24;
+const JUMP_POWER = 14;
+const PLAYER_HEIGHT = 2.2;
+const PLAYER_RADIUS = 0.4;
+
+const POOL_SIZE = 38;
+const POOL_HALF = POOL_SIZE / 2;
+const POOL_FLOOR_LEVEL = -3.0;
+const POOL_WATER_LEVEL = -1.3;
+
+const ROOM_SIZE = 100;
+const ROOM_HALF = ROOM_SIZE / 2;
+const WALL_THICKNESS = 1;
+const CEILING_HEIGHT = 16;
+
+let onGround = false;
+let isInWater = false;
+let lastStepTime = 0;
+const stepInterval = 0.4;
+
+// 呼吸晃动
+let breathTime = 0;
+
+// ========== 音频 ==========
+let audioCtx = null;
+let ambientNode = null, ambientGain = null, ambientFilter = null, ambientLFO = null;
+
+// 地面脚步声
+const stepSrc = "https://assets.mixkit.co/active_storage/sfx/2465/2465-preview.mp3";
+const STEP_POOL_N = 8;
+const stepPool = [];
+let stepIdx = 0;
+for(let i=0;i<STEP_POOL_N;i++){
+  const s=new Audio(stepSrc);s.preload='auto';s.volume=0.35;stepPool.push(s);
+}
+function playStepSound(){
+  const a=stepPool[stepIdx%STEP_POOL_N];stepIdx++;
+  try{a.currentTime=0;}catch(e){}
+  a.play().catch(()=>{});
+}
+function playStep(){
+  const now=performance.now()/1000;
+  if(now-lastStepTime<stepInterval) return;
+  lastStepTime=now;
+  playStepSound();
+}
+
+// 低频环境白噪音（持续，极低音量，模拟空旷空间氛围）
+function initAmbient(){
+  if(!audioCtx || ambientNode) return;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 3, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+  ambientNode = audioCtx.createBufferSource();
+  ambientNode.buffer = buf; ambientNode.loop = true;
+  ambientFilter = audioCtx.createBiquadFilter();
+  ambientFilter.type = 'lowpass';
+  ambientFilter.frequency.value = 180;
+  ambientFilter.Q.value = 0.7;
+  ambientGain = audioCtx.createGain();
+  ambientGain.gain.value = 0;
+  // LFO 缓慢调制音量，模拟环境呼吸感
+  ambientLFO = audioCtx.createOscillator();
+  ambientLFO.frequency.value = 0.08;
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = 0.015;
+  ambientLFO.connect(lfoGain);
+  lfoGain.connect(ambientGain.gain);
+  ambientNode.connect(ambientFilter);
+  ambientFilter.connect(ambientGain);
+  ambientGain.connect(audioCtx.destination);
+  ambientNode.start();
+  ambientLFO.start();
+  // 淡入
+  ambientGain.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 2);
+}
+
+// ========== 贴图 ==========
+function createTileTexture(isWall=false){
+  const c=document.createElement('canvas');c.width=c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle=isWall?"#b8ccd8":"#8fb3c8";ctx.fillRect(0,0,256,256);
+  ctx.strokeStyle="#5f8fa6";ctx.lineWidth=3;
+  for(let x=0;x<=256;x+=32){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,256);ctx.stroke();}
+  for(let y=0;y<=256;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(256,y);ctx.stroke();}
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;return t;
+}
+function createEdgeTexture(){
+  const c=document.createElement('canvas');c.width=c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle="#dfe6ed";ctx.fillRect(0,0,256,256);
+  ctx.strokeStyle="#7890a3";ctx.lineWidth=4;ctx.strokeRect(2,2,252,252);
+  ctx.fillStyle="rgba(255,255,255,0.4)";ctx.fillRect(0,0,256,10);
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;return t;
+}
+
+// ========== 水面 Shader（菲涅尔反光 + 清澈水体）==========
+function createWaterMaterial(){
+  waterUniforms = { uTime: { value: 0 } };
+  return new THREE.ShaderMaterial({
+    uniforms: waterUniforms,
+    transparent: true,
+    vertexShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying float vWave;
+      varying vec3 vViewDir;
+      void main(){
+        vUv = uv;
+        vec3 pos = position;
+        float w = sin(pos.x*0.35 + uTime*1.6)*0.09
+                + cos(pos.y*0.45 + uTime*1.3)*0.07
+                + sin((pos.x+pos.y)*0.2 + uTime*0.9)*0.05;
+        pos.z += w;
+        vWave = w;
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        vViewDir = normalize(-mvPosition.xyz);
+        gl_Position = projectionMatrix * mvPosition;
+      }`,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying float vWave;
+      varying vec3 vViewDir;
+      void main(){
+        // 清澈水体颜色
+        vec3 deep = vec3(0.18, 0.46, 0.66);
+        vec3 shallow = vec3(0.42, 0.70, 0.85);
+        float f = clamp(0.45 + vWave * 3.0, 0.0, 1.0);
+        vec3 waterCol = mix(deep, shallow, f);
+
+        // 细波纹高光
+        float r1 = sin(vUv.x*40.0 + uTime*2.2)*sin(vUv.y*32.0 + uTime*1.8);
+        float r2 = sin(vUv.x*25.0 - uTime*1.5 + vUv.y*20.0);
+        waterCol += (r1*0.45 + r2*0.25) * 0.07;
+
+        // 菲涅尔：视线越平（看远处水面）反射越强，越垂直越透明
+        // 水面旋转后法线近似朝上，用viewDir的y分量近似
+        float fresnel = pow(1.0 - clamp(abs(vViewDir.y), 0.0, 1.0), 3.0);
+        vec3 reflectCol = vec3(0.75, 0.88, 0.96); // 反射天花板/天光
+        waterCol = mix(waterCol, reflectCol, fresnel * 0.6);
+
+        // 透明度：菲涅尔强的地方更不透明（反射），中心更透明
+        float alpha = mix(0.55, 0.85, fresnel);
+
+        gl_FragColor = vec4(waterCol, alpha);
+      }`
+  });
+}
+
+// ========== 水底焦散光斑 Shader ==========
+function createCausticsMaterial(){
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }`,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      // 多层正弦波叠加模拟焦散
+      float caustic(vec2 uv, float t){
+        float c = 0.0;
+        c += sin(uv.x*12.0 + t*1.2 + sin(uv.y*8.0+t*0.7)*2.0);
+        c += sin(uv.y*10.0 - t*0.9 + cos(uv.x*9.0+t*1.1)*1.8);
+        c += sin((uv.x+uv.y)*8.0 + t*1.5 + sin((uv.x-uv.y)*6.0+t*0.5)*1.5);
+        c += sin((uv.x-uv.y)*14.0 - t*1.3);
+        return c / 4.0;
+      }
+      void main(){
+        vec2 uv = vUv * 3.0;
+        float c1 = caustic(uv, uTime);
+        float c2 = caustic(uv*1.5 + vec2(0.3,0.5), uTime*0.8);
+        float c = smoothstep(0.3, 1.0, (c1+c2)*0.5);
+        vec3 col = vec3(0.55, 0.80, 0.95) * c * 0.5;
+        gl_FragColor = vec4(col, c * 0.45);
+      }`
+  });
+}
+
+init();
+
+function init(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x8fb8d4);
+  scene.fog=new THREE.Fog(0x8fb8d4,30,160);
+
+  camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+  camera.position.set(0,PLAYER_HEIGHT,28);
+
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  controls=new PointerLockControls(camera,renderer.domElement);
+
+  document.getElementById('startBtn').addEventListener('click',()=>{
+    if(!audioCtx){ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    initAmbient();
+    document.getElementById('menu').classList.add('hidden');
+    controls.lock();
+  });
+  controls.addEventListener('unlock',()=>{
+    document.getElementById('menu').classList.remove('hidden');
+  });
+
+  const dl=new THREE.DirectionalLight(0xffffff,1.4);
+  dl.position.set(25,45,25);dl.castShadow=true;
+  dl.shadow.mapSize.set(2048,2048);
+  Object.assign(dl.shadow.camera,{left:-60,right:60,top:60,bottom:-60});
+  scene.add(dl);
+  scene.add(new THREE.AmbientLight(0xb2d4ee,0.4));
+
+  const floorTex=createTileTexture(false);floorTex.repeat.set(20,20);
+  const wallTex=createTileTexture(true);wallTex.repeat.set(16,7);
+  const edgeTex=createEdgeTexture();edgeTex.repeat.set(10,1);
+  const floorMat=new THREE.MeshStandardMaterial({map:floorTex,roughness:0.85});
+  const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:0.9});
+  const edgeMat=new THREE.MeshStandardMaterial({map:edgeTex,roughness:0.7});
+
+  // 地面四块
+  const gd=(ROOM_SIZE-POOL_SIZE)/2;
+  const gc=(POOL_HALF+ROOM_HALF)/2;
+  const g1=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE,gd),floorMat);
+  g1.rotation.x=-Math.PI/2;g1.position.set(0,0,gc);g1.receiveShadow=true;scene.add(g1);
+  const g2=g1.clone();g2.position.set(0,0,-gc);scene.add(g2);
+  const g3=new THREE.Mesh(new THREE.PlaneGeometry(gd,POOL_SIZE),floorMat);
+  g3.rotation.x=-Math.PI/2;g3.position.set(gc,0,0);g3.receiveShadow=true;scene.add(g3);
+  const g4=g3.clone();g4.position.set(-gc,0,0);scene.add(g4);
+
+  // 泳池池底
+  const pf=new THREE.Mesh(new THREE.PlaneGeometry(POOL_SIZE,POOL_SIZE),floorMat);
+  pf.rotation.x=-Math.PI/2;pf.position.y=POOL_FLOOR_LEVEL;pf.receiveShadow=true;scene.add(pf);
+
+  // 水底焦散光斑（叠加在池底上方）
+  causticsMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(POOL_SIZE-0.5, POOL_SIZE-0.5),
+    createCausticsMaterial()
+  );
+  causticsMesh.rotation.x = -Math.PI/2;
+  causticsMesh.position.y = POOL_FLOOR_LEVEL + 0.03;
+  scene.add(causticsMesh);
+
+  // 泳池四壁
+  const pwh=0-POOL_FLOOR_LEVEL;
+  const pwt=0.4;
+  const pw1=new THREE.Mesh(new THREE.BoxGeometry(POOL_SIZE,pwh,pwt),wallMat);
+  pw1.position.set(0,POOL_FLOOR_LEVEL+pwh/2,-POOL_HALF);pw1.castShadow=true;scene.add(pw1);
+  const pw2=pw1.clone();pw2.position.set(0,POOL_FLOOR_LEVEL+pwh/2,POOL_HALF);scene.add(pw2);
+  const pw3=new THREE.Mesh(new THREE.BoxGeometry(pwt,pwh,POOL_SIZE),wallMat);
+  pw3.position.set(-POOL_HALF,POOL_FLOOR_LEVEL+pwh/2,0);pw3.castShadow=true;scene.add(pw3);
+  const pw4=pw3.clone();pw4.position.set(POOL_HALF,POOL_FLOOR_LEVEL+pwh/2,0);scene.add(pw4);
+
+  // 池沿压边
+  const ew=1.0;
+  const e1=new THREE.Mesh(new THREE.BoxGeometry(POOL_SIZE+ew*2,0.12,ew),edgeMat);
+  e1.position.set(0,0.06,-POOL_HALF-ew/2);e1.castShadow=true;scene.add(e1);
+  const e2=e1.clone();e2.position.set(0,0.06,POOL_HALF+ew/2);scene.add(e2);
+  const e3=new THREE.Mesh(new THREE.BoxGeometry(ew,0.12,POOL_SIZE+ew*2),edgeMat);
+  e3.position.set(-POOL_HALF-ew/2,0.06,0);e3.castShadow=true;scene.add(e3);
+  const e4=e3.clone();e4.position.set(POOL_HALF+ew/2,0.06,0);scene.add(e4);
+
+  // 水面
+  waterMesh=new THREE.Mesh(
+    new THREE.PlaneGeometry(POOL_SIZE-0.5,POOL_SIZE-0.5,80,80),
+    createWaterMaterial()
+  );
+  waterMesh.rotation.x=-Math.PI/2;
+  waterMesh.position.y=POOL_WATER_LEVEL;
+  scene.add(waterMesh);
+
+  // 外墙
+  const wh=CEILING_HEIGHT;
+  const w1=new THREE.Mesh(new THREE.BoxGeometry(ROOM_SIZE,wh,WALL_THICKNESS),wallMat);
+  w1.position.set(0,wh/2,-ROOM_HALF);w1.castShadow=true;scene.add(w1);
+  const w2=w1.clone();w2.position.set(0,wh/2,ROOM_HALF);scene.add(w2);
+  const w3=new THREE.Mesh(new THREE.BoxGeometry(WALL_THICKNESS,wh,ROOM_SIZE),wallMat);
+  w3.position.set(-ROOM_HALF,wh/2,0);w3.castShadow=true;scene.add(w3);
+  const w4=w3.clone();w4.position.set(ROOM_HALF,wh/2,0);scene.add(w4);
+
+  // 天花板
+  const ceil=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_SIZE,ROOM_SIZE),wallMat);
+  ceil.rotation.x=Math.PI/2;ceil.position.y=CEILING_HEIGHT;ceil.receiveShadow=true;scene.add(ceil);
+
+  addEventListener('keydown',e=>{
+    if(!controls.isLocked) return;
+    switch(e.code){
+      case 'KeyW':moveForward=true;break;
+      case 'KeyS':moveBack=true;break;
+      case 'KeyA':moveLeft=true;break;
+      case 'KeyD':moveRight=true;break;
+      case 'Space':if(onGround){velocity.y=JUMP_POWER;onGround=false;}break;
+    }
+  });
+  addEventListener('keyup',e=>{
+    switch(e.code){
+      case 'KeyW':moveForward=false;break;
+      case 'KeyS':moveBack=false;break;
+      case 'KeyA':moveLeft=false;break;
+      case 'KeyD':moveRight=false;break;
+    }
+  });
+  addEventListener('resize',()=>{
+    camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+
+  animate();
+}
+
+function collideOuterWalls(){
+  const lim=ROOM_HALF-WALL_THICKNESS/2-PLAYER_RADIUS;
+  camera.position.x=Math.max(-lim,Math.min(lim,camera.position.x));
+  camera.position.z=Math.max(-lim,Math.min(lim,camera.position.z));
+}
+function collidePoolWalls(){
+  if(camera.position.y < PLAYER_HEIGHT - 0.1){
+    const lim=POOL_HALF-PLAYER_RADIUS;
+    camera.position.x=Math.max(-lim,Math.min(lim,camera.position.x));
+    camera.position.z=Math.max(-lim,Math.min(lim,camera.position.z));
+  }
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  const delta=Math.min(clock.getDelta(),0.05);
+  const elapsed=clock.elapsedTime;
+
+  // 水面 + 焦散动画
+  if(waterUniforms) waterUniforms.uTime.value = elapsed;
+  if(causticsMesh) causticsMesh.material.uniforms.uTime.value = elapsed;
+
+  if(controls.isLocked){
+    velocity.y += GRAVITY * delta;
+    direction.z=Number(moveForward)-Number(moveBack);
+    direction.x=Number(moveRight)-Number(moveLeft);
+    direction.normalize();
+
+    const inPoolArea = Math.abs(camera.position.x)<POOL_HALF-0.2 &&
+                       Math.abs(camera.position.z)<POOL_HALF-0.2;
+    isInWater = inPoolArea && camera.position.y < POOL_WATER_LEVEL + PLAYER_HEIGHT;
+
+    const moving = moveForward||moveBack||moveLeft||moveRight;
+    const speed = isInWater ? 2.8 : 5.2;
+    if(moveForward||moveBack) controls.moveForward(direction.z*speed*delta);
+    if(moveLeft||moveRight) controls.moveRight(direction.x*speed*delta);
+
+    camera.position.y += velocity.y * delta;
+
+    const groundY = inPoolArea ? POOL_FLOOR_LEVEL + PLAYER_HEIGHT : PLAYER_HEIGHT;
+    if(camera.position.y <= groundY){
+      camera.position.y = groundY; velocity.y = 0; onGround = true;
+    }else{ onGround = false; }
+
+    // 静止呼吸晃动：不移动且在地面时，镜头微小上下浮动
+    if(!moving && onGround){
+      breathTime += delta;
+      const breath = Math.sin(breathTime * 1.3) * 0.035;
+      camera.position.y += breath;
+    }else{
+      breathTime = 0;
+    }
+
+    collidePoolWalls(); collideOuterWalls();
+
+    if(camera.position.y > CEILING_HEIGHT-0.5){
+      camera.position.y=CEILING_HEIGHT-0.5;velocity.y=0;
+    }
+
+    if(onGround && moving && !isInWater) playStep();
+  }
+  renderer.render(scene,camera);
+}
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d143b01e09eeca',t:'MTc4OTc0NDA4OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>大象牙膏 · Elephant Toothpaste — three.js 3D 演示</title>
+<style>
+  :root{
+    --pink:#ff2f8e;
+    --pink-soft:#ff7ac0;
+    --ink:#2b2f38;
+    --panel:rgba(255,255,255,.72);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#dfe3ea;}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  #scene{position:fixed;inset:0;display:block;}
+  #scene canvas{display:block;}
+
+  /* ---------- 标题 ---------- */
+  #title{
+    position:fixed;left:22px;top:20px;z-index:10;
+    padding:12px 18px 13px;border-radius:14px;
+    background:var(--panel);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    backdrop-filter:blur(14px) saturate(140%);
+    box-shadow:0 6px 26px rgba(40,45,60,.14);
+    border:1px solid rgba(255,255,255,.6);
+    pointer-events:none;
+  }
+  #title h1{margin:0;font-size:17px;letter-spacing:.5px;font-weight:700;}
+  #title h1 em{font-style:normal;color:var(--pink);}
+  #title p{margin:5px 0 0;font-size:12px;line-height:1.55;color:#606877;}
+  #title .kbd{
+    display:inline-block;padding:0 5px;border-radius:4px;background:#eceff4;
+    border:1px solid #d7dbe3;font-size:11px;color:#4b5260;
+  }
+
+  /* ---------- 底部控制条 ---------- */
+  footer{
+    position:fixed;left:0;right:0;bottom:0;z-index:20;
+    display:flex;justify-content:center;
+    padding:0 16px 18px;
+    pointer-events:none;
+  }
+  .bar{
+    pointer-events:auto;
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;
+    padding:11px 16px;border-radius:16px;
+    background:var(--panel);
+    -webkit-backdrop-filter:blur(16px) saturate(150%);
+    backdrop-filter:blur(16px) saturate(150%);
+    box-shadow:0 10px 34px rgba(35,40,55,.18);
+    border:1px solid rgba(255,255,255,.65);
+  }
+  button{
+    font-family:inherit;font-size:14px;font-weight:600;
+    border:0;cursor:pointer;color:#fff;
+    padding:10px 22px;border-radius:11px;
+    background:linear-gradient(135deg,#ff3d95,#ff6fb5);
+    box-shadow:0 4px 14px rgba(255,61,149,.35);
+    transition:transform .12s ease, box-shadow .2s ease, opacity .2s;
+  }
+  button:hover{transform:translateY(-1px);box-shadow:0 7px 20px rgba(255,61,149,.45);}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:.42;cursor:not-allowed;box-shadow:none;transform:none;}
+  button.ghost{
+    background:#fff;color:#5a616f;border:1px solid #dde1e8;
+    box-shadow:0 2px 8px rgba(40,45,60,.07);
+  }
+  button.ghost:hover{background:#f7f8fb;box-shadow:0 4px 14px rgba(40,45,60,.12);}
+
+  .sep{width:1px;height:26px;background:#dfe3ea;}
+
+  .chk{
+    display:flex;align-items:center;gap:6px;font-size:12.5px;color:#5a616f;cursor:pointer;
+    user-select:none;
+  }
+  .chk input{accent-color:var(--pink);width:15px;height:15px;cursor:pointer;}
+
+  .stat{display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5a616f;}
+  .stat b{color:var(--ink);font-variant-numeric:tabular-nums;}
+  .pbar{
+    position:relative;width:112px;height:7px;border-radius:99px;
+    background:#e6e9ef;overflow:hidden;
+  }
+  .pbar i{
+    position:absolute;left:0;top:0;bottom:0;width:0%;border-radius:99px;
+    background:linear-gradient(90deg,#ff9ec9,#ff2f8e);
+    transition:width .12s linear;
+  }
+
+  /* ---------- 加载 / 报错 ---------- */
+  #boot{
+    position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;background:#e9ecf2;color:#5a616f;font-size:14px;
+    transition:opacity .5s ease;
+  }
+  #boot.hide{opacity:0;pointer-events:none;}
+  .spin{
+    width:34px;height:34px;border-radius:50%;
+    border:3px solid #dfe3ea;border-top-color:var(--pink);
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #boot .err{max-width:520px;text-align:center;line-height:1.7;color:#8a4356;font-size:13px;}
+
+  @media (max-width:640px){
+    #title{left:12px;top:12px;padding:9px 13px;}
+    #title h1{font-size:14px;} #title p{display:none;}
+    .bar{gap:9px;padding:9px 11px;}
+    button{padding:9px 15px;font-size:13px;}
+    .pbar{width:70px;}
+  }
+</style>
+</head>
+<body>
+
+<div id="scene"></div>
+
+<div id="title">
+  <h1>大象牙膏 · <em>Elephant Toothpaste</em></h1>
+  <p>H₂O₂ 催化分解 · 泡沫喷发与堆积模拟<br/>拖拽旋转视角 · 滚轮缩放</p>
+</div>
+
+<footer>
+  <div class="bar">
+    <button id="btnStart">开始喷发</button>
+    <button id="btnReset" class="ghost">重置</button>
+    <div class="sep"></div>
+    <label class="chk"><input type="checkbox" id="chkGlass" /> 高透明玻璃</label>
+    <div class="sep"></div>
+    <div class="stat">
+      <span>状态 <b id="stState">待机</b></span>
+      <div class="pbar"><i id="stBar"></i></div>
+      <span>泡沫 <b id="stCount">0</b></span>
+    </div>
+  </div>
+</footer>
+
+<div id="boot"><div class="spin"></div><div>正在装载 three.js 场景…</div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* =========================================================================
+   0. 常量
+   ========================================================================= */
+const G          = 195;    // 重力加速度（泡沫很轻，等效重力略低）
+const MAXP       = 4400;   // 泡沫粒子上限
+const ERUPT_TIME = 15;     // 压力衰减总时长（秒）
+const L0         = 56;     // 初始液面高度（≈ 瓶高 1/3）
+const LMIN       = 7;      // 最低液面
+
+// 三角烧瓶尺寸（单位与世界一致，瓶高 164）
+const R_BOT      = 58;     // 底部半径
+const R_NECK     = 17;     // 颈部半径
+const Y_SHOULDER = 104;    // 瓶身锥 → 颈 的过渡高度
+const Y_NECK_TOP = 157;    // 颈顶（唇下沿）
+const Y_LIP_TOP  = 164;    // 瓶口最高点
+const WALL       = 1.9;    // 玻璃壁厚
+const FLASK_TOP  = Y_LIP_TOP;
+
+const UP = new THREE.Vector3(0, 1, 0);
+
+/* ---- 烧瓶轮廓：外半径 r(y) ---- */
+function outerR(y){
+  if (y <= 0) return R_BOT - 4;
+  if (y < 4){                                   // 底部圆角
+    const t = y / 4;
+    return (R_BOT - 4) + 4 * Math.sin(t * Math.PI * 0.5);
+  }
+  if (y < Y_SHOULDER){                          // 圆锥瓶身（下宽上窄，微凹）
+    const t = (y - 4) / (Y_SHOULDER - 4);
+    return R_NECK + (R_BOT - R_NECK) * Math.pow(1 - t, 1.35);
+  }
+  if (y < Y_NECK_TOP){                          // 圆柱形颈部（极小收口）
+    return R_NECK - 0.5 * ((y - Y_SHOULDER) / (Y_NECK_TOP - Y_SHOULDER));
+  }
+  if (y < Y_LIP_TOP){                           // 瓶口外翻唇
+    const t = (y - Y_NECK_TOP) / (Y_LIP_TOP - Y_NECK_TOP);
+    return 16.5 + 4.3 * Math.sin(t * Math.PI * 0.9);
+  }
+  return 0;
+}
+function innerR(y){ return Math.max(1.5, outerR(y) - WALL); }
+
+/* =========================================================================
+   1. 渲染器 / 场景 / 相机 / 灯光 / 环境
+   ========================================================================= */
+const holder = document.getElementById('scene');
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+holder.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xc3c9d4, 700, 2100);
+
+const camera = new THREE.PerspectiveCamera(46, window.innerWidth/window.innerHeight, 1, 6000);
+camera.position.set(450, 420, 500);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 140, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.minDistance = 180;
+controls.maxDistance = 1900;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.update();
+
+/* ---- 程序化环境贴图（给玻璃反射用） ---- */
+function makeEnvTexture(){
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 512;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0.00, '#ffffff');
+  g.addColorStop(0.38, '#e6ecf6');
+  g.addColorStop(0.52, '#a2acbd');
+  g.addColorStop(1.00, '#39404c');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1024, 512);
+  ctx.filter = 'blur(26px)';
+  const panels = [
+    [170, 105, 200, 95, 'rgba(255,255,255,0.95)'],
+    [530,  80, 250, 110,'rgba(255,255,255,0.90)'],
+    [845, 140, 180, 85, 'rgba(255,244,250,0.85)'],
+    [360, 300, 280, 55, 'rgba(186,205,235,0.45)']
+  ];
+  for (const [x,y,w,h,col] of panels){
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(x, y, w/2, h/2, 0, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.filter = 'none';
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const envTex = makeEnvTexture();
+const pmrem = new THREE.PMREMGenerator(renderer);
+pmrem.compileEquirectangularShader();
+scene.environment = pmrem.fromEquirectangular(envTex).texture;
+
+/* ---- 背景渐变（玻璃能看到"背景"） ---- */
+(function(){
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 512;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0.00, '#f4f7fc');
+  g.addColorStop(0.48, '#cfd6e2');
+  g.addColorStop(0.62, '#8f97a6');
+  g.addColorStop(1.00, '#6a7180');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 512);
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  scene.background = t;
+})();
+
+/* ---- 灯光 ---- */
+const key = new THREE.DirectionalLight(0xffffff, 2.7);
+key.position.set(320, 620, 300);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.near = 150;
+key.shadow.camera.far = 1700;
+key.shadow.camera.left = -470;
+key.shadow.camera.right = 470;
+key.shadow.camera.top = 470;
+key.shadow.camera.bottom = -470;
+key.shadow.bias = -0.0007;
+key.shadow.normalBias = 0.9;
+scene.add(key);
+scene.add(new THREE.HemisphereLight(0xe8f0ff, 0x6d7280, 0.95));
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));      // 保证无纯黑区域
+const fill = new THREE.DirectionalLight(0xffd9ec, 0.55); // 粉色补光，营造荧光感
+fill.position.set(-380, 180, -300);
+scene.add(fill);
+
+/* ---- 地面：1000×1000 灰色光滑平面 ---- */
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(1000, 1000),
+  new THREE.MeshStandardMaterial({ color:0x8d939c, roughness:0.42, metalness:0.04 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* =========================================================================
+   2. 三角烧瓶（车削建模，带玻璃壁厚，方向朝上）
+   ========================================================================= */
+function buildFlaskGeometry(){
+  const V2 = THREE.Vector2;
+  const P = [];
+  // 外底：中心 → 平底 → 底部圆角
+  P.push(new V2(0, 0), new V2(46, 0));
+  for (let i = 0; i <= 7; i++){
+    const a = (i/7) * Math.PI * 0.5;
+    P.push(new V2(54 + 4*Math.sin(a), 4 - 4*Math.cos(a)));
+  }
+  // 外壁：圆锥瓶身
+  for (let i = 1; i <= 34; i++){
+    const y = 4 + (Y_SHOULDER - 4) * i / 34;
+    P.push(new V2(outerR(y), y));
+  }
+  // 外壁：圆柱颈
+  for (let i = 1; i <= 8; i++){
+    const y = Y_SHOULDER + (Y_NECK_TOP - Y_SHOULDER) * i / 8;
+    P.push(new V2(outerR(y), y));
+  }
+  // 外壁：瓶口唇
+  for (let i = 1; i <= 9; i++){
+    const y = Y_NECK_TOP + (Y_LIP_TOP - Y_NECK_TOP) * i / 9;
+    P.push(new V2(outerR(y), y));
+  }
+  // 越过唇口，转到内壁
+  P.push(new V2(14.9, Y_LIP_TOP - 0.6));
+  // 内壁：颈
+  for (let i = 1; i <= 8; i++){
+    const y = (Y_LIP_TOP - 1.4) - (Y_LIP_TOP - 1.4 - Y_SHOULDER) * i / 8;
+    P.push(new V2(innerR(y), y));
+  }
+  // 内壁：圆锥瓶身
+  for (let i = 1; i <= 34; i++){
+    const y = Y_SHOULDER - (Y_SHOULDER - 5) * i / 34;
+    P.push(new V2(innerR(y), y));
+  }
+  // 内底圆角 → 内底中心
+  P.push(new V2(50, 3.0), new V2(44, WALL), new V2(0, WALL));
+
+  const g = new THREE.LatheGeometry(P, 96);
+  g.computeBoundingSphere();
+  return g;
+}
+
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.9,
+  roughness: 0.95,          // 题设给定值
+  metalness: 0.35,          // 题设给定值
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.03,
+  transmission: 0.95,
+  ior: 1.5,
+  side: THREE.DoubleSide,
+  thickness: 2.2,
+  attenuationColor: new THREE.Color(0xe9f4ff),
+  attenuationDistance: 420,
+  envMapIntensity: 1.35,
+  specularIntensity: 1.0
+});
+
+const flask = new THREE.Mesh(buildFlaskGeometry(), glassMat);
+flask.castShadow = true;
+flask.receiveShadow = true;
+scene.add(flask);
+
+/* ---- 荧光粉色液体：复用内壁轮廓，只取到液面高度 ---- */
+function buildLiquidGeometry(level){
+  const V2 = THREE.Vector2;
+  const P = [];
+  P.push(new V2(0, level));                        // 平整的液面（中心 → 壁）
+  const N = 30;
+  for (let i = 0; i <= N; i++){
+    const y = level - (level - WALL) * i / N;
+    P.push(new V2(Math.max(0.6, innerR(y) - 0.28), y));  // 与内壁贴合
+  }
+  P.push(new V2(0, WALL));                         // 平底
+  return new THREE.LatheGeometry(P, 72);
+}
+
+const liquidMat = new THREE.MeshPhysicalMaterial({
+  color: 0xff2d92,
+  emissive: 0x5c0030,
+  emissiveIntensity: 0.45,
+  roughness: 0.10,
+  metalness: 0.0,
+  transmission: 0.35,
+  ior: 1.34,
+  thickness: 40,
+  attenuationColor: new THREE.Color(0xff2d92),
+  attenuationDistance: 26,
+  clearcoat: 0.9,
+  clearcoatRoughness: 0.08,
+  transparent: true,
+  opacity: 0.97,
+  side: THREE.DoubleSide,
+  envMapIntensity: 0.9
+});
+
+let liquidLevel = L0, liquidBuilt = -999;
+const liquid = new THREE.Mesh(buildLiquidGeometry(L0), liquidMat);
+liquid.castShadow = true;
+scene.add(liquid);
+
+function setLiquidLevel(L){
+  liquidLevel = L;
+  if (Math.abs(L - liquidBuilt) < 0.3) return;
+  liquidBuilt = L;
+  const old = liquid.geometry;
+  liquid.geometry = buildLiquidGeometry(L);
+  old.dispose();
+}
+
+/* =========================================================================
+   3. 泡沫：InstancedMesh + 程序化噪点纹理
+   ========================================================================= */
+function makeFoamTexture(size = 256){
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#9a9a9a'; ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 2600; i++){                 // 多孔气泡噪点
+    const x = Math.random()*size, y = Math.random()*size;
+    const r = 1.6 + Math.random()*9;
+    const v = Math.random() > 0.5 ? 255 : 30;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${v},${v},${v},${0.35 + Math.random()*0.5})`);
+    g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+  // 少量更大的暗斑，增加层次
+  for (let i = 0; i < 90; i++){
+    const x = Math.random()*size, y = Math.random()*size, r = 8 + Math.random()*20;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(60,60,60,0.30)');
+    g.addColorStop(1, 'rgba(60,60,60,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 1);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const foamTex = makeFoamTexture();
+
+const foamMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff,
+  map: foamTex,
+  bumpMap: foamTex,
+  bumpScale: 0.5,
+  roughness: 0.52,
+  metalness: 0.0,
+  clearcoat: 0.45,
+  clearcoatRoughness: 0.35,
+  sheen: 0.6,
+  sheenColor: new THREE.Color(0xff9fd0),
+  transparent: true,
+  opacity: 0.93,
+  depthWrite: true
+});
+// 边缘菲涅尔提亮：让重叠球体读起来像"融合的泡沫团"而不是孤立小球
+foamMat.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <dithering_fragment>',
+    `#include <dithering_fragment>
+     float fr = 1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
+     fr = pow(fr, 2.2);
+     gl_FragColor.rgb += vec3(0.90, 0.20, 0.56) * fr * 0.55;
+     gl_FragColor.a = clamp(gl_FragColor.a + fr * 0.22, 0.0, 1.0);`
+  );
+};
+
+const foamGeo = new THREE.SphereGeometry(1, 10, 7);
+const foam = new THREE.InstancedMesh(foamGeo, foamMat, MAXP);
+foam.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+foam.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXP * 3), 3);
+foam.instanceColor.setUsage(THREE.DynamicDrawUsage);
+foam.count = 0;
+foam.castShadow = true;
+foam.receiveShadow = true;
+foam.frustumCulled = false;
+scene.add(foam);
+
+const tmpM = new THREE.Matrix4();
+const tmpP = new THREE.Vector3();
+const tmpS = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
+const tmpE = new THREE.Euler();
+const col = new THREE.Color();
+
+/* =========================================================================
+   4. 粒子池
+   st: 0 未启用 / 1 空中 / 2 地面滑行 / 3 瓶壁滑落 / 4 已固定
+   ========================================================================= */
+const P = new Array(MAXP);
+for (let i = 0; i < MAXP; i++){
+  P[i] = {
+    x:0, y:0, z:0, vx:0, vy:0, vz:0,
+    r:3, st:0, age:0, q:0, sc:0, ct:0,
+    s1:Math.random(), s2:Math.random()*100, s3:Math.random(),
+    quat:new THREE.Quaternion()
+  };
+}
+let alive = 0;
+
+/* =========================================================================
+   5. 泡沫堆积高度场
+   ========================================================================= */
+const HN = 132, CELL = 3.5, HOFF = HN * CELL * 0.5, HMAX = 130;
+const HF = new Float32Array(HN * HN);
+
+function sampleH(x, z){
+  const gx = (x + HOFF) / CELL, gz = (z + HOFF) / CELL;
+  if (gx < 0 || gz < 0 || gx >= HN-1 || gz >= HN-1) return 0;
+  const i = gx | 0, j = gz | 0, fx = gx - i, fz = gz - j;
+  const h00 = HF[j*HN+i],     h10 = HF[j*HN+i+1];
+  const h01 = HF[(j+1)*HN+i], h11 = HF[(j+1)*HN+i+1];
+  return (h00*(1-fx) + h10*fx)*(1-fz) + (h01*(1-fx) + h11*fx)*fz;
+}
+
+const KR = 3, KW = (() => {
+  const n = KR*2+1, w = new Float32Array(n*n);
+  let s = 0;
+  for (let j = -KR; j <= KR; j++)
+    for (let i = -KR; i <= KR; i++){
+      const v = Math.exp(-(i*i + j*j) / (2*2.0*2.0));
+      w[(j+KR)*n + (i+KR)] = v; s += v;
+    }
+  for (let k = 0; k < w.length; k++) w[k] /= s;
+  return w;
+})();
+
+function splat(x, z, amount){
+  const n = KR*2+1;
+  const i0 = Math.round((x + HOFF)/CELL), j0 = Math.round((z + HOFF)/CELL);
+  for (let j = -KR; j <= KR; j++){
+    const jj = j0 + j; if (jj < 0 || jj >= HN) continue;
+    for (let i = -KR; i <= KR; i++){
+      const ii = i0 + i; if (ii < 0 || ii >= HN) continue;
+      const a = jj*HN + ii;
+      const v = HF[a] + amount * KW[(j+KR)*n + (i+KR)];
+      HF[a] = v > HMAX ? HMAX : v;
+    }
+  }
+}
+
+// 雪崩松弛：坡度超过阈值就在邻格间搬运，让泡沫堆自然摊开
+const MAXDIFF = 2.6;
+let relaxRow = 1;
+function relax(){
+  for (let k = 0; k < 26; k++){
+    const j = 1 + ((relaxRow + k) % (HN - 2));
+    const row = j * HN;
+    for (let i = 1; i < HN - 1; i++){
+      const a = row + i, h = HF[a];
+      if (h <= 0.01) continue;
+      let b = a + 1;
+      let d = h - HF[b];
+      if (d > MAXDIFF){ const m = (d - MAXDIFF) * 0.22; HF[a] -= m; HF[b] += m; }
+      b = a - 1; d = h - HF[b];
+      if (d > MAXDIFF){ const m = (d - MAXDIFF) * 0.22; HF[a] -= m; HF[b] += m; }
+      b = a + HN; d = h - HF[b];
+      if (d > MAXDIFF){ const m = (d - MAXDIFF) * 0.22; HF[a] -= m; HF[b] += m; }
+      b = a - HN; d = h - HF[b];
+      if (d > MAXDIFF){ const m = (d - MAXDIFF) * 0.22; HF[a] -= m; HF[b] += m; }
+    }
+  }
+  relaxRow = (relaxRow + 26) % (HN - 2);
+}
+
+/* =========================================================================
+   6. 空间哈希（粒子互斥，制造泡沫膨胀感）
+   ========================================================================= */
+const TB = 1 << 13, TBM = TB - 1;
+const cellStart = new Int32Array(TB + 1);
+const cursor    = new Int32Array(TB);
+const cellOf    = new Int32Array(MAXP);
+const sorted    = new Int32Array(MAXP);
+const CELLSIZE  = 7.0;
+
+function hashCell(ix, iy, iz){
+  return (((ix * 92837111) ^ (iy * 689287499) ^ (iz * 283923481)) & TBM);
+}
+function buildGrid(){
+  cellStart.fill(0);
+  for (let i = 0; i < alive; i++){
+    const p = P[i];
+    const h = hashCell(Math.floor(p.x/CELLSIZE), Math.floor(p.y/CELLSIZE), Math.floor(p.z/CELLSIZE));
+    cellOf[i] = h; cellStart[h]++;
+  }
+  let s = 0;
+  for (let h = 0; h < TB; h++){ const c = cellStart[h]; cellStart[h] = s; cursor[h] = s; s += c; }
+  cellStart[TB] = s;
+  for (let i = 0; i < alive; i++) sorted[cursor[cellOf[i]]++] = i;
+}
+
+function repel(){
+  for (let a = 0; a < alive; a++){
+    const p = P[a];
+    if (p.st !== 1 && p.st !== 2 && p.st !== 3) continue;
+    const ix = Math.floor(p.x/CELLSIZE), iy = Math.floor(p.y/CELLSIZE), iz = Math.floor(p.z/CELLSIZE);
+    for (let dz = -1; dz <= 1; dz++)
+    for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++){
+      const hh = hashCell(ix+dx, iy+dy, iz+dz);
+      const s0 = cellStart[hh], e0 = cellStart[hh+1];
+      for (let k = s0; k < e0; k++){
+        const b = sorted[k];
+        if (b === a) continue;
+        const q = P[b];
+        let ox = q.x - p.x, oy = q.y - p.y, oz = q.z - p.z;
+        const rr = (p.r + q.r) * 0.84;
+        const d2 = ox*ox + oy*oy + oz*oz;
+        if (d2 > rr*rr || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2);
+        const f = (rr - d) / d * 0.20;
+        ox *= f; oy *= f; oz *= f;
+        const pFixed = (p.st === 4), qFixed = (q.st === 4);
+        if (pFixed && qFixed) continue;
+        if (pFixed)      { q.x += ox;      q.y += oy;      q.z += oz; }
+        else if (qFixed) { p.x -= ox;      p.y -= oy;      p.z -= oz; }
+        else {
+          p.x -= ox*0.5; p.y -= oy*0.5; p.z -= oz*0.5;
+          q.x += ox*0.5; q.y += oy*0.5; q.z += oz*0.5;
+        }
+      }
+    }
+  }
+}
+
+/* =========================================================================
+   7. 喷发逻辑
+   ========================================================================= */
+let running = false, T = 0, pressure = 0, emitAcc = 0;
+
+function spawn(){
+  const i = alive++;
+  const p = P[i];
+  const a = Math.random() * Math.PI * 2;
+  const rr = Math.sqrt(Math.random()) * 7.5;          // 在瓶颈内生成
+  p.x = Math.cos(a) * rr;
+  p.z = Math.sin(a) * rr;
+  p.y = 132 + Math.random() * 12;
+
+  const sp   = (500 + Math.random() * 150) * (0.42 + 0.58 * pressure);
+  const wide = 0.05 + 0.20 * (1 - pressure);          // 压力衰减后喷幅变散
+  p.vx = Math.cos(a) * sp * wide * 0.42 + (Math.random() - 0.5) * 16;
+  p.vz = Math.sin(a) * sp * wide * 0.42 + (Math.random() - 0.5) * 16;
+  p.vy = sp;
+
+  p.r  = 2.5 + Math.random() * 2.4;
+  p.st = 1; p.age = 0; p.q = 0; p.sc = 0; p.ct = 0;
+  p.quat.set(0, 0, 0, 1);
+
+  // 荧光粉：亮度与色相轻微抖动，增加层次
+  const h = 0.90 + Math.random() * 0.06;              // 品红 → 粉
+  const s = 0.62 + Math.random() * 0.30;
+  const l = 0.56 + Math.random() * 0.22;
+  col.setHSL(h > 1 ? h - 1 : h, s, l);
+  foam.setColorAt(i, col);
+  foam.instanceColor.needsUpdate = true;
+}
+
+function airborne(p, dt){
+  p.age += dt;
+  // 湍流：越接近最高点扰动越强，使泡沫柱在顶端才散开
+  const dec = 1 - Math.min(1, Math.abs(p.vy) / 470);
+  const amp = (14 + 86 * dec * dec) * (0.35 + 0.95 * (1 - pressure));
+  const s = p.s2;
+  p.vx += Math.sin(p.y*0.021 + T*1.7 + s*6.3) * amp * dt;
+  p.vz += Math.cos(p.y*0.024 - T*1.9 + s*3.1) * amp * dt;
+  p.vy += Math.sin(p.x*0.017 + T*1.3 + s*2.7) * amp * 0.32 * dt;
+
+  p.vy -= G * dt;                                     // 重力
+  if (pressure > 0.05 && p.age < 0.6 && p.y < 430)    // 瓶内压力持续助推
+    p.vy += 300 * pressure * dt;
+
+  const f = Math.exp(-0.32 * dt);                     // 空气阻力（泡沫轻、飘）
+  p.vx *= f; p.vy *= f; p.vz *= f;
+  p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt;
+}
+
+function deposit(p){
+  p.st = 4; p.vx = p.vy = p.vz = 0;
+  splat(p.x, p.z, 0.40 * p.r * p.r * p.r);            // 累积到高度场
+  p.y = sampleH(p.x, p.z) + p.r * 0.55;
+  tmpE.set((Math.random()-0.5)*0.55, Math.random()*Math.PI*2, (Math.random()-0.5)*0.55);
+  p.quat.setFromEuler(tmpE);
+  p.q = 1;
+}
+
+function onGround(p, gh, dt){
+  if (p.st !== 2){
+    p.st = 2; p.ct = 0;
+    p.vy = -p.vy * 0.10;                              // 微弱回弹
+    p.vx *= 0.5;  p.vz *= 0.5;
+  }
+  p.y = gh + p.r * 0.60;
+  p.ct += dt;
+  // 沿堆积面坡度下滑
+  const s = 3.5;
+  const gx = (sampleH(p.x+s, p.z) - sampleH(p.x-s, p.z)) / (2*s);
+  const gz = (sampleH(p.x, p.z+s) - sampleH(p.x, p.z-s)) / (2*s);
+  p.vx -= gx * G * 0.85 * dt;
+  p.vz -= gz * G * 0.85 * dt;
+  const f = Math.exp(-3.4 * dt);
+  p.vx *= f; p.vz *= f; p.vy = 0;
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  p.q = Math.min(1, p.q + dt * 5.5);                  // 压扁
+  const sp = Math.sqrt(p.vx*p.vx + p.vz*p.vz);
+  if (p.ct > 0.26 + p.s3 * 0.20 || sp < 6) deposit(p); // 滑行一小段后固定
+}
+
+function onFlask(p, d, dt){
+  const y = p.y;
+  const Ri = innerR(y);
+  if (p.vy > 40 && d < Ri){                           // 正在瓶颈里向上冲
+    const lim = Math.max(0.8, Ri - p.r * 0.62);
+    if (d > lim){ const k = lim / d; p.x *= k; p.z *= k; }
+    return;
+  }
+  if (p.st !== 3){ p.st = 3; p.ct = 0; }
+  p.ct += dt;
+
+  const ux = p.x / d, uz = p.z / d;
+  const target = outerR(y) + p.r * 0.78;
+  p.x = ux * target; p.z = uz * target;               // 推出到外壁
+
+  // 外表面法线（径向, y）
+  const dr = (outerR(Math.min(FLASK_TOP, y + 1)) - outerR(Math.max(0, y - 1))) * 0.5;
+  let nr = 1, ny = -dr;
+  const len = Math.sqrt(nr*nr + ny*ny); nr /= len; ny /= len;
+  const nx = ux * nr, nz = uz * nr;
+
+  p.vy -= G * dt;
+  const vn = p.vx*nx + p.vy*ny + p.vz*nz;
+  if (vn < 0){ p.vx -= vn*nx; p.vy -= vn*ny; p.vz -= vn*nz; }
+  const fr = Math.exp(-2.0 * dt);
+  p.vx *= fr; p.vy *= fr; p.vz *= fr;
+  p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt;
+
+  if (p.y > 0.5 && p.y < FLASK_TOP){                  // 重新贴合外壁
+    const dd = Math.sqrt(p.x*p.x + p.z*p.z) || 1e-4;
+    const t2 = outerR(p.y) + p.r * 0.78;
+    if (dd < t2){ const k = t2 / dd; p.x *= k; p.z *= k; }
+  }
+  if (p.y < 3.0){ p.st = 1; p.y = 3.2; p.vy = Math.min(p.vy, -8); return; }
+
+  const sp = Math.sqrt(p.vx*p.vx + p.vy*p.vy + p.vz*p.vz);
+  p.q = Math.min(0.75, p.q + dt * 3.0);
+  const clingRate = 1.1 + 3.2 * (1 - pressure);
+  if (ny > 0.28 && sp < 72 && Math.random() < clingRate * dt){
+    p.st = 4; p.vx = p.vy = p.vz = 0;
+    tmpV.set(nx, ny, nz).normalize();
+    p.quat.setFromUnitVectors(UP, tmpV);
+    p.y -= p.r * 0.18;
+    p.q = 1;
+  }
+}
+
+function collide(p, dt){
+  const d = Math.sqrt(p.x*p.x + p.z*p.z);
+  const gh = sampleH(p.x, p.z);
+  if (p.y - p.r * 0.72 <= gh){ onGround(p, gh, dt); return; }
+  if (p.y < FLASK_TOP && d < outerR(p.y) + p.r && d > 0){ onFlask(p, d, dt); return; }
+  p.st = 1;
+}
+
+/* =========================================================================
+   8. 主循环
+   ========================================================================= */
+function step(dt){
+  if (running){
+    T += dt;
+    let pr;
+    if (T < 0.5) pr = T / 0.45;
+    else {
+      const x = (T - 0.5) / ERUPT_TIME;
+      pr = x < 1 ? Math.pow(1 - x, 1.7) : 0;
+    }
+    pr *= 0.965 + 0.07 * Math.sin(T * 7.3);           // 反应抖动
+    pressure = Math.max(0, Math.min(1, pr));
+
+    if (pressure > 0.001){
+      emitAcc += (690 * pressure + 30) * dt;
+      while (emitAcc >= 1 && alive < MAXP){ emitAcc -= 1; spawn(); }
+      if (alive >= MAXP) emitAcc = 0;
+    }
+  }
+
+  if (alive > 0){
+    buildGrid();
+    for (let i = 0; i < alive; i++){
+      const p = P[i];
+      if (p.st === 1) airborne(p, dt);
+      else if (p.st === 0) continue;
+    }
+    repel();
+    for (let i = 0; i < alive; i++){
+      const p = P[i];
+      if (p.st === 1 || p.st === 2 || p.st === 3) collide(p, dt);
+    }
+    relax();
+  }
+
+  // 液面下降：只降顶面，形状与内壁保持一致
+  if (running){
+    const prog = Math.min(1, alive / 4200);
+    setLiquidLevel(L0 - prog * (L0 - LMIN));
+  }
+}
+
+function updateInstances(dt){
+  for (let i = 0; i < alive; i++){
+    const p = P[i];
+    const settled = (p.st === 4);
+    if (settled && p.q >= 1 && p.sc >= 1) continue;
+    p.sc = Math.min(1, p.sc + dt * 4.5);              // 生成时膨胀
+    if (settled) p.q = Math.min(1, p.q + dt * 5.0);
+    const grow = 0.32 + 0.68 * p.sc;
+    const sy  = p.r * grow * (1 - 0.44 * p.q);        // 受压：竖向压扁
+    const sxz = p.r * grow * (1 + 0.22 * p.q);        // 横向铺展
+    tmpM.compose(tmpP.set(p.x, p.y, p.z), p.quat, tmpS.set(sxz, sy, sxz));
+    foam.setMatrixAt(i, tmpM);
+  }
+  foam.instanceMatrix.needsUpdate = true;
+  foam.count = alive;
+}
+
+const clock = new THREE.Clock();
+let acc = 0;
+const FIXED = 1 / 60;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  acc += dt;
+  let n = 0;
+  while (acc >= FIXED && n < 3){ step(FIXED); acc -= FIXED; n++; }
+  if (n === 0 && acc > 0) { /* 帧率过高时等待 */ }
+  if (acc > FIXED * 3) acc = 0;
+  updateInstances(dt);
+  controls.update();
+  renderer.render(scene, camera);
+  hud();
+}
+
+/* =========================================================================
+   9. UI
+   ========================================================================= */
+const btnStart = document.getElementById('btnStart');
+const btnReset = document.getElementById('btnReset');
+const chkGlass = document.getElementById('chkGlass');
+const stState  = document.getElementById('stState');
+const stBar    = document.getElementById('stBar');
+const stCount  = document.getElementById('stCount');
+
+btnStart.addEventListener('click', () => {
+  if (running) return;
+  running = true; T = 0; pressure = 0; emitAcc = 0;
+  btnStart.disabled = true;
+  btnStart.textContent = '喷发中…';
+});
+
+btnReset.addEventListener('click', () => {
+  running = false; T = 0; pressure = 0; emitAcc = 0; alive = 0;
+  foam.count = 0;
+  for (let i = 0; i < MAXP; i++){ P[i].st = 0; P[i].q = 0; P[i].sc = 0; }
+  HF.fill(0);
+  setLiquidLevel(L0);
+  liquidBuilt = -999; setLiquidLevel(L0);
+  btnStart.disabled = false;
+  btnStart.textContent = '开始喷发';
+});
+
+chkGlass.addEventListener('change', () => {
+  if (chkGlass.checked){
+    glassMat.roughness = 0.05;   // 清澈玻璃（偏离题设给定值，仅作对比）
+    glassMat.metalness = 0.0;
+  } else {
+    glassMat.roughness = 0.95;   // 题设给定值
+    glassMat.metalness = 0.35;
+  }
+  glassMat.needsUpdate = true;
+});
+
+let hudTick = 0;
+function hud(){
+  if (++hudTick % 6) return;
+  let s = '待机';
+  if (running){
+    if (pressure > 0.65) s = '剧烈喷发';
+    else if (pressure > 0.18) s = '压力衰减';
+    else if (pressure > 0.001) s = '余势';
+    else s = '沉积中';
+  } else if (alive > 0) s = '已结束';
+  stState.textContent = s;
+  stBar.style.width = (pressure * 100).toFixed(0) + '%';
+  stCount.textContent = alive;
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* 启动 */
+renderer.compile(scene, camera);
+animate();
+const boot = document.getElementById('boot');
+requestAnimationFrame(() => boot.classList.add('hide'));
+setTimeout(() => boot.remove(), 900);
+window.addEventListener('error', (e) => {
+  const b = document.getElementById('boot');
+  if (b) b.innerHTML = '<div class="err">场景加载失败：' + (e.message || '未知错误') +
+    '<br/>请确认网络可访问 cdn.jsdelivr.net，并使用支持 WebGL2 的现代浏览器。</div>';
+});
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d143304e846974',t:'MTc4OTc0NDA2OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

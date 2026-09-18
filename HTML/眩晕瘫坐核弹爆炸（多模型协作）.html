@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>核爆都市 · 艺术化模拟</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; background:#06070a; height:100%; }
+  canvas { display:block; }
+  #panel {
+    position:fixed; right:18px; bottom:18px; z-index:10;
+    min-width:252px; padding:14px 16px 13px;
+    background:rgba(12,14,19,.58); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.09); border-radius:14px;
+    color:#e9e4d8; font:13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+    user-select:none; box-shadow:0 8px 30px rgba(0,0,0,.45);
+  }
+  #panel .row { display:flex; align-items:center; gap:8px; margin:7px 0; }
+  #panel .lbl { color:#9d97a8; flex:0 0 auto; }
+  #time { flex:1 1 auto; accent-color:#e8a15c; }
+  #clock { font-variant-numeric:tabular-nums; color:#f3d9ae; width:44px; text-align:right; }
+  button {
+    background:rgba(255,255,255,.07); color:#ddd6c8; border:1px solid rgba(255,255,255,.12);
+    border-radius:8px; padding:5px 11px; cursor:pointer; font:inherit; transition:background .15s;
+  }
+  button:hover { background:rgba(255,255,255,.15); }
+  button.on { background:rgba(232,161,92,.28); border-color:rgba(232,161,92,.55); color:#ffe2bd; }
+  #detonate { width:100%; padding:8px 0; font-size:14px; letter-spacing:6px; text-indent:6px; }
+  #detonate.armed { background:rgba(200,60,40,.30); border-color:rgba(230,90,70,.6); color:#ffd9cf; }
+  #hint { color:#7b7684; font-size:11px; margin-top:8px; text-align:center; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="panel">
+  <div class="row"><span class="lbl">时间</span><input id="time" type="range" min="0" max="24" step="0.1" value="19.5"><span id="clock">19:30</span></div>
+  <div class="row"><button id="detonate">引 爆</button></div>
+  <div class="row"><span class="lbl">视角</span><button id="camFree">自由观察</button><button id="camCliff" class="on">崖边男人</button></div>
+  <div class="row"><span class="lbl">速率</span><button class="rate" data-r="0.5">0.5</button><button class="rate on" data-r="1">1</button><button class="rate" data-r="2">2</button></div>
+  <div id="hint">拖动旋转 · 滚轮缩放 · 右键平移</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ===================== 时间线 / 空间常量（集中管理） ===================== */
+const GRID = 30, SLOT = 12;                       // 街区槽位 30×30，栋间距 12
+const BOMB_START = new THREE.Vector3(18, 280, 8);
+const BLAST      = new THREE.Vector3(18, 110, 8); // 空中炸点
+const FALL_DURATION = 3.2;                        // 下落秒（播放速率另乘）
+const FIREBALL_MAX_R = 64;                        // 爆炸强化：火球上限 36→64
+const SHOCKWAVE_R = 240;                          // 冲击波效果半径 130→240（远角 ≈254 槽位保留，男人 307 在环外）
+const SHOCK_START = 0.35, SHOCK_END = 7.0;        // SHOCK_END 10→7，波前更快扫完全城
+const INNER_TILT_R = 150;                         // 结构倾斜半径 55→150
+const WINDOW_DARK_R = 210;                        // 窗熄灭半径 90→210
+const DUST_RING_MAX = 268;                        // 地面尘环外缘上限（硬约束 < 280）
+const PLATFORM_TOP = 80;                          // 崖平台面（平台中心≈(0,78,-310)）
+const CHAIR_POS = new THREE.Vector3(0, PLATFORM_TOP, -298.5); // 平台边缘内侧约1.5
+const MAN_REACT_T = 0.12;                         // 男人反应时刻（光先到）
+const STIFF_A = 0.12, STIFF_B = 0.35, STIFF_OUT = 0.58;
+const SLUMP_START = 0.35;
+const BLOOM_BASE = { strength: 0.55, radius: 0.45, threshold: 0.85 };
+
+/* ===================== 全局状态 ===================== */
+const S = {
+  timeOfDay: 19.5,        // 0–24，默认黄昏
+  phase: 'idle',          // 'idle' | 'falling' | 'detonating'
+  fallElapsed: 0,
+  explosionElapsed: 0,    // 零点 = 弹体抵达炸点
+  camMode: 'cliff',       // 'free' | 'cliff'
+  timeScale: 1,
+};
+
+/* ===================== 工具 ===================== */
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const sstep = (x, a, b) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const easeOutCubic = t => 1 - Math.pow(1 - clamp01(t), 3);
+const easeInQuad = t => clamp01(t) * clamp01(t);
+const lerp = (a, b, t) => a + (b - a) * t;
+function hash01(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+
+/* ===================== 渲染器 / 场景 / 后期 ===================== */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x10141c, 200, 900);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 3000);
+camera.position.set(150, 95, 170);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight),
+  BLOOM_BASE.strength, BLOOM_BASE.radius, BLOOM_BASE.threshold);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ===================== 环境与时间 ===================== */
+const SUN_TARGET_POS = new THREE.Vector3(0, PLATFORM_TOP, -305);
+const hemi = new THREE.HemisphereLight(0x223048, 0x141210, 0.3);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1da, 1.2);
+sun.castShadow = true;                 // 阴影只覆盖崖+男人+近平台
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -45; sun.shadow.camera.right = 45;
+sun.shadow.camera.top = 45; sun.shadow.camera.bottom = -45;
+sun.shadow.camera.near = 100; sun.shadow.camera.far = 900;
+sun.shadow.bias = -0.0005;
+sun.target.position.copy(SUN_TARGET_POS);
+scene.add(sun, sun.target);
+
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: {
+    topColor: { value: new THREE.Color(0x060a18) },
+    horizonColor: { value: new THREE.Color(0x1a1626) },
+    sunDir: { value: new THREE.Vector3(0, 1, 0) },
+    sunTint: { value: new THREE.Color(1.0, 0.55, 0.25) },
+    sunI: { value: 0 },
+    flash: { value: 0 },
+  },
+  vertexShader: `
+    varying vec3 vDir;
+    void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    varying vec3 vDir;
+    uniform vec3 topColor, horizonColor, sunTint, sunDir;
+    uniform float sunI, flash;
+    void main(){
+      float h = clamp(vDir.y, -1.0, 1.0);
+      vec3 col = mix(horizonColor, topColor, pow(max(h, 0.0), 0.55));
+      if (h < 0.0) col = mix(horizonColor, horizonColor * 0.30, min(-h * 3.0, 1.0));
+      float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+      col += sunTint * pow(s, 22.0) * sunI;
+      col = mix(col, vec3(1.0), flash);
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1150, 32, 20), skyMat));
+
+const PAL = { // 夜 / 晨昏 / 昼 三档调色
+  nightTop: new THREE.Color(0x04060f), nightHor: new THREE.Color(0x141a2c),
+  duskTop:  new THREE.Color(0x323a6b), duskHor:  new THREE.Color(0xf58a4e),
+  dayTop:   new THREE.Color(0x2f6fc8), dayHor:   new THREE.Color(0xbdd8ee),
+};
+
+// 艺术化太阳曲线：日出 6 点、日落 19 点，中午最高
+function sunState(t) {
+  const u = (t - 6) / 13;
+  const sinEl = Math.sin(Math.PI * u);
+  const elevDeg = sinEl * 70;
+  return { u, sinEl, elevDeg,
+    dayK: sstep(elevDeg, 4, 16),
+    glow: 1 - sstep(elevDeg, -4, 8) };   // sunElev<8° 开始亮，全夜到 1
+}
+
+let timeGlow = 1;
+function updateEnvironment(t, T) {
+  const { u, sinEl, elevDeg, dayK, glow } = sunState(t);
+  timeGlow = glow;
+
+  const az = Math.PI * u;
+  skyMat.uniforms.sunDir.value.set(Math.cos(az), Math.max(sinEl, -0.3), Math.sin(az) * 0.55).normalize();
+  sun.position.copy(skyMat.uniforms.sunDir.value).multiplyScalar(620).add(SUN_TARGET_POS);
+  sun.intensity = 2.3 * Math.pow(Math.max(sinEl, 0), 0.65);
+  sun.color.lerpColors(_c1.set(0xff8a3c), _c2.set(0xfff2df), sstep(elevDeg, 2, 25));
+
+  const duskK = sstep(elevDeg, -12, -2);
+  const top = _c1.lerpColors(PAL.nightTop, PAL.duskTop, duskK).lerp(PAL.dayTop, dayK);
+  const hor = _c2.lerpColors(PAL.nightHor, PAL.duskHor, duskK).lerp(PAL.dayHor, dayK);
+  skyMat.uniforms.topColor.value.copy(top);
+  skyMat.uniforms.horizonColor.value.copy(hor);
+  skyMat.uniforms.sunI.value =
+    0.55 * (1 - dayK) * sstep(elevDeg, -14, 2) +
+    0.9 * sstep(elevDeg, -2, 10) * (1 - sstep(elevDeg, 12, 30));
+
+  hemi.intensity = 0.42 + 0.38 * dayK;   // 夜间楼体剪影分层、邻楼材质反差可读；白天保持 0.80（增量复核）
+  hemi.color.copy(top).lerp(_c1.set(0xffffff), 0.25);
+  if (groundMat) groundMat.color.lerpColors(_c1.set(0x14171c), _c2.set(0x4a4640), dayK);  // 昼间岩灰，崖脚/乱石落地可读
+
+  scene.fog.color.copy(hor).multiplyScalar(0.55);
+  scene.fog.near = lerp(150, 320, dayK);
+  scene.fog.far = lerp(560, 1050, dayK);
+
+  // —— 爆炸闪光叠加层：独立于时间滑条，每帧从基值重算不累积 ——
+  const flash = (S.phase === 'detonating' && T >= 0) ? Math.exp(-T * 11) : 0;
+  skyMat.uniforms.flash.value = flash * 0.9;
+  scene.fog.color.lerp(_c1.set(0xffffff), flash * 0.85);
+  bloom.threshold = BLOOM_BASE.threshold - 0.68 * flash;
+  bloom.strength = BLOOM_BASE.strength + 2.4 * flash;
+}
+
+/* ===================== 地面与道路 ===================== */
+let groundMat;   // 模块引用：地面色随时间（夜暗昼岩），正午崖脚接地可读
+function buildGround() {
+  groundMat = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.96 });
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), groundMat);
+  g.rotation.x = -Math.PI / 2;
+  g.receiveShadow = true;
+  scene.add(g);
+
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x21262e, roughness: 0.92 });
+  const walkMat = new THREE.MeshStandardMaterial({ color: 0x2f343c, roughness: 0.9 });
+  const half = GRID * SLOT / 2 + 14;
+  const dashGeo = new THREE.BoxGeometry(0.4, 0.06, 2.4);
+  const dashMat = new THREE.MeshStandardMaterial({ color: 0x6d727b, roughness: 0.8 });
+  const dashes = [];
+  for (let i = 0; i < GRID; i++) {
+    if (i % 5 !== 4) continue;
+    const c = (i - (GRID - 1) / 2) * SLOT;
+    const rX = new THREE.Mesh(new THREE.BoxGeometry(7, 0.08, half * 2), roadMat);
+    rX.position.set(c, 0.04, 0);
+    const rZ = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.08, 7), roadMat);
+    rZ.position.set(0, 0.04, c);
+    scene.add(rX, rZ);
+    // 人行道缘石（两侧提亮）+ 中央虚线，道路不只靠色块区分
+    for (const s of [-4.2, 4.2]) {
+      const wX = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, half * 2), walkMat);
+      wX.position.set(c + s, 0.05, 0);
+      const wZ = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.1, 0.7), walkMat);
+      wZ.position.set(0, 0.05, c + s);
+      scene.add(wX, wZ);
+    }
+    for (let d = -half + 5; d < half - 5; d += 9) {
+      dashes.push({ x: c, z: d, ry: 0 }, { x: d, z: c, ry: Math.PI / 2 });
+    }
+  }
+  const dashMesh = new THREE.InstancedMesh(dashGeo, dashMat, dashes.length);
+  const dm4 = new THREE.Matrix4(), dq = new THREE.Quaternion(), dp = new THREE.Vector3(), ds = new THREE.Vector3(1, 1, 1);
+  const de = new THREE.Euler();
+  dashes.forEach((d, k) => {
+    dq.setFromEuler(de.set(0, d.ry, 0));
+    dm4.compose(dp.set(d.x, 0.09, d.z), dq, ds);
+    dashMesh.setMatrixAt(k, dm4);
+  });
+  dashMesh.instanceMatrix.needsUpdate = true;
+  scene.add(dashMesh);
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(27, 40),
+    new THREE.MeshStandardMaterial({ color: 0x272c34, roughness: 0.9 }));
+  plaza.rotation.x = -Math.PI / 2;
+  plaza.position.y = 0.06;
+  scene.add(plaza);
+}
+
+/* ===================== 城市（InstancedMesh） ===================== */
+const buildings = [];    // {x,z,w,d,h,dist,damage,tilted,reacted,landmark,instIdx,baseMatrix}
+const strips = [];       // 窗条 {bld,x,y,z,ry,w,hue,inherent}
+const bldTransforms = []; // 主体 instance（含塔冠，计入 900 预算）
+const MAX_INSTANCES = 900;
+let cityInstMesh, winMesh, winMat, lampHeadMat;
+const pointLights = [];
+const windowFlashQueue = []; // {b, until}
+
+function addWindowStrips(b) {
+  const bld = buildings.length - 1;
+  // 四面立面；横带宽两段 / 竖梃密列两种节奏按楼混合（增量复核：破单一窗格感）
+  const vertical = !b.landmark && b.h5 < 0.32;
+  const step = b.landmark ? 4.0 : (vertical ? 5.0 : 5.2); // 地标窗更密
+  const faces = [
+    { ry: 0,             ax: 'x', oz: b.d / 2 + 0.09, span: b.w, sign: 1 },
+    { ry: Math.PI,       ax: 'x', oz: -b.d / 2 - 0.09, span: b.w, sign: -1 },
+    { ry: Math.PI / 2,   ax: 'z', ox: b.w / 2 + 0.09, span: b.d, sign: 1 },
+    { ry: -Math.PI / 2,  ax: 'z', ox: -b.w / 2 - 0.09, span: b.d, sign: -1 },
+  ];
+  for (let y = 2.6; y + 1.6 < b.h - 1.2; y += step) {
+    for (const f of faces) {
+      const segs = vertical ? Math.max(2, Math.floor(f.span / 1.8)) : 2;
+      for (let seg = 0; seg < segs; seg++) {
+        const id = strips.length;
+        const segOff = vertical
+          ? (seg / (segs - 1) - 0.5) * f.span * 0.72 * f.sign   // 竖梃：窄条沿面宽均布
+          : (seg === 0 ? -1 : 1) * f.span * 0.21 * f.sign;      // 横带：宽条两段
+        const px = f.ax === 'x' ? b.x + segOff : b.x + (f.ox || 0);
+        const pz = f.ax === 'x' ? b.z + f.oz : b.z + segOff;
+        const off = hash01(id * 5 + 17) < 0.24;        // 部分楼层整层暗，形成亮暗节奏
+        const cool = b.landmark ? hash01(id * 3 + 11) < 0.55 : hash01(id * 3 + 11) >= 0.78;
+        const hue = cool ? new THREE.Color(0.78, 0.88, 1.0) : new THREE.Color(1, 0.93, 0.80);
+        strips.push({ bld, x: px, y, z: pz, ry: f.ry,
+          w: vertical ? 0.62 : f.span * 0.33, h: vertical ? 2.7 : 2.0,
+          hue, inherent: off ? 0 : 0.45 + 0.55 * hash01(id * 7 + 3), mat: null });
+      }
+    }
+  }
+}
+
+function registerBuilding(x, z, w, d, h, isLandmark = false) {
+  const b = { x, z, w, d, h,
+    dist: Math.hypot(x - BLAST.x, z - BLAST.z),
+    damage: 1, tilted: false, reacted: false,
+    // 破坏状态机（爆炸强化）：波前触达记 arrivalTime/目标，0.4–0.8s 插值到目标
+    arrivalTime: -1, dmgDur: 0.5, dmgTarget: 1, dmgDone: false,
+    tiltAngle: 0, squashK: 1, tiltAxis: new THREE.Vector3(0, 0, 1),
+    h3: hash01(x * 1.7 + z * 2.3), h4: hash01(x * 3.1 - z * 1.3), h5: hash01(x - z * 4.7),
+    landmark: isLandmark, instIdx: -1, baseMatrix: null, baseInv: null,
+    crownInstIdx: -1, crownBase: null,
+    landmarkMeshes: null,               // 地标：{body,crown,ant} 现有 Mesh + 各自基三元组
+    winStart: strips.length, winCount: 0 };
+  buildings.push(b);
+  addWindowStrips(b);
+  b.winCount = strips.length - b.winStart;             // S1：记录区间，不再全量扫描
+  return b;
+}
+
+function buildCity() {
+  const n = (GRID - 1) / 2;
+  for (let i = 0; i < GRID; i++) for (let j = 0; j < GRID; j++) {
+    if (i % 5 === 4 || j % 5 === 4) continue;                 // 道路槽
+    const x = (i - n) * SLOT, z = (j - n) * SLOT;
+    const dC = Math.hypot(x, z);
+    if (dC < 25) continue;                                    // 中心矮广场
+    const noise = hash01(i * 31 + j * 7);
+    let h = 8 + 82 * Math.pow(Math.max(0, 1 - dC / 195), 1.7) + noise * 10 - 5;
+    const v = hash01(i * 13 + j * 41);
+    let w, d;
+    if (v < 0.34)      { w = 7.0; d = 7.0; }                  // 标准
+    else if (v < 0.67) { w = 5.4; d = 5.4; h *= 1.28; }       // 瘦高
+    else               { w = 8.6; d = 6.2; h *= 0.68; }       // 矮宽
+    h = THREE.MathUtils.clamp(h, 6, 92);
+    registerBuilding(x, z, w, d, h);
+  }
+  // 地标 3 栋（独立 Mesh，不计入 900；窗条并入窗 InstancedMesh）
+  const t1 = registerBuilding(-42, -34, 13, 13, 105, true);   // 超高玻璃塔
+  const t2 = registerBuilding(52, 44, 11, 11, 85, true);      // 双塔
+  const t3 = registerBuilding(64, 57, 11, 11, 76, true);
+
+  // —— 建筑主体 InstancedMesh ——
+  for (const b of buildings) {
+    if (b.landmark) continue;
+    // 邻楼材质反差拉大：五档色相 × 宽明度带（增量复核）
+    const cTend = hash01(b.x * 2.1 + b.z);
+    const col = cTend < 0.22 ? new THREE.Color(0x9aa1a8)      // 浅混凝土
+      : cTend < 0.45 ? new THREE.Color(0x4e5a66)              // 深灰蓝玻璃
+      : cTend < 0.65 ? new THREE.Color(0x8c6f5a)              // 砖红棕
+      : cTend < 0.85 ? new THREE.Color(0xb3a48c)              // 米白暖石
+      : new THREE.Color(0x3c4046);                            // 炭灰
+    col.multiplyScalar(0.68 + 0.5 * hash01(b.z * 5 - b.x));
+    b.instIdx = bldTransforms.length;
+    bldTransforms.push({ b, x: b.x, y: b.h / 2, z: b.z, sx: b.w, sy: b.h, sz: b.d, color: col, crown: false });
+    // 少量裙楼基座：高塔踩宽矮座，轮廓不再是单一竖盒（增量复核）
+    if (b.h > 30 && b.w >= 7 && hash01(b.x * 0.7 + b.z * 1.9) < 0.09) {
+      bldTransforms.push({ b, x: b.x, y: 2.6, z: b.z,
+        sx: b.w * 1.5, sy: 5.2, sz: b.d * 1.5,
+        color: col.clone().multiplyScalar(0.72), crown: true });  // crown 语义=主体附件：不记 baseMatrix、不随倾
+    }
+    if (b.h > 34 && hash01(b.x - b.z * 3) < 0.35) {           // 塔冠/退台
+      b.crownInstIdx = bldTransforms.length;
+      bldTransforms.push({ b, x: b.x, y: b.h + 1.8, z: b.z,
+        sx: b.w * 0.62, sy: 3.6, sz: b.d * 0.62, color: col.clone().multiplyScalar(0.9), crown: true });
+    }
+  }
+  const inst = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.12 }),
+    Math.min(bldTransforms.length, MAX_INSTANCES));
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+  bldTransforms.forEach((t, k) => {
+    if (k >= MAX_INSTANCES) return;
+    m4.compose(p.set(t.x, t.y, t.z), q.identity(), s.set(t.sx, t.sy, t.sz));
+    inst.setMatrixAt(k, m4);
+    inst.setColorAt(k, t.color);
+    if (!t.crown) {                              // 供倾角与重置恢复
+      t.b.baseMatrix = m4.clone();
+      t.b.baseInv = m4.clone().invert();         // R4：刚体增量 = newBody × baseInv
+    } else t.b.crownBase = m4.clone();
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  scene.add(inst);
+  cityInstMesh = inst;
+
+  // —— 地标独立 Mesh；登记到建筑对象（plan 允许例外：只登记引用与基变换，破坏/重置走同一套） ——
+  const glass = new THREE.MeshStandardMaterial({ color: 0x5f7488, metalness: 0.8, roughness: 0.3 });
+  const stone = new THREE.MeshStandardMaterial({ color: 0x8b7f6e, metalness: 0.25, roughness: 0.6 });
+  const snapBase = m => ({ p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone() });
+  for (const b of [t1, t2, t3]) {
+    const mat = b === t1 ? glass : stone;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), mat);
+    mesh.position.set(b.x, b.h / 2, b.z);
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(b.w * 0.55, 3.5, b.d * 0.55), mat);
+    crown.position.set(b.x, b.h + 1.75, b.z);
+    scene.add(mesh, crown);
+    b.landmarkMeshes = { body: mesh, crown, ant: null };
+    b.landmarkBase = { body: snapBase(mesh), crown: snapBase(crown), ant: null };
+    if (b === t1) {
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 12, 6), stone);
+      ant.position.set(b.x, b.h + 9, b.z);
+      scene.add(ant);
+      b.landmarkMeshes.ant = ant;
+      b.landmarkBase.ant = snapBase(ant);
+    }
+  }
+
+  buildWindows();
+  buildStreetLights();
+}
+
+/* ---- 窗：材质全局色 = timeGlow；instanceColor = hue × inherent × damage ---- */
+function stripColor(st) {
+  return _c1.copy(st.hue).multiplyScalar(st.inherent * buildings[st.bld].damage);
+}
+function buildWindows() {
+  winMat = new THREE.MeshBasicMaterial({ color: 0x1a2028 });
+  winMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), winMat, strips.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+  const e = new THREE.Euler();
+  strips.forEach((st, k) => {
+    q.setFromEuler(e.set(0, st.ry, 0));
+    m4.compose(p.set(st.x, st.y, st.z), q, s.set(st.w, st.h, 0.18));
+    st.mat = m4.clone();                          // R4：附件基矩阵，倾斜时共用刚体增量
+    winMesh.setMatrixAt(k, m4);
+    winMesh.setColorAt(k, stripColor(st));
+  });
+  winMesh.instanceMatrix.needsUpdate = true;
+  winMesh.instanceColor.needsUpdate = true;
+  scene.add(winMesh);
+}
+function forEachStripOf(b, fn) {   // S1：用建城时记录的区间，不再全量扫描
+  for (let k = b.winStart; k < b.winStart + b.winCount; k++) fn(k, strips[k]);
+  winMesh.instanceColor.needsUpdate = true;
+}
+function refreshBuildingWindows(b) { forEachStripOf(b, (k, st) => winMesh.setColorAt(k, stripColor(st))); }
+function updateWindowTimeGlow() {
+  winMat.color.lerpColors(_c1.set(0x171d26), _c2.set(0xffcc77), timeGlow);
+}
+
+/* ---- 街灯：杆 instanced + 灯头发光；真 PointLight 仅 4 盏 ---- */
+function buildStreetLights() {
+  const coords = [];
+  for (let i = 0; i < GRID; i++) if (i % 5 === 4) coords.push((i - (GRID - 1) / 2) * SLOT);
+  const spots = [];
+  coords.forEach((x, a) => coords.forEach((z, b) => {
+    if ((a + b) % 2 === 0) spots.push([x + 4.6, z + 4.6]);
+  }));
+  const pole = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.1, 0.14, 5, 6),
+    new THREE.MeshStandardMaterial({ color: 0x2c2f36, roughness: 0.8 }), spots.length);
+  lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const head = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.25, 0.5), lampHeadMat, spots.length);
+  const m4 = new THREE.Matrix4();
+  spots.forEach(([x, z], k) => {
+    m4.makeTranslation(x, 2.5, z); pole.setMatrixAt(k, m4);
+    m4.makeTranslation(x, 5.05, z); head.setMatrixAt(k, m4);
+  });
+  scene.add(pole, head);
+
+  const mk = (x, y, z, inten, dist) => {
+    const L = new THREE.PointLight(0xffc887, 0, dist, 2);
+    L.position.set(x, y, z);
+    L.userData.base = inten;
+    scene.add(L); pointLights.push(L);
+  };
+  mk(-8, PLATFORM_TOP + 2.5, -305, 60, 46);  // 崖 ×2（照亮男人/椅子，保证瘫坐可读）
+  mk(8, PLATFORM_TOP + 2.5, -303, 60, 46);
+  mk(-14, 11, 14, 40, 120);                  // 广场 ×2
+  mk(16, 11, -12, 40, 120);
+}
+function updateLamps() {
+  lampHeadMat.color.set(0xffcc77).multiplyScalar(timeGlow);
+  for (const L of pointLights) L.intensity = L.userData.base * timeGlow;
+}
+
+/* ===================== 崖 / 平台 / 栏杆 / 椅子 ===================== */
+function buildCliff() {
+  // 不规则岩体：大角度剪切/错位外伸破直角轮廓；锥峰、斜倚岩坡与滚落乱石把平台接回地面（增量复核）
+  const rockPalette = [0x4b463e, 0x423e37, 0x55504a, 0x3c3833]
+    .map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+  const rock = (sx, sy, sz, x, y, z, ry = 0, rz = 0, rx = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz),
+      rockPalette[Math.floor(hash01(x * 3 + z * 7 + y) * 4)]);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    scene.add(m);
+    return m;
+  };
+  const boulder = (r, x, y, z, seed) => {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), rockPalette[seed % 4]);
+    m.position.set(x, y, z);
+    m.rotation.set(hash01(seed * 3) * 3, hash01(seed * 7) * 3, hash01(seed * 11) * 5);
+    m.scale.y = 0.55 + hash01(seed * 13) * 0.4;
+    m.castShadow = true;
+    scene.add(m);
+    return m;
+  };
+  // 岩壁主体：朝城一面用错位厚体叠成折线，背面稍收
+  rock(48, 38, 28, -6, 20, -318, 0.18, 0.16, 0.08);
+  rock(40, 28, 24, 12, 48, -317, -0.20, -0.14, -0.06);
+  rock(36, 22, 20, -10, 64, -316, 0.22, 0.12, 0.10);
+  rock(44, 14, 22, 4, 74, -318, -0.10, 0.08);
+  rock(28, 22, 18, 24, 40, -312, -0.28, -0.20, 0.10);  // 右翼前伸进主剪影
+  rock(26, 20, 16, -26, 36, -311, 0.30, 0.18, -0.10);
+  rock(22, 52, 20, -38, 26, -310, -0.18, 0.28);        // 左翼立柱，从城侧切轮廓
+  rock(20, 44, 18, 36, 22, -311, 0.20, -0.24);
+  // 朝城扶壁：高块从地面连到台沿，与主体重叠，不是独立斜台
+  rock(22, 36, 18, -16, 18, -304, 0.12, 0.16, 0.38);
+  rock(20, 30, 16, 16, 15, -303, -0.10, -0.12, 0.42);
+  rock(18, 24, 14, 1, 28, -302, 0.08, 0.06, 0.32);
+  // 锥峰推进到朝城剪影（x 外缘、z 靠前），从都市一侧能切到天际
+  for (const [x, z, h, r, lean] of [[-32, -301, 52, 9.0, 0.18], [30, -300, 46, 8.0, -0.16], [4, -298, 22, 5.5, 0.10]]) {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5), rockPalette[Math.floor(hash01(x + z) * 4)]);
+    c.position.set(x, h * 0.38, z);
+    c.rotation.set(0.08, hash01(x * 2) * 3, lean);
+    scene.add(c);
+  }
+  // 朝城突岩：中段咬合，破大端面
+  rock(16, 14, 12, -8, 42, -300, 0.34, 0.22, 0.18);
+  rock(14, 12, 11, 14, 30, -299, -0.28, -0.18, -0.14);
+  boulder(7.5, -22, 12, -300, 70);
+  boulder(6.2, 20, 9, -299, 71);
+  boulder(5.0, 2, 22, -297, 72);
+  // 乱石：坡脚散布 + 崖面滚落串（大→小下坠）
+  for (let k = 0; k < 10; k++) {
+    const a = hash01(k * 11 + 1), b2 = hash01(k * 17 + 5);
+    boulder(2.5 + a * 5.0, lerp(-44, 44, a), 1.5 + b2 * 3.0, -306 - b2 * 14, k);
+  }
+  for (let k = 0; k < 6; k++) {
+    const t = k / 5;
+    boulder(3.2 - t * 1.8, lerp(-16, 8, hash01(k * 23 + 2)), 58 - t * 52, -311 + t * 8, k + 40);
+  }
+
+  // 台下岩肩：填掉台沿与壁面之间的露天斜缝，上中段连成连续肩而不是分层悬挑
+  rock(30, 20, 18, 0, PLATFORM_TOP - 14, -306, 0.06, 0.08, 0.12);
+  rock(22, 18, 16, -16, PLATFORM_TOP - 16, -304, 0.14, 0.12, 0.16);
+  rock(20, 16, 15, 16, PLATFORM_TOP - 15, -304, -0.12, -0.10, 0.14);
+  rock(16, 14, 12, -8, PLATFORM_TOP - 22, -302, 0.10, 0.18, 0.20);
+  rock(15, 13, 12, 10, PLATFORM_TOP - 21, -302, -0.10, -0.14, 0.18);
+  boulder(6.8, -12, PLATFORM_TOP - 10, -300, 80);
+  boulder(6.0, 11, PLATFORM_TOP - 11, -299, 81);
+
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(34, 4, 26),
+    new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.95 }));
+  slab.position.set(0, PLATFORM_TOP - 2, -310);
+  slab.receiveShadow = true; slab.castShadow = true;
+  scene.add(slab);
+  // 台缘裙岩加密成锯齿带：前三块略抬高咬掉台面上棱（椅子在其后 1.5+，不穿椅脚）
+  rock(10, 5, 8, -14.5, PLATFORM_TOP - 1.9, -301, 0.3, 0.12);
+  rock(8, 4, 7, 13.5, PLATFORM_TOP - 2.2, -300.5, -0.25, -0.10);
+  rock(12, 3.2, 6, 2, PLATFORM_TOP - 2.4, -299.5, 0.1, 0.08, 0.10);
+  rock(6, 3, 5, -7.5, PLATFORM_TOP - 3.8, -300, 0.45, 0.18, 0.12);
+  rock(5.5, 2.6, 4.5, 8.0, PLATFORM_TOP - 4.1, -299.8, -0.4, -0.15, -0.09);
+  rock(7, 2.2, 5, -2.5, PLATFORM_TOP - 4.4, -300.6, 0.2, 0.10, 0.14);
+  // 平台点缀小石（避开椅子与观景弧）
+  rock(1.6, 1.1, 1.3, -14.5, PLATFORM_TOP + 0.5, -311, 0.4, 0);
+  rock(1.2, 0.8, 1.0, 15.0, PLATFORM_TOP + 0.4, -313, -0.3, 0);
+
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, metalness: 0.5 });
+  const topRail = new THREE.Mesh(new THREE.BoxGeometry(32, 0.12, 0.12), railMat);
+  topRail.position.set(0, PLATFORM_TOP + 1.25, -297.3);
+  const midRail = topRail.clone(); midRail.position.y = PLATFORM_TOP + 0.7;
+  scene.add(topRail, midRail);
+  for (let k = -4; k <= 4; k++) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.3, 0.1), railMat);
+    post.position.set(k * 3.6, PLATFORM_TOP + 0.65, -297.3);
+    scene.add(post);
+  }
+
+  // 椅子：暖木色与深色衣服明度分开；靠背降低收窄，少挡肩臂（R2）
+  const chairMat = new THREE.MeshStandardMaterial({ color: 0x4a3b2e, roughness: 0.65 });
+  const addC = (sx, sy, sz, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), chairMat);
+    m.position.set(CHAIR_POS.x + x, CHAIR_POS.y + y, CHAIR_POS.z + z);
+    m.castShadow = true;
+    scene.add(m);
+  };
+  addC(1.7, 0.22, 1.6, 0, 1.01, 0);          // 椅面
+  const chairBack = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.45, 0.18), chairMat);
+  chairBack.position.set(CHAIR_POS.x, CHAIR_POS.y + 1.75, CHAIR_POS.z - 0.92);
+  chairBack.rotation.x = -0.10;              // 微后倾承接后倒（plan §4；不加高，肩臂仍可读）
+  chairBack.castShadow = true;
+  scene.add(chairBack);
+  addC(0.16, 0.14, 1.3, -0.85, 1.75, -0.1);  // 扶手 L
+  addC(0.16, 0.14, 1.3, 0.85, 1.75, -0.1);   // 扶手 R
+  for (const [x, z] of [[-0.7, -0.6], [0.7, -0.6], [-0.7, 0.6], [0.7, 0.6]])
+    addC(0.12, 1.0, 0.12, x, 0.5, z);
+
+  buildMan();
+}
+
+/* ===================== 男人（程序化关节；风格化比例 ~3.2 单位站立，保证 8–14 半径机位可读） ===================== */
+const man = {};
+function limb(r, len, mat) {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.85, len, 10), mat);
+  m.position.y = -len / 2;
+  m.castShadow = true;
+  g.add(m);
+  return g;
+}
+function buildMan() {
+  const coat = new THREE.MeshStandardMaterial({ color: 0x343a47, roughness: 0.85 });   // 与椅子明度分开
+  const pants = new THREE.MeshStandardMaterial({ color: 0x252931, roughness: 0.9 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd9b596, roughness: 0.7 });
+  const hairM = new THREE.MeshStandardMaterial({ color: 0x2b241f, roughness: 0.9 });
+
+  const root = new THREE.Group();      // hip：骨盆坐椅面上
+  root.position.set(CHAIR_POS.x, CHAIR_POS.y + 1.33, CHAIR_POS.z + 0.05);
+  const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.42, 0.5), pants);
+  pelvis.castShadow = true;
+  root.add(pelvis);
+
+  const spine = new THREE.Group(); spine.position.y = 0.24; root.add(spine);
+  const spineM = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.55, 0.46), coat);
+  spineM.position.y = 0.27; spineM.castShadow = true; spine.add(spineM);
+
+  const chest = new THREE.Group(); chest.position.y = 0.55; spine.add(chest);
+  const chestM = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.62, 0.5), coat);
+  chestM.position.y = 0.31; chestM.castShadow = true; chest.add(chestM);
+
+  const neck = new THREE.Group(); neck.position.y = 0.66; chest.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.30, 20, 16), skin);
+  head.position.y = 0.36; head.castShadow = true;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.31, 20, 12, 0, Math.PI * 2, 0, 1.5), hairM);
+  hair.position.y = 0.38; hair.scale.set(1, 0.95, 1.02);
+  neck.add(head, hair);
+
+  const mkArm = side => {
+    const sh = new THREE.Group(); sh.position.set(0.52 * side, 0.52, 0); chest.add(sh);
+    const ua = limb(0.13, 0.62, coat); sh.add(ua);
+    const el = new THREE.Group(); el.position.y = -0.62; ua.add(el);
+    const fa = limb(0.11, 0.56, coat); el.add(fa);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), skin);
+    hand.position.y = -0.6; fa.add(hand);
+    return { sh, ua, el };
+  };
+  const mkLeg = side => {
+    const th = new THREE.Group(); th.position.set(0.24 * side, -0.08, 0.10); root.add(th);
+    const thigh = limb(0.16, 0.85, pants); th.add(thigh);
+    const kn = new THREE.Group(); kn.position.y = -0.85; thigh.add(kn);
+    const shin = limb(0.13, 0.85, pants); kn.add(shin);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0x17181c }));
+    foot.position.set(0, -0.86, 0.12); shin.add(foot);
+    return { th, thigh, kn };
+  };
+  man.root = root; man.spine = spine; man.chest = chest; man.neck = neck;
+  man.L = mkArm(-1); man.R = mkArm(1);
+  man.LL = mkLeg(-1); man.RL = mkLeg(1);
+  man.rootY0 = root.position.y;
+  man.rootZ0 = root.position.z;               // 后倒瘫坐 dz 通道基值（每帧从此加算，不累积）
+  scene.add(root);
+  poseMan(-1, 0);
+}
+
+// 瘫坐关节关键帧：各关节不同 delay，禁止全体同一个 ease 一次到位
+// 向后瘫坐（爆炸强化）：朝 +Z 受光，负 rx 后倒进椅背（−Z）；骨盆略后移下沉，胸背最终靠住椅背，头/臂延迟失力，腿略前伸
+const SLUMP = [
+  // [取关节, 属性, 目标量, 启动(相对 SLUMP_START), 时长]
+  [m => m.root, 'rx', -0.10, 0.00, 0.55], [m => m.root, 'dy', -0.08, 0.00, 0.55], // 骨盆微后仰 + 小幅下沉
+  [m => m.root, 'dz', -0.13, 0.00, 0.55],                                        // 骨盆后移进椅（不累积，基值加算）
+  [m => m.spine, 'rx', -0.26, 0.06, 0.55],                                       // 腰背后倒
+  [m => m.chest, 'rx', -0.30, 0.12, 0.55],                                       // 胸背最终靠住椅背
+  [m => m.L.sh, 'rx', -0.18, 0.15, 0.50], [m => m.R.sh, 'rx', -0.18, 0.15, 0.50],// 肩随后仰
+  [m => m.L.sh, 'rz', 0.12, 0.15, 0.50], [m => m.R.sh, 'rz', -0.12, 0.15, 0.50],
+  [m => m.L.ua, 'rx', 0.18, 0.20, 0.60], [m => m.R.ua, 'rx', 0.18, 0.20, 0.60],  // 上臂失力略外张
+  [m => m.L.el, 'rx', 0.62, 0.24, 0.60], [m => m.R.el, 'rx', 0.62, 0.24, 0.60],  // 前臂从扶手滑下变直（-1.05→-0.43）
+  [m => m.neck, 'rx', -0.18, 0.32, 0.50], [m => m.neck, 'rz', 0.12, 0.32, 0.50], // 头后仰侧垂、延迟失力
+  [m => m.LL.th, 'rx', 0.24, 0.10, 0.60], [m => m.RL.th, 'rx', 0.24, 0.10, 0.60],// 大腿略抬平 = 腿前伸（基值 -1.32→-1.08）
+  [m => m.LL.kn, 'rx', -0.22, 0.12, 0.60], [m => m.RL.kn, 'rx', -0.22, 0.12, 0.60], // 膝略松（1.42→1.20）
+];
+function jointRamp(T, delay, dur) { return easeOutCubic((T - SLUMP_START - delay) / dur); }
+function stiffPulse(T) { return sstep(T, STIFF_A, STIFF_B) * (1 - sstep(T, STIFF_B, STIFF_OUT)); }
+
+// T<0 表示未爆炸（端坐+呼吸）；T>=0 为爆炸相对秒
+function poseMan(T, absT) {
+  const stiff = T >= MAN_REACT_T ? stiffPulse(T) : 0;
+  // 基础坐姿：臀在椅面、背靠椅背、小腿下垂脚近平台、手搭扶手、朝 +Z
+  man.LL.th.rotation.x = man.RL.th.rotation.x = -1.32;
+  man.LL.kn.rotation.x = man.RL.kn.rotation.x = 1.42;
+  man.L.sh.rotation.set(0.15, 0, 0.12); man.R.sh.rotation.set(0.15, 0, -0.12);
+  man.L.ua.rotation.x = man.R.ua.rotation.x = 0;
+  man.L.el.rotation.x = man.R.el.rotation.x = -1.05;
+  man.root.rotation.set(0, 0, 0);
+  man.root.position.y = man.rootY0;
+  man.root.position.z = man.rootZ0;           // 基值含 z：后移从基值加算，禁止累积
+  man.spine.rotation.set(0, 0, 0);
+  man.chest.rotation.set(0, 0, 0);
+  man.neck.rotation.set(0.04, 0, 0);
+  // 0.12–0.35 僵直：肩背绷住，几乎不低头
+  man.chest.rotation.x += -0.07 * stiff;
+  man.spine.rotation.x += -0.04 * stiff;
+  man.L.sh.rotation.z += 0.10 * stiff; man.R.sh.rotation.z += -0.10 * stiff;
+  man.neck.rotation.x += -0.03 * stiff;
+  // 0.35–1.25 瘫坐：椅面接触保持，各关节错峰失力
+  if (T >= 0) {
+    for (const [get, prop, target, delay, dur] of SLUMP) {
+      const k = jointRamp(T, delay, dur);
+      if (k <= 0) continue;
+      const o = get(man);
+      if (prop === 'rx') o.rotation.x += target * k;
+      else if (prop === 'rz') o.rotation.z += target * k;
+      else if (prop === 'dy') o.position.y = man.rootY0 + target * k;
+      else if (prop === 'dz') o.position.z = man.rootZ0 + target * k;
+    }
+  }
+  // 呼吸（瘫坐后减弱一半）
+  const slumpK = T >= 0 ? jointRamp(T, 0.1, 0.9) : 0;
+  man.chest.rotation.x += Math.sin(absT * 1.4) * 0.012 * (1 - 0.5 * slumpK);
+}
+
+/* ===================== 核弹：下落 ===================== */
+let bomb;
+const trail = [];
+const trailHistory = [];
+function buildBomb() {
+  bomb = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x33383e, metalness: 0.75, roughness: 0.35 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 10, 20), metal);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.9, 4, 20), metal);
+  nose.rotation.x = Math.PI; nose.position.y = -7;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(1.95, 1.95, 0.8, 20),
+    new THREE.MeshStandardMaterial({ color: 0x8a7a2a, metalness: 0.5, roughness: 0.5 }));
+  band.position.y = 2;
+  bomb.add(body, nose, band);
+  for (let k = 0; k < 4; k++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 2.6), metal);
+    fin.position.set(Math.cos(k * Math.PI / 2) * 1.8, 4.2, Math.sin(k * Math.PI / 2) * 1.8);
+    fin.rotation.y = -k * Math.PI / 2 + Math.PI / 2;
+    bomb.add(fin);
+  }
+  bomb.position.copy(BOMB_START);
+  bomb.visible = false;
+  scene.add(bomb);
+  for (let k = 0; k < 6; k++) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.4, 0.9),
+      new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0 }));
+    t.visible = false; scene.add(t); trail.push(t);
+  }
+}
+function updateBomb() {
+  const k = Math.min(S.fallElapsed / FALL_DURATION, 1);
+  bomb.position.lerpVectors(BOMB_START, BLAST, easeInQuad(k));
+  bomb.rotation.z = Math.sin(S.fallElapsed * 2.2) * 0.03;
+  trailHistory.unshift(bomb.position.clone());
+  if (trailHistory.length > 60) trailHistory.pop();
+  trail.forEach((t, i) => {
+    const p = trailHistory[Math.min((i + 1) * 5, trailHistory.length - 1)];
+    t.visible = !!p;
+    if (p) { t.position.copy(p); t.material.opacity = 0.22 * (1 - i / 6); }
+  });
+  if (k >= 1) startDetonation();
+}
+
+/* ===================== 爆炸：闪光 / 火球 / 冲击波 / 蘑菇云 ===================== */
+let blastLight, fireball, ring1, ring2, dustRing;
+const cloud = {};
+function buildExplosion() {
+  blastLight = new THREE.PointLight(0xffd0a0, 0, 0, 1.0);  // 艺术化衰减，保证 320 外崖上可见
+  blastLight.position.copy(BLAST);
+  scene.add(blastLight);
+
+  // 火球：ShaderMaterial —— 中心炽亮、边缘径向衰减 + 低频噪声不规则边界（R1）
+  const fireballMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: {
+      uColor: { value: new THREE.Color(0xffffff) },   // 主体色（白→橙→暗红）
+      uHot: { value: new THREE.Color(0xfff6e0) },     // 核心炽热色
+      uOpacity: { value: 1 },
+      uTime: { value: 0 },
+    },
+    vertexShader: `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main(){
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = normalize(-mv.xyz);
+        vP = position;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      uniform vec3 uColor; uniform vec3 uHot; uniform float uOpacity; uniform float uTime;
+      float hash3(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+      float noise3(vec3 p){
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+              mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+          mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+              mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+          f.z);
+      }
+      void main(){
+        float facing = abs(dot(normalize(vN), normalize(vV)));
+        float n = 0.62 * noise3(vP * 2.6 + vec3(0.0, -uTime * 0.7, 0.0))
+                + 0.38 * noise3(vP * 5.3 + vec3(uTime * 0.3, 0.0, uTime * 0.2));
+        float edge = smoothstep(0.02, 0.72, facing + (n - 0.5) * 0.6);  // 不规则衰减边界
+        float core = pow(facing, 2.2);
+        vec3 col = mix(uColor, uHot, core) * (0.68 + 0.65 * n);          // 内部明暗层次
+        float a = uOpacity * edge;
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  });
+  fireball = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), fireballMat);
+  fireball.position.copy(BLAST);   // 中心在炸点，不穿地
+  fireball.visible = false;
+  scene.add(fireball);
+
+  const ringGeo = new THREE.RingGeometry(0.86, 1, 96);
+  ring1 = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd9a0,
+    transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  ring2 = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xcbb8a0,
+    transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  for (const r of [ring1, ring2]) {
+    r.rotation.x = -Math.PI / 2;
+    r.position.set(BLAST.x, 0.6, BLAST.z);
+    r.visible = false;
+    scene.add(r);
+  }
+  // 地面尘土环（爆炸强化）：宽边褐灰，跟冲击波走且略滞后，外缘 < 280（硬约束）
+  dustRing = new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 96),
+    new THREE.MeshBasicMaterial({ color: 0x8a7a64, transparent: true, opacity: 0,
+      side: THREE.DoubleSide, depthWrite: false }));
+  dustRing.rotation.x = -Math.PI / 2;
+  dustRing.position.set(BLAST.x, 0.45, BLAST.z);
+  dustRing.visible = false;
+  scene.add(dustRing);
+
+  // 蘑菇云（拟真分片）：烟块用表面 shader——菲涅尔羽化消硬边、世界域噪声斑驳出密度、
+  // 顶受天光冷灰/底朝热区暖橙的受光分层（表面衰减，非体积云/非粒子）；
+  // 各瓣独立自旋/呼吸/领圈公转摆动 = 局部翻卷，整朵不再只绕 Y 转；同一上升包络不动。
+  const CLOUD_VERT = `
+    varying vec3 vN; varying vec3 vV; varying vec3 vNW; varying vec3 vW;
+    varying float vFogDepth;
+    void main(){
+      vN = normalize(normalMatrix * normal);
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vV = normalize(-mv.xyz);
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vW = wp.xyz;
+      vNW = normalize(mat3(modelMatrix) * normal);
+      vFogDepth = -mv.z;
+      gl_Position = projectionMatrix * mv;
+    }`;
+  const CLOUD_FRAG = `
+    varying vec3 vN; varying vec3 vV; varying vec3 vNW; varying vec3 vW;
+    varying float vFogDepth;
+    uniform vec3 uAsh; uniform vec3 uHot; uniform vec3 uFogColor;
+    uniform float uHeat, uEmissK, uLate, uOpacity, uTime, uFogNear, uFogFar;
+    float hash3(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+    float noise3(vec3 p){
+      vec3 i = floor(p), f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+            mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+        mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+            mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+        f.z);
+    }
+    void main(){
+      float facing = abs(dot(normalize(vN), normalize(vV)));
+      float n = 0.60 * noise3(vW * 0.045 + vec3(0.0, -uTime * 0.35, 0.0))
+              + 0.40 * noise3(vW * 0.10 + vec3(uTime * 0.18, 0.0, uTime * 0.12));
+      float edge = smoothstep(0.02, 0.60, facing + (n - 0.5) * 0.55);   // 边缘羽化 + 噪声咬边，消硬边
+      float alpha = uOpacity * edge * (0.45 + 0.55 * n);
+      float topK = clamp(vNW.y * 0.5 + 0.5, 0.0, 1.0);                  // 上受天光下转暗
+      float botK = clamp(-vNW.y, 0.0, 1.0);                             // 底朝热区
+      vec3 smoke = mix(uAsh * 0.45, uAsh * 1.35, topK);                 // 灰褐烟受光分层
+      smoke = mix(smoke, smoke * vec3(0.92, 0.96, 1.06), uLate * 0.6 * topK);  // 后期顶部转冷灰
+      float heat = uHeat * uEmissK * (0.4 + 0.6 * n) * (1.0 + 0.5 * botK);
+      vec3 col = smoke + uHot * heat;                                   // 下/芯局部热区
+      col += uAsh * uLate * 0.20;                                       // 灰褐保底不死黑
+      float fogF = smoothstep(uFogNear, uFogFar, vFogDepth);            // 与场景雾一致，不与环境脱节
+      col = mix(col, uFogColor, fogF);
+      if (alpha < 0.004) discard;
+      gl_FragColor = vec4(col, alpha);
+    }`;
+  const makeSmokeMat = (ash, hot, heat, op) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: {
+      uAsh: { value: new THREE.Color(ash) }, uHot: { value: new THREE.Color(hot) },
+      uHeat: { value: heat }, uEmissK: { value: 0 }, uLate: { value: 0 },
+      uOpacity: { value: 0 }, uTime: { value: 0 },
+      uFogColor: { value: new THREE.Color(0x10141c) }, uFogNear: { value: 200 }, uFogFar: { value: 900 },
+    },
+    vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
+  });
+  const smokeCool  = makeSmokeMat(0x6a625c, 0x000000, 0.0, 0.80);   // 帽顶/外侧：冷灰
+  const smokeLight = makeSmokeMat(0x7d7168, 0xff6a2e, 0.5, 0.90);
+  const smokeMid   = makeSmokeMat(0x5d534c, 0xe04a18, 0.6, 0.94);
+  const smokeDark  = makeSmokeMat(0x453e38, 0xc03a10, 1.2, 0.95);   // 茎/芯/帽底：最热
+  cloud.mats = [smokeCool, smokeLight, smokeMid, smokeDark];
+  cloud.group = new THREE.Group();
+  cloud.capG = new THREE.Group();       // 帽 + 领圈（随帽整体缩放；翻卷由各瓣局部运动承担）
+  cloud.capSpin = [];                   // 帽瓣局部运动参数
+  cloud.collarSpin = [];                // 领圈公转摆动参数
+  cloud.stemCore = [];                  // 茎芯柱：连续填缝，侧视不断
+  cloud.stemChunks = [];                // 茎表：起伏块
+  cloud.dustChunks = [];                // 尘脚：茎底贴地外扩
+
+  const chunkGeo = new THREE.IcosahedronGeometry(1, 2);   // 圆润烟团瓣底形
+  const capChunks = [ // [x,y,z, sx,sy,sz, 材质档, 翻转度] —— 非均匀 scale + 大角度随机旋转
+    [ 0.00, 0.10, 0.00, 1.05, 0.62, 0.95, 1, 0.5],   // 主冠压扁
+    [ 0.55, -0.05, 0.28, 0.55, 0.40, 0.50, 2, 1.0],
+    [-0.50, 0.02, 0.40, 0.50, 0.36, 0.46, 2, 1.0],
+    [ 0.18, -0.02, -0.55, 0.62, 0.38, 0.48, 2, 1.0],
+    [-0.48, -0.08, -0.30, 0.46, 0.34, 0.44, 2, 1.0],
+    [ 0.38, 0.38, -0.28, 0.40, 0.28, 0.36, 0, 0.7],   // 顶块冷灰
+    [-0.18, 0.42, 0.30, 0.36, 0.26, 0.34, 0, 0.7],
+    [ 0.02, -0.10, 0.02, 0.55, 0.50, 0.52, 3, 0.3],   // 内芯热块（被外包半透遮挡，出密度层次）
+    [ 0.05, -0.32, 0.02, 0.70, 0.28, 0.66, 3, 0.8],   // 帽底垂块，压向领圈
+  ];
+  capChunks.forEach(([x, y, z, sx, sy, sz, mi, tumble], ci) => {
+    const m = new THREE.Mesh(chunkGeo, cloud.mats[mi]);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, sz);
+    const r0 = [hash01(x * 9 + z) * tumble * 1.6, hash01(y * 7 + x) * 6.3, hash01(z * 5 + y) * tumble * 1.4];
+    m.rotation.set(r0[0], r0[1], r0[2]);
+    cloud.capSpin.push({ m, r0, py0: y,
+      wx: (hash01(ci * 11 + 3) - 0.5) * 0.20,          // 各瓣独立缓慢自旋
+      wy: (hash01(ci * 17 + 5) - 0.5) * 0.26,
+      wz: (hash01(ci * 23 + 7) - 0.5) * 0.18,
+      ph: hash01(ci * 29 + 1) * 6.28, fs: 0.25 + hash01(ci * 31 + 2) * 0.3 });
+    cloud.capG.add(m);
+  });
+  // 破碎领圈：帽茎交界，小扁块向下外翻；存公转基角，翻卷时绕帽心缓摆
+  for (let k = 0; k < 9; k++) {
+    const a = k * 0.70 + hash01(k * 7 + 2) * 0.5;         // 非均匀角
+    const rr = 0.58 + hash01(k * 13 + 4) * 0.26;
+    const sc = 0.16 + hash01(k * 23 + 1) * 0.14;
+    const m = new THREE.Mesh(chunkGeo, k % 3 === 0 ? smokeDark : smokeMid);
+    const py = -0.40 - hash01(k * 5) * 0.14;
+    m.position.set(Math.cos(a) * rr, py, Math.sin(a) * rr);
+    m.scale.set(sc * 1.5, sc * 0.6, sc);
+    const r0 = [0.5 + hash01(k * 3) * 0.5, a, hash01(k * 11) * 0.8];
+    m.rotation.set(r0[0], r0[1], r0[2]);
+    cloud.collarSpin.push({ m, a0: a, rr, py0: py, r0,
+      ph: hash01(k * 37 + 4) * 6.28,
+      wx: 0.10 + hash01(k * 41 + 6) * 0.12 });            // 下翻自卷
+    cloud.capG.add(m);
+  }
+  // 茎芯：连续柱体，保证侧视不露天；外层再叠起伏块
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(chunkGeo, smokeDark);
+    m.rotation.set(0.15 * i, i * 0.7, -0.1 * i);
+    cloud.stemCore.push(m);
+    cloud.group.add(m);
+  }
+  // 茎表：hFrac 轴位（0 顶 → 1 底）；rK 粗下细中、帽底略扩；各块微自旋
+  const stemRks = [1.05, 0.86, 0.78, 0.80, 0.95, 1.20, 1.55, 1.90, 2.20];
+  stemRks.forEach((rK, i) => {
+    const m = new THREE.Mesh(chunkGeo, smokeDark);
+    const ry0 = hash01(i * 13 + 3) * 6.3;
+    m.rotation.set(hash01(i * 7 + 1) * 1.4, ry0, hash01(i * 17 + 5) * 1.2);
+    cloud.stemChunks.push({ mesh: m, hFrac: i / (stemRks.length - 1), rK,
+      ry0, wy: (hash01(i * 43 + 8) - 0.5) * 0.10, ph: hash01(i * 47 + 2) * 6.28 });
+    cloud.group.add(m);
+  });
+  // 尘脚：7 块扁大块环布茎底，贴地外扩（目标半径 26–70）
+  for (let k = 0; k < 7; k++) {
+    const a = k * 0.9 + hash01(k * 31 + 7) * 0.6;
+    const m = new THREE.Mesh(chunkGeo, k % 2 ? smokeMid : smokeDark);
+    m.rotation.set(hash01(k * 5) * 2, hash01(k * 9) * 6.3, hash01(k * 13) * 2);
+    cloud.dustChunks.push({ mesh: m, ang: a, rr0: 26 + hash01(k * 19 + 3) * 44,
+      y0: 9 + hash01(k * 23 + 5) * 8, r0: 13 + hash01(k * 29 + 1) * 9,
+      ph: hash01(k * 53 + 1) * 6.28 });
+    cloud.group.add(m);
+  }
+  cloud.group.add(cloud.capG);
+  cloud.group.position.set(BLAST.x, 0, BLAST.z);
+  cloud.group.visible = false;
+  scene.add(cloud.group);
+}
+
+/* ---- 破坏（爆炸强化）：波前触达只分档记目标；结构 0.4–0.8s 内从完好插值到目标；
+   落地变换 M = T(pivot)·R(axis,θ)·S(1,k,1)·T(-pivot)·base，pivot=(x,0,z)，压矮后楼底仍接地；
+   窗/塔冠共用 delta = newBody × baseInv（R4）；裙座无记录天然不随动（plan） ---- */
+const _mp = new THREE.Matrix4(), _mpi = new THREE.Matrix4(), _mr = new THREE.Matrix4(),
+      _ms = new THREE.Matrix4(), _mNew = new THREE.Matrix4(), _mDelta = new THREE.Matrix4();
+const _mNew2 = new THREE.Matrix4();
+
+function assignDamage(b, T) {
+  b.reacted = true;
+  b.arrivalTime = T;
+  b.dmgDur = 0.4 + 0.4 * b.h3;                 // 0.4–0.8s 短过程
+  b.dmgDone = false;
+  windowFlashQueue.push({ b, until: T + 0.15 }); // 先窗闪
+  forEachStripOf(b, k => winMesh.setColorAt(k, _c1.set(2.6, 2.3, 1.9)));
+  const r = b.dist;
+  if (b.landmark) {                            // 地标：小倾 + 窗灭，不拆天际线
+    if (r < INNER_TILT_R) { b.tiltAngle = 0.04 + 0.04 * b.h4; b.dmgTarget = 0.05; }
+    else { b.tiltAngle = 0; b.dmgTarget = 0.35; }
+  } else if (r < 70) {                         // 内圈：多数明显外倾 + 压高 0.45–0.7 + 窗几乎全灭
+    b.dmgTarget = 0.03;
+    if (b.h4 < 0.85) {
+      b.tiltAngle = 0.12 + 0.23 * b.h5;
+      b.squashK = 0.45 + 0.25 * hash01(b.x * 7.7 + b.z * 3.3);
+    }
+  } else if (r < INNER_TILT_R) {               // 中圈 70–150：外倾 0.05–0.14，窗大部分灭
+    b.dmgTarget = 0.18;
+    if (b.h4 < 0.6) b.tiltAngle = 0.05 + 0.09 * b.h5;
+  } else {                                     // 外圈 150–240：窗闪后部分灭（210 外不灭），少量微倾
+    b.dmgTarget = (r < WINDOW_DARK_R && b.h3 < 0.45) ? 0.5 : 1;
+    if (b.h4 < 0.15) b.tiltAngle = 0.02 + 0.03 * b.h5;
+  }
+  if (b.tiltAngle > 0) {
+    b.tiltAxis.set(b.z - BLAST.z, 0, -(b.x - BLAST.x)).normalize();  // 顶部远离炸点外倒
+    b.tilted = true;
+  }
+}
+
+function applyPivotTransform(b, ang, sq) {
+  // pivotM = T(pivot)·R(axis,θ)·S(1,k,1)·T(-pivot)
+  _mpi.makeTranslation(-b.x, 0, -b.z);
+  _mr.makeRotationAxis(b.tiltAxis, ang);
+  _ms.makeScale(1, sq, 1);
+  _mp.makeTranslation(b.x, 0, b.z);
+  _mNew.copy(_mp).multiply(_mr).multiply(_ms).multiply(_mpi);
+  if (b.landmarkMeshes) {                      // 地标：同一 pivot 增量作用于登记的现有 Mesh 与窗条
+    for (const key of ['body', 'crown', 'ant']) {
+      const m = b.landmarkMeshes[key];
+      if (!m) continue;
+      const bs = b.landmarkBase[key];
+      _mDelta.copy(_mNew).multiply(_mNew2.compose(bs.p, bs.q, bs.s));
+      _mDelta.decompose(m.position, m.quaternion, m.scale);
+    }
+    for (let k = b.winStart; k < b.winStart + b.winCount; k++) {   // pivotM 即 delta（R4 同一增量）
+      _mNew2.copy(_mNew).multiply(strips[k].mat);
+      winMesh.setMatrixAt(k, _mNew2);
+    }
+    winMesh.instanceMatrix.needsUpdate = true;
+    return;
+  }
+  if (!b.baseMatrix) return;
+  _mNew.multiply(b.baseMatrix);
+  cityInstMesh.setMatrixAt(b.instIdx, _mNew);
+  _mDelta.copy(_mNew).multiply(b.baseInv);     // R4：窗条与塔冠共用同一刚体增量
+  for (let k = b.winStart; k < b.winStart + b.winCount; k++) {
+    _mNew2.copy(_mDelta).multiply(strips[k].mat);
+    winMesh.setMatrixAt(k, _mNew2);
+  }
+  winMesh.instanceMatrix.needsUpdate = true;
+  if (b.crownInstIdx >= 0 && b.crownBase) {
+    _mNew2.copy(_mDelta).multiply(b.crownBase);
+    cityInstMesh.setMatrixAt(b.crownInstIdx, _mNew2);
+  }
+  cityInstMesh.instanceMatrix.needsUpdate = true;
+}
+
+function progressDamage(T) {
+  for (const b of buildings) {
+    if (!b.reacted || b.arrivalTime < 0 || b.dmgDone) continue;
+    const k = clamp01((T - b.arrivalTime) / b.dmgDur);
+    const e = easeOutCubic(k);
+    b.damage = lerp(1, b.dmgTarget, e);        // 窗随结构同步渐灭
+    refreshBuildingWindows(b);
+    if (b.tiltAngle > 0 || b.squashK < 1)
+      applyPivotTransform(b, b.tiltAngle * e, lerp(1, b.squashK, e));
+    if (k >= 1) b.dmgDone = true;
+  }
+}
+
+function applyShockDamage(R) {                 // 波前触发器：只分档登记，不瞬时变形
+  for (const b of buildings) {
+    if (b.reacted || b.dist > R) continue;
+    assignDamage(b, S.explosionElapsed);
+  }
+}
+function settleWindowFlashes() {
+  for (let i = windowFlashQueue.length - 1; i >= 0; i--) {
+    if (S.explosionElapsed < windowFlashQueue[i].until) continue;
+    refreshBuildingWindows(windowFlashQueue[i].b);
+    windowFlashQueue.splice(i, 1);
+  }
+}
+
+function updateExplosion(T) {
+  // 光：闪光冲高 → 火球高亮 → 余辉衰减至 ~18s（爆炸强化：光略增，bloom 阈值不动不洗白）
+  blastLight.intensity =
+    12000 * Math.exp(-T * 9) +
+    4000 * Math.exp(-Math.max(0, T - 0.05) * 1.1) * sstep(T, 0.05, 0.3) +
+    360 * Math.exp(-T / 5);
+  blastLight.color.lerpColors(_c1.set(0xffffff), _c2.set(0xff7a30), sstep(T, 0.1, 1.2));
+
+  // 火球 0.05–1.6 扩到 64，随后略收；T>0.4 起浮升，把中心交给烟帽包络；4.6s 淡出
+  if (T >= 0.05 && T < 4.6) {
+    fireball.visible = true;
+    let r = 2 + (FIREBALL_MAX_R - 2) * easeOutCubic((T - 0.05) / 1.55);
+    r *= 1 - 0.18 * sstep(T, 1.6, 3.5);
+    fireball.scale.setScalar(r);
+    fireball.position.y = BLAST.y + 26 * sstep(T, 0.4, 3.2);   // 浮升起跳，边升边略收
+    const fu = fireball.material.uniforms;
+    fu.uTime.value = T;
+    fu.uOpacity.value = 1 - sstep(T, 2.6, 4.6);
+    fu.uColor.value.set(0xffffff)
+      .lerp(_c1.set(0xff8c3a), sstep(T, 0.15, 0.9))
+      .lerp(_c1.set(0x7a1f10), sstep(T, 1.2, 2.6));
+  } else fireball.visible = false;
+
+  // 冲击波 0.35–7：圆环沿地面过城，上限 240；尘环略滞后跟上，外缘封顶 268 < 280
+  if (T > SHOCK_START && T < SHOCK_END + 0.8) {
+    const k = easeOutCubic((T - SHOCK_START) / (SHOCK_END - SHOCK_START));
+    const R = 2 + (SHOCKWAVE_R - 2) * Math.min(k, 1);
+    ring1.visible = ring2.visible = true;
+    ring1.scale.setScalar(R);
+    ring2.scale.setScalar(R * 1.07);
+    ring1.material.opacity = 0.4 * (1 - k * 0.75);
+    ring2.material.opacity = 0.16 * (1 - k);
+    const kd = easeOutCubic((T - 0.5) / 8.5);
+    dustRing.visible = true;
+    dustRing.scale.setScalar(Math.min(2 + (DUST_RING_MAX - 2) * kd, DUST_RING_MAX));
+    dustRing.material.opacity = 0.28 * (1 - kd);
+    applyShockDamage(R);
+  } else {
+    ring1.visible = ring2.visible = false;
+    dustRing.visible = false;
+    if (T >= SHOCK_END + 0.8) applyShockDamage(SHOCKWAVE_R); // 兜底
+  }
+  progressDamage(T);                       // 已触波楼的 0.4–0.8s 短过程插值（每帧推进）
+  settleWindowFlashes();
+
+  // 蘑菇云：同一上升包络驱动帽/领/茎顶——火球 T>0.4 浮升交叠，帽 1.5s 起从火球摊开，
+  // 1.5–8s 茎托帽，3–18s 帽横扩缓升；帽水平半径 96→106（帽:茎中 ≈ 5:1），后期上灰褐下余热；
+  // 局部翻卷：各瓣独立自旋/呼吸、领圈公转摆动、茎块缓摆微旋，整朵只留 0.015 慢转
+  if (T > 0.9) {
+    cloud.group.visible = true;
+    const grow = sstep(T, 0.9, 1.8);
+    const capR = lerp(14, 96, easeOutCubic(sstep(T, 1.5, 8))) + 10 * sstep(T, 8, 18);
+    const capY = BLAST.y + 8 * sstep(T, 0.4, 1.5) + 62 * easeOutCubic(sstep(T, 1.5, 18));
+    const wob = 1 + 0.05 * Math.sin(T * 1.7);
+    cloud.capG.position.y = capY;
+    cloud.capG.scale.set(capR * wob, capR * 0.55, capR * (2 - wob)); // 压扁成伞 + 非对称呼吸
+    cloud.capG.rotation.y = T * 0.015;                               // 整体只留慢转，翻卷交给局部
+    // 帽瓣局部翻卷：独立自旋 + 纵向呼吸（基值加算，不累积）
+    for (const s of cloud.capSpin) {
+      s.m.rotation.set(s.r0[0] + T * s.wx, s.r0[1] + T * s.wy, s.r0[2] + T * s.wz);
+      s.m.position.y = s.py0 + 0.03 * Math.sin(T * s.fs + s.ph);
+    }
+    // 领圈：绕帽心公转缓摆 + 下翻自卷
+    for (const c of cloud.collarSpin) {
+      const a = c.a0 + 0.10 * Math.sin(T * 0.25 + c.ph);
+      c.m.position.set(Math.cos(a) * c.rr, c.py0 + 0.02 * Math.sin(T * 0.4 + c.ph * 2), Math.sin(a) * c.rr);
+      c.m.rotation.set(c.r0[0] + T * c.wx, c.r0[1], c.r0[2]);
+    }
+    // 茎：芯柱连续填缝 + 表层起伏；粗下细中帽底略扩；竖向尺度跟轴间距走，禁止用半径截断高度
+    const stemTop = capY - capR * 0.10, stemBot = 26;                // 接到近地尘脚
+    const totalH = Math.max(2, stemTop - stemBot);
+    const stemR = (capR * 0.21 + 4) * grow;                          // 茎中 ≈ 帽/5
+    const sway = T * 0.12;                                           // 茎轴缓慢波动
+    const coreN = cloud.stemCore.length;
+    const coreStep = totalH / (coreN - 1);
+    cloud.stemCore.forEach((m, i) => {
+      const hf = i / (coreN - 1);
+      m.position.set(
+        Math.sin(hf * 1.1 + sway) * stemR * 0.06,
+        stemTop - totalH * hf,
+        Math.cos(hf * 0.8 + sway * 0.7) * stemR * 0.05);
+      const r = stemR * (0.55 + 0.45 * hf);                          // 芯柱下粗上细
+      m.scale.set(r, coreStep * 1.55, r);
+    });
+    const chunkStep = totalH / (cloud.stemChunks.length - 1);
+    for (const sc of cloud.stemChunks) {
+      const hf = sc.hFrac;
+      sc.mesh.position.set(
+        Math.sin(hf * 1.8 + 0.4 + sway) * stemR * 0.12,
+        stemTop - totalH * hf,
+        Math.cos(hf * 1.4 + sway * 0.8) * stemR * 0.10);
+      sc.mesh.rotation.y = sc.ry0 + T * sc.wy;                       // 各块微自旋
+      const r = Math.max(0.01, stemR * sc.rK);
+      sc.mesh.scale.set(r, chunkStep * 1.65, r);
+    }
+    // 尘脚：贴地外扩，1–6s 摊开，外缘 < 80；各块缓慢沉浮
+    for (const dc of cloud.dustChunks) {
+      const kk = sstep(T, 1.0, 6.0);
+      const rr = dc.rr0 * (0.3 + 0.7 * kk);
+      dc.mesh.position.set(Math.cos(dc.ang) * rr,
+        dc.y0 + 1.2 * Math.sin(T * 0.3 + dc.ph), Math.sin(dc.ang) * rr);
+      const dr = Math.max(0.01, dc.r0 * (0.5 + 0.6 * kk) * grow);
+      dc.mesh.scale.set(dr, dr * 0.42, dr);
+    }
+    // 材质 uniforms：下/芯热衰减慢、帽中快；uLate 灰褐保底渐入（上灰褐、下仍余热）
+    const emissSlow = 1 - sstep(T, 0.8, 16);   // 下/芯
+    const emissFast = 1 - sstep(T, 0.8, 11);   // 帽中
+    const late = sstep(T, 10, 18);
+    const fade = grow * (1 - 0.3 * sstep(T, 18, 26));
+    const emissByMat = [0, emissFast, emissFast, emissSlow];
+    const opByMat = [0.80, 0.90, 0.94, 0.95];
+    cloud.mats.forEach((mt, i) => {
+      const u = mt.uniforms;
+      u.uEmissK.value = emissByMat[i];
+      u.uLate.value = late;
+      u.uOpacity.value = opByMat[i] * fade;
+      u.uTime.value = T;
+      u.uFogColor.value.copy(scene.fog.color);      // 雾参数每帧同步场景（时间滑条会改雾）
+      u.uFogNear.value = scene.fog.near;
+      u.uFogFar.value = scene.fog.far;
+    });
+  }
+}
+
+/* ===================== 阶段切换 / 重置 ===================== */
+function startFall() {
+  S.phase = 'falling';
+  S.fallElapsed = 0;
+  trailHistory.length = 0;
+  bomb.position.copy(BOMB_START);
+  bomb.visible = true;
+  syncDetonateBtn();
+}
+function startDetonation() {
+  S.phase = 'detonating';
+  S.explosionElapsed = 0;
+  bomb.visible = false;
+  trail.forEach(t => { t.visible = false; t.material.opacity = 0; });
+}
+function resetAll() {
+  S.phase = 'idle';
+  S.fallElapsed = 0; S.explosionElapsed = 0;
+  bomb.position.copy(BOMB_START);
+  bomb.visible = false;
+  trail.forEach(t => { t.visible = false; t.material.opacity = 0; });
+  trailHistory.length = 0;
+  blastLight.intensity = 0;
+  fireball.visible = false; fireball.scale.setScalar(1);
+  fireball.position.copy(BLAST);               // 浮升过的火球回炸点，重置后不从高空接着飞
+  ring1.visible = ring2.visible = false;
+  dustRing.visible = false; dustRing.material.opacity = 0;
+  cloud.group.visible = false;                 // 云材质强度/opacity 由 updateExplosion 下轮从 T 重算
+  // 城市：破坏状态机清零，楼体/窗/塔冠矩阵回未炸；地标主体/冠/天线回登记基（R4）
+  for (const b of buildings) {
+    b.damage = 1; b.reacted = false;
+    b.arrivalTime = -1; b.dmgDone = false; b.dmgTarget = 1;
+    b.tiltAngle = 0; b.squashK = 1;
+    if (b.tilted) {
+      b.tilted = false;
+      if (b.landmarkMeshes) {
+        for (const key of ['body', 'crown', 'ant']) {
+          const m = b.landmarkMeshes[key];
+          if (!m) continue;
+          const bs = b.landmarkBase[key];
+          m.position.copy(bs.p); m.quaternion.copy(bs.q); m.scale.copy(bs.s);
+        }
+      } else if (b.baseMatrix) {
+        cityInstMesh.setMatrixAt(b.instIdx, b.baseMatrix);
+        if (b.crownInstIdx >= 0 && b.crownBase)
+          cityInstMesh.setMatrixAt(b.crownInstIdx, b.crownBase);
+      }
+      for (let k = b.winStart; k < b.winStart + b.winCount; k++)
+        winMesh.setMatrixAt(k, strips[k].mat);
+    }
+    refreshBuildingWindows(b);
+  }
+  winMesh.instanceMatrix.needsUpdate = true;
+  winMesh.instanceColor.needsUpdate = true;
+  cityInstMesh.instanceMatrix.needsUpdate = true;
+  windowFlashQueue.length = 0;
+  bloom.strength = BLOOM_BASE.strength;   // 曝光/雾/bloom 恢复（雾色由 updateEnvironment 重算）
+  bloom.threshold = BLOOM_BASE.threshold;
+  poseMan(-1, 0);                          // 男人回端坐
+  syncDetonateBtn();
+}
+
+/* ===================== 摄像机 ===================== */
+const freeControls = new OrbitControls(camera, renderer.domElement);
+freeControls.target.set(0, 25, 0);
+freeControls.minDistance = 40;
+freeControls.maxDistance = 480;
+freeControls.enableDamping = true;
+freeControls.dampingFactor = 0.06;
+freeControls.maxPolarAngle = 1.53;
+freeControls.enabled = false;
+
+const cliffControls = new OrbitControls(camera, renderer.domElement);
+cliffControls.enableDamping = true;
+cliffControls.dampingFactor = 0.06;
+cliffControls.minDistance = 3;
+cliffControls.maxDistance = 60;
+cliffControls.maxPolarAngle = 1.55;
+cliffControls.enabled = true;
+
+let cliffAuto = true;                    // 展示弧自动运动；用户拖动后让位
+cliffControls.addEventListener('start', () => { cliffAuto = false; });
+
+const chestWorld = new THREE.Vector3();
+function updateCameras(absT) {
+  man.chest.getWorldPosition(chestWorld);
+  if (S.camMode === 'cliff') {
+    if (cliffAuto) {
+      // 有限展示弧：相对「看向城市(+Z)」的后方偏航 +25°~+50°，半径 8.5–12.5，略俯视
+      // target 向城市方向偏移 r*0.8：纯胸部 target 在该偏航下会把城市/核爆甩出画面
+      const yaw = THREE.MathUtils.degToRad(lerp(25, 50, 0.5 + 0.5 * Math.sin(absT * 0.09)));
+      const r = 10.5 + 2.0 * Math.sin(absT * 0.07);
+      camera.position.set(
+        chestWorld.x + Math.sin(yaw) * r,
+        chestWorld.y + 1.2,
+        chestWorld.z - Math.cos(yaw) * r);
+      cliffControls.target.set(chestWorld.x, chestWorld.y, chestWorld.z + r * 0.8);
+    }
+    // R3：手动接管时不再覆写 target/position——保持让位瞬间的取景，orbit pivot 即当前视线目标
+    cliffControls.update();
+  } else {
+    freeControls.update();
+  }
+}
+function setCamMode(m) {
+  S.camMode = m;
+  freeControls.enabled = m === 'free';
+  cliffControls.enabled = m === 'cliff';
+  document.getElementById('camFree').classList.toggle('on', m === 'free');
+  document.getElementById('camCliff').classList.toggle('on', m === 'cliff');
+  if (m === 'cliff') cliffAuto = true;   // 再点「崖边男人」= 回观景位
+  else {                                  // 切自由机位：给到城市俯瞰起点
+    camera.position.set(150, 95, 170);
+    freeControls.target.set(0, 25, 0);
+  }
+}
+
+/* ===================== UI ===================== */
+function syncDetonateBtn() {
+  const b = document.getElementById('detonate');
+  const armed = S.phase !== 'idle';
+  b.textContent = armed ? '重 置' : '引 爆';
+  b.classList.toggle('armed', armed);
+}
+function fmtTime(t) {
+  const h = Math.floor(t) % 24, m = Math.floor((t % 1) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+function initUI() {
+  const timeInput = document.getElementById('time');
+  timeInput.addEventListener('input', () => {   // 拖动立即生效，爆炸中也可调
+    S.timeOfDay = parseFloat(timeInput.value);
+    document.getElementById('clock').textContent = fmtTime(S.timeOfDay);
+  });
+  document.getElementById('detonate').addEventListener('click', () => {
+    if (S.phase === 'idle') startFall(); else resetAll();
+  });
+  document.getElementById('camFree').addEventListener('click', () => setCamMode('free'));
+  document.getElementById('camCliff').addEventListener('click', () => setCamMode('cliff'));
+  document.querySelectorAll('.rate').forEach(btn =>
+    btn.addEventListener('click', () => {
+      S.timeScale = parseFloat(btn.dataset.r);
+      document.querySelectorAll('.rate').forEach(b => b.classList.toggle('on', b === btn));
+    }));
+}
+
+/* ===================== 主循环 ===================== */
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const sdt = dt * S.timeScale;
+  const absT = clock.elapsedTime;
+
+  updateEnvironment(S.timeOfDay, S.explosionElapsed);
+  updateWindowTimeGlow();
+  updateLamps();
+  if (S.phase === 'falling') { S.fallElapsed += sdt; updateBomb(); }
+  else if (S.phase === 'detonating') { S.explosionElapsed += sdt; updateExplosion(S.explosionElapsed); }
+  poseMan(S.phase === 'detonating' ? S.explosionElapsed : -1, absT);
+  updateCameras(absT);
+  composer.render();
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+/* ===================== 启动 ===================== */
+buildGround();
+buildCity();
+buildCliff();
+buildBomb();
+buildExplosion();
+initUI();
+setCamMode('cliff');
+animate();
+
+// 采样/调试接口：暴露可变引用（S、控制器、setTime），供本地截图验证使用
+window.__demo = { S, camera, scene, freeControls, cliffControls, setCamMode,
+  getFireball: () => fireball, getCloud: () => cloud, getMan: () => man,
+  getBuildings: () => buildings,
+  setTime: t => { S.timeOfDay = t; document.getElementById('time').value = t;
+    document.getElementById('clock').textContent = fmtTime(t); } };
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d13f2938c20296',t:'MTc4OTc0MzkwNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

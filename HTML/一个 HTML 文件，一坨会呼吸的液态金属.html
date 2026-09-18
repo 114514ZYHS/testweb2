@@ -1,0 +1,2434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>实时元球雕塑 · Real-time Metaball Sculpture</title>
+<style>
+  :root{
+    --fg:#e9f2ff; --dim:#8fa3bd; --accent:#6fd3ff; --warm:#ffb066;
+    --glass:rgba(10,14,22,.62); --line:rgba(140,180,220,.18);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#05070c;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+  #gl.dragging{cursor:grabbing}
+  .ui{position:fixed;z-index:10;color:var(--fg);pointer-events:none;
+      text-shadow:0 1px 10px rgba(0,0,0,.85);user-select:none;-webkit-user-select:none}
+  #hud{left:18px;top:16px;max-width:min(46vw,420px);transition:opacity .35s ease}
+  #title{font-size:15px;font-weight:650;letter-spacing:.22em;text-transform:uppercase}
+  #title b{color:var(--accent);font-weight:650}
+  #subtitle{font-size:10.5px;color:var(--dim);letter-spacing:.3em;margin-top:3px}
+  #stats{margin-top:10px;font:11.5px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         color:var(--dim);letter-spacing:.02em}
+  #stats b{color:var(--fg);font-weight:600}
+  #stats .k{color:#6b7f99}
+  #stats .acc{color:var(--accent)}
+  #stats .warm{color:var(--warm)}
+  #hints{margin-top:9px;font-size:11px;line-height:1.75;color:var(--dim)}
+  #hints kbd{display:inline-block;padding:0 5px;margin:0 1px;border-radius:4px;
+    border:1px solid var(--line);background:rgba(255,255,255,.05);color:#cfe2f7;
+    font:10.5px/16px ui-monospace,Menlo,monospace}
+  #panel{left:18px;bottom:16px;pointer-events:auto;background:var(--glass);
+    border:1px solid var(--line);border-radius:14px;padding:12px 14px 10px;
+    backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);
+    box-shadow:0 10px 40px rgba(0,0,0,.5);transition:opacity .35s ease;min-width:250px}
+  .row{display:flex;align-items:center;gap:10px;margin:5px 0}
+  .row label{font-size:11px;color:var(--dim);width:82px;flex:none;letter-spacing:.06em}
+  .row input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:20px;background:transparent;margin:0}
+  .row input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;
+    background:linear-gradient(90deg,rgba(111,211,255,.85),rgba(255,176,102,.8))}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5.5px;
+    border-radius:50%;background:#eaf4ff;border:1px solid rgba(0,0,0,.4);box-shadow:0 0 10px rgba(111,211,255,.75);cursor:pointer}
+  .row input[type=range]::-moz-range-track{height:3px;border-radius:3px;background:rgba(150,190,230,.5)}
+  .row input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;background:#eaf4ff;cursor:pointer}
+  .row .v{font:11px/1 ui-monospace,Menlo,monospace;color:var(--fg);width:42px;text-align:right;flex:none}
+  #panel .sep{height:1px;background:var(--line);margin:9px 0 7px}
+  #panel .ops{font-size:10.5px;color:var(--dim);line-height:1.7}
+  #panel .ops i{color:var(--accent);font-style:normal}
+  #badge{position:fixed;right:16px;top:16px;z-index:10;pointer-events:none;
+    font:10.5px/1 ui-monospace,Menlo,monospace;color:var(--dim);letter-spacing:.14em;
+    border:1px solid var(--line);border-radius:999px;padding:6px 11px;background:var(--glass);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  #toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:12;
+    font-size:12px;color:#dceaff;background:var(--glass);border:1px solid var(--line);
+    border-radius:999px;padding:8px 16px;opacity:0;transition:opacity .4s ease;pointer-events:none;
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  #toast.on{opacity:1}
+  body.noui .ui,body.noui #panel,body.noui #badge{opacity:0;pointer-events:none}
+  @media (max-width:720px){
+    #hud{max-width:62vw;left:12px;top:12px}
+    #hints{display:none}
+    #panel{left:12px;right:12px;bottom:12px;min-width:0;padding:10px 12px 8px}
+    .row label{width:70px;font-size:10.5px}
+    #title{font-size:13px}
+    #badge{right:10px;top:10px;font-size:9.5px}
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud" class="ui">
+  <div id="title">实时<b>元球</b>雕塑</div>
+  <div id="subtitle">METABALL SCULPTURE / MC REALTIME</div>
+  <div id="stats">
+    <span class="k">FPS</span> <b id="s-fps">--</b>
+    <span class="k">·</span> <span class="k">后端</span> <b id="s-api" class="acc">--</b><br>
+    <span class="k">网格</span> <b id="s-res">--</b>
+    <span class="k">·</span> <span class="k">顶点</span> <b id="s-vert">--</b>
+    <span class="k">·</span> <span class="k">三角形</span> <b id="s-tri">--</b><br>
+    <span class="k">元球</span> <b id="s-balls">--</b>
+    <span class="k">·</span> <span class="k">重建</span> <b id="s-build" class="warm">--</b>
+  </div>
+  <div id="hints">
+    拖拽 <kbd>旋转</kbd> · 滚轮 <kbd>缩放</kbd> · 点击空白 <kbd>加球</kbd><br>
+    拖拽球体 <kbd>移动</kbd> · 右键/长按 <kbd>删除</kbd><br>
+    <kbd>空格</kbd> 爆炸重组 · <kbd>R</kbd> 重置 · <kbd>H</kbd> 隐藏 UI · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 分辨率
+  </div>
+</div>
+
+<div id="badge">WEBGL2 · REALTIME</div>
+
+<div id="panel" class="ui">
+  <div class="row"><label>等值面阈值</label><input id="p-iso" type="range" min="0.10" max="1.40" step="0.01" value="0.52"><span class="v" id="v-iso">0.52</span></div>
+  <div class="row"><label>融合强度</label><input id="p-fuse" type="range" min="0.70" max="1.70" step="0.01" value="1.00"><span class="v" id="v-fuse">1.00</span></div>
+  <div class="row"><label>金属度</label><input id="p-metal" type="range" min="0" max="1" step="0.01" value="1.00"><span class="v" id="v-metal">1.00</span></div>
+  <div class="row"><label>粗糙度</label><input id="p-rough" type="range" min="0.03" max="0.70" step="0.01" value="0.14"><span class="v" id="v-rough">0.14</span></div>
+  <div class="sep"></div>
+  <div class="ops">空格 <i>爆炸</i> · R <i>重置</i> · H <i>隐藏</i> · 1/2/3 <i>32³/48³/64³</i></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ============================================================================
+ *  实时元球雕塑 —— 单文件 WebGL2 / WebGL1 / Canvas2D 实现
+ *  隐式场 → Marching Cubes → 梯度法线 → Cook-Torrance PBR → 多 Pass 后处理
+ * ==========================================================================*/
+(function () {
+'use strict';
+
+/* ============================================================================
+ *  Marching Cubes 查找表（完整 256 项）
+ *  ---------------------------------------------------------------------------
+ *  立方体顶点编号（与 Lorensen/Bourke 经典约定一致）：
+ *      0:(0,0,0) 1:(1,0,0) 2:(1,1,0) 3:(0,1,0)
+ *      4:(0,0,1) 5:(1,0,1) 6:(1,1,1) 7:(0,1,1)
+ *  边编号：
+ *      0:(0-1) 1:(1-2) 2:(2-3) 3:(3-0)
+ *      4:(4-5) 5:(5-6) 6:(6-7) 7:(7-4)
+ *      8:(0-4) 9:(1-5) 10:(2-6) 11:(3-7)
+ *  EDGE_TABLE[c]：第 c 号立方体配置中，两端点符号不同（即等值面穿过）的边位掩码。
+ *  TRI_TABLE  ：256 × 16 的三角面索引表（每行以 -1 结尾/填充），
+ *               每三个连续非负整数构成一个三角形，元素为边编号。
+ * ==========================================================================*/
+
+/* --- 256 项边表 --- */
+const EDGE_TABLE = [
+  0x000, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
+  0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
+  0x190, 0x099, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c,
+  0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
+  0x230, 0x339, 0x033, 0x13a, 0x636, 0x73f, 0x435, 0x53c,
+  0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30,
+  0x3a0, 0x2a9, 0x1a3, 0x0aa, 0x7a6, 0x6af, 0x5a5, 0x4ac,
+  0xbac, 0xaa5, 0x9af, 0x8a6, 0xfaa, 0xea3, 0xda9, 0xca0,
+  0x460, 0x569, 0x663, 0x76a, 0x066, 0x16f, 0x265, 0x36c,
+  0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963, 0xa69, 0xb60,
+  0x5f0, 0x4f9, 0x7f3, 0x6fa, 0x1f6, 0x0ff, 0x3f5, 0x2fc,
+  0xdfc, 0xcf5, 0xfff, 0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0,
+  0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x055, 0x15c,
+  0xe5c, 0xf55, 0xc5f, 0xd56, 0xa5a, 0xb53, 0x859, 0x950,
+  0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6, 0x2cf, 0x1c5, 0x0cc,
+  0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0,
+  0x8c0, 0x9c9, 0xac3, 0xbca, 0xcc6, 0xdcf, 0xec5, 0xfcc,
+  0x0cc, 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9, 0x7c0,
+  0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c,
+  0x15c, 0x055, 0x35f, 0x256, 0x55a, 0x453, 0x759, 0x650,
+  0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc,
+  0x2fc, 0x3f5, 0x0ff, 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0,
+  0xb60, 0xa69, 0x963, 0x86a, 0xf66, 0xe6f, 0xd65, 0xc6c,
+  0x36c, 0x265, 0x16f, 0x066, 0x76a, 0x663, 0x569, 0x460,
+  0xca0, 0xda9, 0xea3, 0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac,
+  0x4ac, 0x5a5, 0x6af, 0x7a6, 0x0aa, 0x1a3, 0x2a9, 0x3a0,
+  0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c,
+  0x53c, 0x435, 0x73f, 0x636, 0x13a, 0x033, 0x339, 0x230,
+  0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c,
+  0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x099, 0x190,
+  0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c,
+  0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x000
+];
+
+/* --- 256 × 16 三角面表（扁平存放，行偏移 = 配置号 × 16） --- */
+const TRI_TABLE = [
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 8, 3, 9, 8, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, 1, 2, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 2, 10, 0, 2, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  2, 8, 3, 2, 10, 8, 10, 9, 8, -1, -1, -1, -1, -1, -1, -1,
+  3, 11, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 11, 2, 8, 11, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 9, 0, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 11, 2, 1, 9, 11, 9, 8, 11, -1, -1, -1, -1, -1, -1, -1,
+  3, 10, 1, 11, 10, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 10, 1, 0, 8, 10, 8, 11, 10, -1, -1, -1, -1, -1, -1, -1,
+  3, 9, 0, 3, 11, 9, 11, 10, 9, -1, -1, -1, -1, -1, -1, -1,
+  9, 8, 10, 10, 8, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 7, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 3, 0, 7, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 1, 9, 8, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 1, 9, 4, 7, 1, 7, 3, 1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, 8, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 4, 7, 3, 0, 4, 1, 2, 10, -1, -1, -1, -1, -1, -1, -1,
+  9, 2, 10, 9, 0, 2, 8, 4, 7, -1, -1, -1, -1, -1, -1, -1,
+  2, 10, 9, 2, 9, 7, 2, 7, 3, 7, 9, 4, -1, -1, -1, -1,
+  8, 4, 7, 3, 11, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  11, 4, 7, 11, 2, 4, 2, 0, 4, -1, -1, -1, -1, -1, -1, -1,
+  9, 0, 1, 8, 4, 7, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1,
+  4, 7, 11, 9, 4, 11, 9, 11, 2, 9, 2, 1, -1, -1, -1, -1,
+  3, 10, 1, 3, 11, 10, 7, 8, 4, -1, -1, -1, -1, -1, -1, -1,
+  1, 11, 10, 1, 4, 11, 1, 0, 4, 7, 11, 4, -1, -1, -1, -1,
+  4, 7, 8, 9, 0, 11, 9, 11, 10, 11, 0, 3, -1, -1, -1, -1,
+  4, 7, 11, 4, 11, 9, 9, 11, 10, -1, -1, -1, -1, -1, -1, -1,
+  9, 5, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 5, 4, 0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 5, 4, 1, 5, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  8, 5, 4, 8, 3, 5, 3, 1, 5, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, 9, 5, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 0, 8, 1, 2, 10, 4, 9, 5, -1, -1, -1, -1, -1, -1, -1,
+  5, 2, 10, 5, 4, 2, 4, 0, 2, -1, -1, -1, -1, -1, -1, -1,
+  2, 10, 5, 3, 2, 5, 3, 5, 4, 3, 4, 8, -1, -1, -1, -1,
+  9, 5, 4, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 11, 2, 0, 8, 11, 4, 9, 5, -1, -1, -1, -1, -1, -1, -1,
+  0, 5, 4, 0, 1, 5, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1,
+  2, 1, 5, 2, 5, 8, 2, 8, 11, 4, 8, 5, -1, -1, -1, -1,
+  10, 3, 11, 10, 1, 3, 9, 5, 4, -1, -1, -1, -1, -1, -1, -1,
+  4, 9, 5, 0, 8, 1, 8, 10, 1, 8, 11, 10, -1, -1, -1, -1,
+  5, 4, 0, 5, 0, 11, 5, 11, 10, 11, 0, 3, -1, -1, -1, -1,
+  5, 4, 8, 5, 8, 10, 10, 8, 11, -1, -1, -1, -1, -1, -1, -1,
+  9, 7, 8, 5, 7, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 3, 0, 9, 5, 3, 5, 7, 3, -1, -1, -1, -1, -1, -1, -1,
+  0, 7, 8, 0, 1, 7, 1, 5, 7, -1, -1, -1, -1, -1, -1, -1,
+  1, 5, 3, 3, 5, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 7, 8, 9, 5, 7, 10, 1, 2, -1, -1, -1, -1, -1, -1, -1,
+  10, 1, 2, 9, 5, 0, 5, 3, 0, 5, 7, 3, -1, -1, -1, -1,
+  8, 0, 2, 8, 2, 5, 8, 5, 7, 10, 5, 2, -1, -1, -1, -1,
+  2, 10, 5, 2, 5, 3, 3, 5, 7, -1, -1, -1, -1, -1, -1, -1,
+  7, 9, 5, 7, 8, 9, 3, 11, 2, -1, -1, -1, -1, -1, -1, -1,
+  9, 5, 7, 9, 7, 2, 9, 2, 0, 2, 7, 11, -1, -1, -1, -1,
+  2, 3, 11, 0, 1, 8, 1, 7, 8, 1, 5, 7, -1, -1, -1, -1,
+  11, 2, 1, 11, 1, 7, 7, 1, 5, -1, -1, -1, -1, -1, -1, -1,
+  9, 5, 8, 8, 5, 7, 10, 1, 3, 10, 3, 11, -1, -1, -1, -1,
+  5, 7, 0, 5, 0, 9, 7, 11, 0, 1, 0, 10, 11, 10, 0, -1,
+  11, 10, 0, 11, 0, 3, 10, 5, 0, 8, 0, 7, 5, 7, 0, -1,
+  11, 10, 5, 7, 11, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  10, 6, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 0, 1, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 8, 3, 1, 9, 8, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1,
+  1, 6, 5, 2, 6, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 6, 5, 1, 2, 6, 3, 0, 8, -1, -1, -1, -1, -1, -1, -1,
+  9, 6, 5, 9, 0, 6, 0, 2, 6, -1, -1, -1, -1, -1, -1, -1,
+  5, 9, 8, 5, 8, 2, 5, 2, 6, 3, 2, 8, -1, -1, -1, -1,
+  2, 3, 11, 10, 6, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  11, 0, 8, 11, 2, 0, 10, 6, 5, -1, -1, -1, -1, -1, -1, -1,
+  0, 1, 9, 2, 3, 11, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1,
+  5, 10, 6, 1, 9, 2, 9, 11, 2, 9, 8, 11, -1, -1, -1, -1,
+  6, 3, 11, 6, 5, 3, 5, 1, 3, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 11, 0, 11, 5, 0, 5, 1, 5, 11, 6, -1, -1, -1, -1,
+  3, 11, 6, 0, 3, 6, 0, 6, 5, 0, 5, 9, -1, -1, -1, -1,
+  6, 5, 9, 6, 9, 11, 11, 9, 8, -1, -1, -1, -1, -1, -1, -1,
+  5, 10, 6, 4, 7, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 3, 0, 4, 7, 3, 6, 5, 10, -1, -1, -1, -1, -1, -1, -1,
+  1, 9, 0, 5, 10, 6, 8, 4, 7, -1, -1, -1, -1, -1, -1, -1,
+  10, 6, 5, 1, 9, 7, 1, 7, 3, 7, 9, 4, -1, -1, -1, -1,
+  6, 1, 2, 6, 5, 1, 4, 7, 8, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 5, 5, 2, 6, 3, 0, 4, 3, 4, 7, -1, -1, -1, -1,
+  8, 4, 7, 9, 0, 5, 0, 6, 5, 0, 2, 6, -1, -1, -1, -1,
+  7, 3, 9, 7, 9, 4, 3, 2, 9, 5, 9, 6, 2, 6, 9, -1,
+  3, 11, 2, 7, 8, 4, 10, 6, 5, -1, -1, -1, -1, -1, -1, -1,
+  5, 10, 6, 4, 7, 2, 4, 2, 0, 2, 7, 11, -1, -1, -1, -1,
+  0, 1, 9, 4, 7, 8, 2, 3, 11, 5, 10, 6, -1, -1, -1, -1,
+  9, 2, 1, 9, 11, 2, 9, 4, 11, 7, 11, 4, 5, 10, 6, -1,
+  8, 4, 7, 3, 11, 5, 3, 5, 1, 5, 11, 6, -1, -1, -1, -1,
+  5, 1, 11, 5, 11, 6, 1, 0, 11, 7, 11, 4, 0, 4, 11, -1,
+  0, 5, 9, 0, 6, 5, 0, 3, 6, 11, 6, 3, 8, 4, 7, -1,
+  6, 5, 9, 6, 9, 11, 4, 7, 9, 7, 11, 9, -1, -1, -1, -1,
+  10, 4, 9, 6, 4, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 10, 6, 4, 9, 10, 0, 8, 3, -1, -1, -1, -1, -1, -1, -1,
+  10, 0, 1, 10, 6, 0, 6, 4, 0, -1, -1, -1, -1, -1, -1, -1,
+  8, 3, 1, 8, 1, 6, 8, 6, 4, 6, 1, 10, -1, -1, -1, -1,
+  1, 4, 9, 1, 2, 4, 2, 6, 4, -1, -1, -1, -1, -1, -1, -1,
+  3, 0, 8, 1, 2, 9, 2, 4, 9, 2, 6, 4, -1, -1, -1, -1,
+  0, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  8, 3, 2, 8, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1, -1,
+  10, 4, 9, 10, 6, 4, 11, 2, 3, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 2, 2, 8, 11, 4, 9, 10, 4, 10, 6, -1, -1, -1, -1,
+  3, 11, 2, 0, 1, 6, 0, 6, 4, 6, 1, 10, -1, -1, -1, -1,
+  6, 4, 1, 6, 1, 10, 4, 8, 1, 2, 1, 11, 8, 11, 1, -1,
+  9, 6, 4, 9, 3, 6, 9, 1, 3, 11, 6, 3, -1, -1, -1, -1,
+  8, 11, 1, 8, 1, 0, 11, 6, 1, 9, 1, 4, 6, 4, 1, -1,
+  3, 11, 6, 3, 6, 0, 0, 6, 4, -1, -1, -1, -1, -1, -1, -1,
+  6, 4, 8, 11, 6, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  7, 10, 6, 7, 8, 10, 8, 9, 10, -1, -1, -1, -1, -1, -1, -1,
+  0, 7, 3, 0, 10, 7, 0, 9, 10, 6, 7, 10, -1, -1, -1, -1,
+  10, 6, 7, 1, 10, 7, 1, 7, 8, 1, 8, 0, -1, -1, -1, -1,
+  10, 6, 7, 10, 7, 1, 1, 7, 3, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 6, 1, 6, 8, 1, 8, 9, 8, 6, 7, -1, -1, -1, -1,
+  2, 6, 9, 2, 9, 1, 6, 7, 9, 0, 9, 3, 7, 3, 9, -1,
+  7, 8, 0, 7, 0, 6, 6, 0, 2, -1, -1, -1, -1, -1, -1, -1,
+  7, 3, 2, 6, 7, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  2, 3, 11, 10, 6, 8, 10, 8, 9, 8, 6, 7, -1, -1, -1, -1,
+  2, 0, 7, 2, 7, 11, 0, 9, 7, 6, 7, 10, 9, 10, 7, -1,
+  1, 8, 0, 1, 7, 8, 1, 10, 7, 6, 7, 10, 2, 3, 11, -1,
+  11, 2, 1, 11, 1, 7, 10, 6, 1, 6, 7, 1, -1, -1, -1, -1,
+  8, 9, 6, 8, 6, 7, 9, 1, 6, 11, 6, 3, 1, 3, 6, -1,
+  0, 9, 1, 11, 6, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  7, 8, 0, 7, 0, 6, 3, 11, 0, 11, 6, 0, -1, -1, -1, -1,
+  7, 11, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  7, 6, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 0, 8, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 1, 9, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  8, 1, 9, 8, 3, 1, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1,
+  10, 1, 2, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, 3, 0, 8, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1,
+  2, 9, 0, 2, 10, 9, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1,
+  6, 11, 7, 2, 10, 3, 10, 8, 3, 10, 9, 8, -1, -1, -1, -1,
+  7, 2, 3, 6, 2, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  7, 0, 8, 7, 6, 0, 6, 2, 0, -1, -1, -1, -1, -1, -1, -1,
+  2, 7, 6, 2, 3, 7, 0, 1, 9, -1, -1, -1, -1, -1, -1, -1,
+  1, 6, 2, 1, 8, 6, 1, 9, 8, 8, 7, 6, -1, -1, -1, -1,
+  10, 7, 6, 10, 1, 7, 1, 3, 7, -1, -1, -1, -1, -1, -1, -1,
+  10, 7, 6, 1, 7, 10, 1, 8, 7, 1, 0, 8, -1, -1, -1, -1,
+  0, 3, 7, 0, 7, 10, 0, 10, 9, 6, 10, 7, -1, -1, -1, -1,
+  7, 6, 10, 7, 10, 8, 8, 10, 9, -1, -1, -1, -1, -1, -1, -1,
+  6, 8, 4, 11, 8, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 6, 11, 3, 0, 6, 0, 4, 6, -1, -1, -1, -1, -1, -1, -1,
+  8, 6, 11, 8, 4, 6, 9, 0, 1, -1, -1, -1, -1, -1, -1, -1,
+  9, 4, 6, 9, 6, 3, 9, 3, 1, 11, 3, 6, -1, -1, -1, -1,
+  6, 8, 4, 6, 11, 8, 2, 10, 1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, 3, 0, 11, 0, 6, 11, 0, 4, 6, -1, -1, -1, -1,
+  4, 11, 8, 4, 6, 11, 0, 2, 9, 2, 10, 9, -1, -1, -1, -1,
+  10, 9, 3, 10, 3, 2, 9, 4, 3, 11, 3, 6, 4, 6, 3, -1,
+  8, 2, 3, 8, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1, -1,
+  0, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 9, 0, 2, 3, 4, 2, 4, 6, 4, 3, 8, -1, -1, -1, -1,
+  1, 9, 4, 1, 4, 2, 2, 4, 6, -1, -1, -1, -1, -1, -1, -1,
+  8, 1, 3, 8, 6, 1, 8, 4, 6, 6, 10, 1, -1, -1, -1, -1,
+  10, 1, 0, 10, 0, 6, 6, 0, 4, -1, -1, -1, -1, -1, -1, -1,
+  4, 6, 3, 4, 3, 8, 6, 10, 3, 0, 3, 9, 10, 9, 3, -1,
+  10, 9, 4, 6, 10, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 9, 5, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, 4, 9, 5, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1,
+  5, 0, 1, 5, 4, 0, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1,
+  11, 7, 6, 8, 3, 4, 3, 5, 4, 3, 1, 5, -1, -1, -1, -1,
+  9, 5, 4, 10, 1, 2, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1,
+  6, 11, 7, 1, 2, 10, 0, 8, 3, 4, 9, 5, -1, -1, -1, -1,
+  7, 6, 11, 5, 4, 10, 4, 2, 10, 4, 0, 2, -1, -1, -1, -1,
+  3, 4, 8, 3, 5, 4, 3, 2, 5, 10, 5, 2, 11, 7, 6, -1,
+  7, 2, 3, 7, 6, 2, 5, 4, 9, -1, -1, -1, -1, -1, -1, -1,
+  9, 5, 4, 0, 8, 6, 0, 6, 2, 6, 8, 7, -1, -1, -1, -1,
+  3, 6, 2, 3, 7, 6, 1, 5, 0, 5, 4, 0, -1, -1, -1, -1,
+  6, 2, 8, 6, 8, 7, 2, 1, 8, 4, 8, 5, 1, 5, 8, -1,
+  9, 5, 4, 10, 1, 6, 1, 7, 6, 1, 3, 7, -1, -1, -1, -1,
+  1, 6, 10, 1, 7, 6, 1, 0, 7, 8, 7, 0, 9, 5, 4, -1,
+  4, 0, 10, 4, 10, 5, 0, 3, 10, 6, 10, 7, 3, 7, 10, -1,
+  7, 6, 10, 7, 10, 8, 5, 4, 10, 4, 8, 10, -1, -1, -1, -1,
+  6, 9, 5, 6, 11, 9, 11, 8, 9, -1, -1, -1, -1, -1, -1, -1,
+  3, 6, 11, 0, 6, 3, 0, 5, 6, 0, 9, 5, -1, -1, -1, -1,
+  0, 11, 8, 0, 5, 11, 0, 1, 5, 5, 6, 11, -1, -1, -1, -1,
+  6, 11, 3, 6, 3, 5, 5, 3, 1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 10, 9, 5, 11, 9, 11, 8, 11, 5, 6, -1, -1, -1, -1,
+  0, 11, 3, 0, 6, 11, 0, 9, 6, 5, 6, 9, 1, 2, 10, -1,
+  11, 8, 5, 11, 5, 6, 8, 0, 5, 10, 5, 2, 0, 2, 5, -1,
+  6, 11, 3, 6, 3, 5, 2, 10, 3, 10, 5, 3, -1, -1, -1, -1,
+  5, 8, 9, 5, 2, 8, 5, 6, 2, 3, 8, 2, -1, -1, -1, -1,
+  9, 5, 6, 9, 6, 0, 0, 6, 2, -1, -1, -1, -1, -1, -1, -1,
+  1, 5, 8, 1, 8, 0, 5, 6, 8, 3, 8, 2, 6, 2, 8, -1,
+  1, 5, 6, 2, 1, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 3, 6, 1, 6, 10, 3, 8, 6, 5, 6, 9, 8, 9, 6, -1,
+  10, 1, 0, 10, 0, 6, 9, 5, 0, 5, 6, 0, -1, -1, -1, -1,
+  0, 3, 8, 5, 6, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  10, 5, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  11, 5, 10, 7, 5, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  11, 5, 10, 11, 7, 5, 8, 3, 0, -1, -1, -1, -1, -1, -1, -1,
+  5, 11, 7, 5, 10, 11, 1, 9, 0, -1, -1, -1, -1, -1, -1, -1,
+  10, 7, 5, 10, 11, 7, 9, 8, 1, 8, 3, 1, -1, -1, -1, -1,
+  11, 1, 2, 11, 7, 1, 7, 5, 1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, 1, 2, 7, 1, 7, 5, 7, 2, 11, -1, -1, -1, -1,
+  9, 7, 5, 9, 2, 7, 9, 0, 2, 2, 11, 7, -1, -1, -1, -1,
+  7, 5, 2, 7, 2, 11, 5, 9, 2, 3, 2, 8, 9, 8, 2, -1,
+  2, 5, 10, 2, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1, -1,
+  8, 2, 0, 8, 5, 2, 8, 7, 5, 10, 2, 5, -1, -1, -1, -1,
+  9, 0, 1, 5, 10, 3, 5, 3, 7, 3, 10, 2, -1, -1, -1, -1,
+  9, 8, 2, 9, 2, 1, 8, 7, 2, 10, 2, 5, 7, 5, 2, -1,
+  1, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 7, 0, 7, 1, 1, 7, 5, -1, -1, -1, -1, -1, -1, -1,
+  9, 0, 3, 9, 3, 5, 5, 3, 7, -1, -1, -1, -1, -1, -1, -1,
+  9, 8, 7, 5, 9, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  5, 8, 4, 5, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1, -1,
+  5, 0, 4, 5, 11, 0, 5, 10, 11, 11, 3, 0, -1, -1, -1, -1,
+  0, 1, 9, 8, 4, 10, 8, 10, 11, 10, 4, 5, -1, -1, -1, -1,
+  10, 11, 4, 10, 4, 5, 11, 3, 4, 9, 4, 1, 3, 1, 4, -1,
+  2, 5, 1, 2, 8, 5, 2, 11, 8, 4, 5, 8, -1, -1, -1, -1,
+  0, 4, 11, 0, 11, 3, 4, 5, 11, 2, 11, 1, 5, 1, 11, -1,
+  0, 2, 5, 0, 5, 9, 2, 11, 5, 4, 5, 8, 11, 8, 5, -1,
+  9, 4, 5, 2, 11, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  2, 5, 10, 3, 5, 2, 3, 4, 5, 3, 8, 4, -1, -1, -1, -1,
+  5, 10, 2, 5, 2, 4, 4, 2, 0, -1, -1, -1, -1, -1, -1, -1,
+  3, 10, 2, 3, 5, 10, 3, 8, 5, 4, 5, 8, 0, 1, 9, -1,
+  5, 10, 2, 5, 2, 4, 1, 9, 2, 9, 4, 2, -1, -1, -1, -1,
+  8, 4, 5, 8, 5, 3, 3, 5, 1, -1, -1, -1, -1, -1, -1, -1,
+  0, 4, 5, 1, 0, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  8, 4, 5, 8, 5, 3, 9, 0, 5, 0, 3, 5, -1, -1, -1, -1,
+  9, 4, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 11, 7, 4, 9, 11, 9, 10, 11, -1, -1, -1, -1, -1, -1, -1,
+  0, 8, 3, 4, 9, 7, 9, 11, 7, 9, 10, 11, -1, -1, -1, -1,
+  1, 10, 11, 1, 11, 4, 1, 4, 0, 7, 4, 11, -1, -1, -1, -1,
+  3, 1, 4, 3, 4, 8, 1, 10, 4, 7, 4, 11, 10, 11, 4, -1,
+  4, 11, 7, 9, 11, 4, 9, 2, 11, 9, 1, 2, -1, -1, -1, -1,
+  9, 7, 4, 9, 11, 7, 9, 1, 11, 2, 11, 1, 0, 8, 3, -1,
+  11, 7, 4, 11, 4, 2, 2, 4, 0, -1, -1, -1, -1, -1, -1, -1,
+  11, 7, 4, 11, 4, 2, 8, 3, 4, 3, 2, 4, -1, -1, -1, -1,
+  2, 9, 10, 2, 7, 9, 2, 3, 7, 7, 4, 9, -1, -1, -1, -1,
+  9, 10, 7, 9, 7, 4, 10, 2, 7, 8, 7, 0, 2, 0, 7, -1,
+  3, 7, 10, 3, 10, 2, 7, 4, 10, 1, 10, 0, 4, 0, 10, -1,
+  1, 10, 2, 8, 7, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 9, 1, 4, 1, 7, 7, 1, 3, -1, -1, -1, -1, -1, -1, -1,
+  4, 9, 1, 4, 1, 7, 0, 8, 1, 8, 7, 1, -1, -1, -1, -1,
+  4, 0, 3, 7, 4, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  4, 8, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  9, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 0, 9, 3, 9, 11, 11, 9, 10, -1, -1, -1, -1, -1, -1, -1,
+  0, 1, 10, 0, 10, 8, 8, 10, 11, -1, -1, -1, -1, -1, -1, -1,
+  3, 1, 10, 11, 3, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 2, 11, 1, 11, 9, 9, 11, 8, -1, -1, -1, -1, -1, -1, -1,
+  3, 0, 9, 3, 9, 11, 1, 2, 9, 2, 11, 9, -1, -1, -1, -1,
+  0, 2, 11, 8, 0, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  3, 2, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  2, 3, 8, 2, 8, 10, 10, 8, 9, -1, -1, -1, -1, -1, -1, -1,
+  9, 10, 2, 0, 9, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  2, 3, 8, 2, 8, 10, 0, 1, 8, 1, 10, 8, -1, -1, -1, -1,
+  1, 10, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  1, 3, 8, 9, 1, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 9, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+];
+
+/* ==========================================================================
+ *  0. 通用工具
+ * ========================================================================*/
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+
+/** 确定性伪随机（保证每次打开形态一致） */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** 3D 整数哈希 → [0,1)，用于程序化噪声 */
+function hash3(i, j, k, seed) {
+  let n = (i * 374761393 + j * 668265263 + k * 1442695040 + seed * 3266489917) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+/** 3D 值噪声（三线性插值 + 平滑曲线） */
+function noise3(x, y, z, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const c000 = hash3(xi, yi, zi, seed), c100 = hash3(xi + 1, yi, zi, seed);
+  const c010 = hash3(xi, yi + 1, zi, seed), c110 = hash3(xi + 1, yi + 1, zi, seed);
+  const c001 = hash3(xi, yi, zi + 1, seed), c101 = hash3(xi + 1, yi, zi + 1, seed);
+  const c011 = hash3(xi, yi + 1, zi + 1, seed), c111 = hash3(xi + 1, yi + 1, zi + 1, seed);
+  const x00 = lerp(c000, c100, u), x10 = lerp(c010, c110, u);
+  const x01 = lerp(c001, c101, u), x11 = lerp(c011, c111, u);
+  return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+}
+/** 分形噪声（多倍频） */
+function fbm3(x, y, z, oct, seed) {
+  let s = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) { s += amp * noise3(x * f, y * f, z * f, seed + i * 17); amp *= 0.5; f *= 2.03; }
+  return s;
+}
+
+/* ==========================================================================
+ *  1. 极简 4x4 矩阵（列主序，与 WebGL 一致）
+ * ========================================================================*/
+const m4 = {
+  /** 透视投影矩阵 */
+  perspective(o, fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy * 0.5), nf = 1 / (near - far);
+    o[0] = f / aspect; o[1] = 0; o[2] = 0; o[3] = 0;
+    o[4] = 0; o[5] = f; o[6] = 0; o[7] = 0;
+    o[8] = 0; o[9] = 0; o[10] = (far + near) * nf; o[11] = -1;
+    o[12] = 0; o[13] = 0; o[14] = 2 * far * near * nf; o[15] = 0;
+    return o;
+  },
+  /** 视图矩阵（由相机基向量直接构造，避免求逆） */
+  viewFromBasis(o, ex, ey, ez, rx, ry, rz, ux, uy, uz, fx, fy, fz) {
+    o[0] = rx; o[1] = ux; o[2] = -fx; o[3] = 0;
+    o[4] = ry; o[5] = uy; o[6] = -fy; o[7] = 0;
+    o[8] = rz; o[9] = uz; o[10] = -fz; o[11] = 0;
+    o[12] = -(rx * ex + ry * ey + rz * ez);
+    o[13] = -(ux * ex + uy * ey + uz * ez);
+    o[14] = fx * ex + fy * ey + fz * ez;
+    o[15] = 1;
+    return o;
+  },
+  /** o = a * b */
+  mul(o, a, b) {
+    for (let c = 0; c < 4; c++) {
+      const b0 = b[c * 4], b1 = b[c * 4 + 1], b2 = b[c * 4 + 2], b3 = b[c * 4 + 3];
+      o[c * 4]     = a[0] * b0 + a[4] * b1 + a[8]  * b2 + a[12] * b3;
+      o[c * 4 + 1] = a[1] * b0 + a[5] * b1 + a[9]  * b2 + a[13] * b3;
+      o[c * 4 + 2] = a[2] * b0 + a[6] * b1 + a[10] * b2 + a[14] * b3;
+      o[c * 4 + 3] = a[3] * b0 + a[7] * b1 + a[11] * b2 + a[15] * b3;
+    }
+    return o;
+  }
+};
+
+/* ==========================================================================
+ *  2. 元球系统（隐式标量场）
+ *  --------------------------------------------------------------------------
+ *  场定义：  F(p) = Σ_i  W_i · (1 - |p-c_i|² / R_i²)³      (|p-c_i| < R_i)
+ *  即 Wyvill 核（C² 连续、紧支撑），等值面 F(p) = iso 即为雕塑表面。
+ *  数据用 SoA Float32Array 存放，热路径零对象分配、零 GC。
+ * ========================================================================*/
+const MAX_BALLS = 16;
+
+class MetaField {
+  constructor() {
+    const n = MAX_BALLS;
+    this.n = 0;
+    // 当前位置 / 半径 / 权重
+    this.X = new Float32Array(n); this.Y = new Float32Array(n); this.Z = new Float32Array(n);
+    this.R = new Float32Array(n); this.W = new Float32Array(n);
+    // 影响半径 = R · 融合强度 · 半径动画系数
+    this.RI = new Float32Array(n);
+    // 编队基准位置（弹簧回归目标）
+    this.BX = new Float32Array(n); this.BY = new Float32Array(n); this.BZ = new Float32Array(n);
+    // 速度（爆炸 / 弹簧物理）
+    this.VX = new Float32Array(n); this.VY = new Float32Array(n); this.VZ = new Float32Array(n);
+    this.fusion = 1.0;   // 融合强度：缩放影响半径
+    this.rScale = 1.0;   // 爆炸时半径收缩动画系数
+    this.dirty = true;
+  }
+  /** 对全部元球重算影响半径（融合强度或半径动画变化时调用） */
+  refreshRadii() {
+    const k = this.fusion * this.rScale;
+    for (let i = 0; i < this.n; i++) this.RI[i] = this.R[i] * k;
+    this.dirty = true;
+  }
+  clear() { this.n = 0; this.dirty = true; }
+  /** 追加元球，超出上限时移除最早的一个 */
+  add(x, y, z, r, w) {
+    if (this.n >= MAX_BALLS) this.removeAt(0);
+    const i = this.n++;
+    this.set(i, x, y, z, r, w === undefined ? 1 : w);
+    this.VX[i] = this.VY[i] = this.VZ[i] = 0;
+    this.refreshRadii();
+    return i;
+  }
+  set(i, x, y, z, r, w) {
+    this.X[i] = this.BX[i] = x;
+    this.Y[i] = this.BY[i] = y;
+    this.Z[i] = this.BZ[i] = z;
+    this.R[i] = r; this.W[i] = w;
+  }
+  /** 沿 -X 方向紧凑移除第 i 个球（保序，避免视觉跳变） */
+  removeAt(i) {
+    const last = --this.n;
+    for (let k = i; k < last; k++) {
+      const s = k + 1;
+      this.X[k] = this.X[s]; this.Y[k] = this.Y[s]; this.Z[k] = this.Z[s];
+      this.R[k] = this.R[s]; this.W[k] = this.W[s];
+      this.BX[k] = this.BX[s]; this.BY[k] = this.BY[s]; this.BZ[k] = this.BZ[s];
+      this.VX[k] = this.VX[s]; this.VY[k] = this.VY[s]; this.VZ[k] = this.VZ[s];
+    }
+    this.refreshRadii();
+    return i;
+  }
+
+  /** 隐式场求值：F(p) —— 全局最热函数，全部使用局部别名减少属性访问 */
+  fieldAt(x, y, z) {
+    const n = this.n, X = this.X, Y = this.Y, Z = this.Z, R = this.RI, W = this.W;
+    let f = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = x - X[i], dy = y - Y[i], dz = z - Z[i];
+      const ri = R[i];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const r2 = ri * ri;
+      if (d2 < r2) {
+        const t = 1 - d2 / r2;
+        f += W[i] * t * t * t;   // Wyvill 核
+      }
+    }
+    return f;
+  }
+
+  /**
+   * 隐式场梯度（中心差分）—— 法线来源
+   * 场值内部大、外部小，故外法线 = -∇F / |∇F|
+   */
+  gradient(x, y, z, eps, out) {
+    const inv = 0.5 / eps;
+    out[0] = (this.fieldAt(x + eps, y, z) - this.fieldAt(x - eps, y, z)) * inv;
+    out[1] = (this.fieldAt(x, y + eps, z) - this.fieldAt(x, y - eps, z)) * inv;
+    out[2] = (this.fieldAt(x, y, z + eps) - this.fieldAt(x, y, z - eps)) * inv;
+    return out;
+  }
+
+  /** 每个球的可见半径（单球在等值面 iso 处的半径系数） */
+  static visibleFactor(iso) {
+    const q = 1 - Math.cbrt(iso);        // (1-d²/R²)=∛iso
+    return q > 0 ? Math.sqrt(q) : 0;
+  }
+}
+
+/* ==========================================================================
+ *  3. Marching Cubes 引擎
+ *  --------------------------------------------------------------------------
+ *  · 规则网格采样（按球体包围盒累加，避免 O(N³·球数) 的全量遍历）
+ *  · 逐体素查表提取三角面片（EDGE_TABLE / TRI_TABLE，256 项完整表）
+ *  · 顶点法线 = 隐式场中心差分梯度（相邻体素共享边 → 位置/法线完全一致，天然平滑）
+ *  · 顶点 AO  = 沿法线步进采样隐式场得到的近似遮挡（场梯度 AO）
+ *  · 全部数据预分配 TypedArray，热路径零 new
+ * ========================================================================*/
+const CUBE_CX = [0, 1, 1, 0, 0, 1, 1, 0];
+const CUBE_CY = [0, 0, 1, 1, 0, 0, 1, 1];
+const CUBE_CZ = [0, 0, 0, 0, 1, 1, 1, 1];
+const EDGE_A = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3];
+const EDGE_B = [1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7];
+const STRIDE = 7; // x,y,z, nx,ny,nz, ao
+
+class MCEngine {
+  constructor() {
+    this.res = 0; this.size = 4.4;
+    this.field = null;
+    this.verts = null; this.idx = null;
+    this.maxVerts = 0; this.maxIdx = 0;
+    this.nv = 0; this.ni = 0;
+    this.triangles = 0;
+    this.overflow = false;
+    this.corners = new Float32Array(8);
+    this.edgeCache = new Int32Array(12);
+    this.grad = new Float32Array(3);
+  }
+  /**
+   * 分配（分辨率 / 域尺寸变化时调用）
+   * 仅当容量不足才重建 TypedArray，避免频繁 resize 造成 GC 抖动
+   * @param {boolean} u32 是否可用 32 位索引（WebGL2 或 OES_element_index_uint）
+   */
+  resize(res, size, u32) {
+    this.res = res; this.size = size;
+    const D = res + 1;
+    const fieldLen = D * D * D;
+    if (!this.field || this.field.length !== fieldLen) this.field = new Float32Array(fieldLen);
+    // 顶点上限：光滑元球远达不到理论上限，按体积 0.4 预留
+    let maxVerts = Math.min(320000, Math.max(20000, Math.floor(fieldLen * 0.4)));
+    if (!u32 && maxVerts > 65000) maxVerts = 65000;
+    const maxIdx = maxVerts * 3;
+    if (this.verts && this.maxVerts >= maxVerts && this.idx.length >= maxIdx) return;
+    this.maxVerts = maxVerts;
+    this.maxIdx = maxIdx;
+    this.verts = new Float32Array(maxVerts * STRIDE);
+    this.idx = u32 ? new Uint32Array(maxIdx) : new Uint16Array(maxIdx);
+  }
+
+  /**
+   * 网格重建主循环
+   * @param {MetaField} mb 元球场
+   * @param {number} iso 等值面阈值
+   */
+  build(mb, iso) {
+    const N = this.res, S = this.size, h = S / N, half = S * 0.5;
+    const D = N + 1, DD = D * D;
+    const F = this.field;
+    const verts = this.verts, idx = this.idx;
+    const maxVerts = this.maxVerts, maxIdx = this.maxIdx;
+    let vp = 0, ip = 0;            // 顶点浮点指针 / 索引指针
+    let overflow = false;
+
+    /* ---- 步骤 1：规则网格标量场采样 ---- */
+    F.fill(0);
+    const nB = mb.n, X = mb.X, Y = mb.Y, Z = mb.Z, RI = mb.RI, W = mb.W;
+    for (let b = 0; b < nB; b++) {
+      const r = RI[b], w = W[b], r2 = r * r;
+      if (r <= 0) continue;
+      // 球体包围盒 → 网格索引范围
+      let i0 = Math.ceil((X[b] - r + half) / h), i1 = Math.floor((X[b] + r + half) / h);
+      let j0 = Math.ceil((Y[b] - r + half) / h), j1 = Math.floor((Y[b] + r + half) / h);
+      let k0 = Math.ceil((Z[b] - r + half) / h), k1 = Math.floor((Z[b] + r + half) / h);
+      if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0; if (k0 < 0) k0 = 0;
+      if (i1 > N) i1 = N; if (j1 > N) j1 = N; if (k1 > N) k1 = N;
+      const gx = X[b] + half, gy = Y[b] + half, gz = Z[b] + half;
+      for (let k = k0; k <= k1; k++) {
+        const dz = k * h - gz, dz2 = dz * dz;
+        const kRow = k * DD;
+        for (let j = j0; j <= j1; j++) {
+          const dy = j * h - gy, dyz2 = dz2 + dy * dy;
+          let base = i0 + j * D + kRow;   // 必须补上 x 方向起始偏移 i0
+          for (let i = i0; i <= i1; i++, base++) {
+            const dx = i * h - gx;
+            const d2 = dyz2 + dx * dx;
+            if (d2 < r2) {
+              const t = 1 - d2 / r2;
+              F[base] += w * t * t * t;
+            }
+          }
+        }
+      }
+    }
+
+    /* ---- 步骤 2：逐体素 Marching Cubes ---- */
+    const grad = this.grad, corners = this.corners, ecache = this.edgeCache;
+    const eps = h * 0.45;
+    const T = TRI_TABLE, E = EDGE_TABLE;
+
+    for (let k = 0; k < N; k++) {
+      const kRow = k * DD, kRow1 = kRow + DD;
+      for (let j = 0; j < N; j++) {
+        const row0 = j * D + kRow, row1 = j * D + kRow1;
+        const y0 = j * h - half, z0 = k * h - half;
+        for (let i = 0; i < N; i++) {
+          const b0 = i + row0, b1 = i + row1;
+          // 读取 8 个角点的场值（与 CUBE_CX/CY/CZ 顺序一致）
+          const v0 = F[b0], v1 = F[b0 + 1], v2 = F[b0 + 1 + D], v3 = F[b0 + D];
+          const v4 = F[b1], v5 = F[b1 + 1], v6 = F[b1 + 1 + D], v7 = F[b1 + D];
+
+          // 立方体配置索引：场值 ≥ iso 视为"内部"，置位
+          let ci = 0;
+          if (v0 >= iso) ci |= 1;
+          if (v1 >= iso) ci |= 2;
+          if (v2 >= iso) ci |= 4;
+          if (v3 >= iso) ci |= 8;
+          if (v4 >= iso) ci |= 16;
+          if (v5 >= iso) ci |= 32;
+          if (v6 >= iso) ci |= 64;
+          if (v7 >= iso) ci |= 128;
+          if (ci === 0 || ci === 255) continue;   // 完全在内外两侧，无面片
+          const et = E[ci];
+          if (et === 0) continue;
+
+          corners[0] = v0; corners[1] = v1; corners[2] = v2; corners[3] = v3;
+          corners[4] = v4; corners[5] = v5; corners[6] = v6; corners[7] = v7;
+          ecache[0] = ecache[1] = ecache[2] = ecache[3] = -1;
+          ecache[4] = ecache[5] = ecache[6] = ecache[7] = -1;
+          ecache[8] = ecache[9] = ecache[10] = ecache[11] = -1;
+
+          const x0 = i * h - half;
+          const tBase = ci * 16;
+          for (let t = 0; t < 16; t += 3) {
+            const e0 = T[tBase + t];
+            if (e0 < 0) break;
+            if (ip + 3 > maxIdx) { overflow = true; break; }
+            for (let c = 0; c < 3; c++) {
+              const e = T[tBase + t + c];
+              let vi = ecache[e];
+              if (vi < 0) {
+                /* ---- 边交点：线性插值 ---- */
+                const ca = EDGE_A[e], cb = EDGE_B[e];
+                const va = corners[ca], vb = corners[cb];
+                let s = (iso - va) / (vb - va);
+                if (!(s >= 0 && s <= 1)) s = 0.5;   // 数值保护
+                const ax = CUBE_CX[ca], ay = CUBE_CY[ca], az = CUBE_CZ[ca];
+                const bx = CUBE_CX[cb], by = CUBE_CY[cb], bz = CUBE_CZ[cb];
+                const px = x0 + (ax + (bx - ax) * s) * h;
+                const py = y0 + (ay + (by - ay) * s) * h;
+                const pz = z0 + (az + (bz - az) * s) * h;
+
+                /* ---- 法线：隐式场中心差分梯度（外法线 = -∇F） ---- */
+                mb.gradient(px, py, pz, eps, grad);
+                let nx = -grad[0], ny = -grad[1], nz = -grad[2];
+                const glen = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1e-6;
+                nx /= glen; ny /= glen; nz /= glen;
+
+                /* ---- 环境光遮蔽：沿法线步进采样场，估算邻近几何遮挡 ---- */
+                let occ = 0, sca = 1;
+                for (let s2 = 0; s2 < 4; s2++) {
+                  const hh = 0.035 + 0.17 * (s2 / 3);
+                  const fs = mb.fieldAt(px + nx * hh, py + ny * hh, pz + nz * hh);
+                  const d = (iso - fs) / glen;      // 近似有符号距离（内部为负）
+                  const g = hh - d;
+                  if (g > 0) occ += g * sca;
+                  sca *= 0.72;
+                }
+                let ao = 1 - occ * 3.3;
+                ao = ao < 0 ? 0 : (ao > 1 ? 1 : ao);
+
+                if (vp + STRIDE > maxVerts * STRIDE) { overflow = true; break; }
+                verts[vp] = px; verts[vp + 1] = py; verts[vp + 2] = pz;
+                verts[vp + 3] = nx; verts[vp + 4] = ny; verts[vp + 5] = nz;
+                verts[vp + 6] = ao;
+                vi = vp / STRIDE;
+                vp += STRIDE;
+                ecache[e] = vi;
+              }
+              idx[ip++] = vi;
+            }
+            if (overflow) break;
+          }
+          if (overflow) break;
+        }
+        if (overflow) break;
+      }
+      if (overflow) break;
+    }
+
+    this.nv = vp / STRIDE;
+    this.ni = ip;
+    this.triangles = ip / 3;
+    this.overflow = overflow;
+    return this;
+  }
+}
+
+/* ==========================================================================
+ *  4. 程序化 equirectangular 环境贴图
+ *  --------------------------------------------------------------------------
+ *  完全由代码生成：天空渐变 + 程序化云（fbm 值噪声，柱面采样保证无接缝）
+ *  + 程序化柔光箱（金属反射的长条高光来源）+ 星点 + 地面。
+ *  作为 IBL 近似：着色器端按粗糙度做锥形采样实现预滤波层次。
+ * ========================================================================*/
+const ENV_W = 512, ENV_H = 256;
+/** 半球平均辐照度（由环境贴图 CPU 端积分得到，供漫反射 IBL 使用） */
+const ENV_AMBIENT = new Float32Array(3);
+function buildEnvMap() {
+  const data = new Uint8Array(ENV_W * ENV_H * 4);
+  let ambR = 0, ambG = 0, ambB = 0, ambW = 0;
+  const rnd = mulberry32(20240913);
+  // 太阳方向（暖光源，决定冷暖对比）
+  let sx = 0.62, sy = 0.30, sz = -0.72;
+  const sl = Math.hypot(sx, sy, sz); sx /= sl; sy /= sl; sz /= sl;
+
+  /* ---- 程序化"柔光箱"：环境中的高亮软面板。金属反射会出现清晰的长条高光，
+         这是液态金属质感的关键（纯渐变环境只会得到灰蒙蒙的反射）。 ---- */
+  function makeBox(dx, dy, dz, hw, hh, softness, r, g, b) {
+    const l = Math.hypot(dx, dy, dz) || 1;
+    dx /= l; dy /= l; dz /= l;
+    let ux = 0, uy = 1, uz = 0;
+    if (Math.abs(dy) > 0.94) { ux = 1; uy = 0; uz = 0; }
+    let tx = uy * dz - uz * dy, ty = uz * dx - ux * dz, tz = ux * dy - uy * dx;
+    const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+    const bx = dy * tz - dz * ty, by = dz * tx - dx * tz, bz = dx * ty - dy * tx;
+    return { dx, dy, dz, tx, ty, tz, bx, by, bz, hw, hh, softness, r, g, b };
+  }
+  const boxes = [
+    makeBox(0.40, 0.60, -0.70, 0.13, 0.80, 0.09, 1.00, 0.58, 0.26),   // 暖色竖向条形光
+    makeBox(-0.74, 0.30, 0.60, 0.80, 0.11, 0.08, 0.26, 0.60, 1.00),   // 冷色横向条形光
+    makeBox(0.18, 0.88, 0.44, 0.11, 0.11, 0.09, 1.00, 0.96, 0.92),    // 小型硬光源（锐利高光）
+    makeBox(0.76, -0.42, 0.42, 0.62, 0.22, 0.20, 0.62, 0.26, 0.09),   // 地面暖色反弹板（冷暖对比）
+    makeBox(-0.55, -0.55, -0.62, 0.70, 0.26, 0.22, 0.16, 0.26, 0.46)  // 地面冷色反弹板
+  ];
+
+  const stars = [];
+  for (let i = 0; i < 520; i++) {
+    const u = rnd(), v = rnd() * 0.60;              // 只出现在上半球
+    stars.push({ u, v, b: 0.30 + rnd() * 0.70, s: rnd() < 0.10 ? 1 : 0 });
+  }
+  for (let y = 0; y < ENV_H; y++) {
+    const v = (y + 0.5) / ENV_H;                    // 0 = 天顶
+    const theta = v * Math.PI;
+    const cy = Math.cos(theta), sy2 = Math.sin(theta);
+    for (let x = 0; x < ENV_W; x++) {
+      const u = (x + 0.5) / ENV_W;
+      const phi = (u - 0.5) * TAU;
+      const dx = sy2 * Math.sin(phi), dy = cy, dz = sy2 * Math.cos(phi);
+
+      /* ---- 基础天空：近黑天顶（冷）→ 窄而高饱和的地平线带（暖/冷方位分区） ---- */
+      const up = clamp(dy, 0, 1);
+      let r = lerp(0.052, 0.005, Math.pow(up, 0.40));
+      let g = lerp(0.050, 0.011, Math.pow(up, 0.38));
+      let b = lerp(0.095, 0.030, Math.pow(up, 0.30));
+      // 方位冷暖对比：一侧暖橙，一侧冷青蓝
+      const warm = clamp(dx * 0.62 - dz * 0.62, -1, 1);
+      const horizonBand = Math.pow(1 - up, 5.0) * sy2;
+      r += 0.40 * Math.max(0, warm) * horizonBand;
+      g += 0.150 * Math.max(0, warm) * horizonBand;
+      b += 0.038 * Math.max(0, warm) * horizonBand;
+      r += 0.016 * Math.max(0, -warm) * horizonBand;
+      g += 0.105 * Math.max(0, -warm) * horizonBand;
+      b += 0.340 * Math.max(0, -warm) * horizonBand;
+
+      /* ---- 地面（下半球）：极暗，但保留一线镜像反光（湿地面效果） ---- */
+      if (dy < 0) {
+        const d = -dy;
+        const k = clamp(d * 4.2, 0, 1);
+        const hb = Math.pow(clamp(1 - d * 0.55, 0, 1), 3.0);
+        const gr = 0.004 + 0.52 * Math.max(0, warm) * hb * 0.42;
+        const gg = 0.005 + 0.17 * Math.max(0, warm) * hb * 0.42;
+        const gb = 0.009 + 0.36 * Math.max(0, -warm) * hb * 0.42;
+        r = lerp(r, gr, k); g = lerp(g, gg, k); b = lerp(b, gb, k);
+      }
+
+      /* ---- 程序化云：柱面坐标采样 3D 噪声 → 水平方向天然无缝 ---- */
+      if (dy > -0.08) {
+        const cr = 1.7, cs = 2.6;
+        const nz = fbm3(dx * cr, dy * cs + 1.7, dz * cr, 3, 91);
+        const band = Math.exp(-Math.pow((dy - 0.13) * 3.0, 2));
+        const cm = clamp((nz - 0.52) * 2.9, 0, 1) * band;
+        if (cm > 0.001) {
+          const lit = 0.35 + 0.65 * clamp(nz * 1.5, 0, 1);
+          const sunLit = 0.45 + 0.55 * Math.max(0, dx * sx + dy * sy + dz * sz);
+          const cr2 = 0.30 * lit * sunLit, cg2 = 0.27 * lit * sunLit, cb2 = 0.34 * lit * sunLit;
+          r = lerp(r, cr2, cm * 0.85); g = lerp(g, cg2, cm * 0.85); b = lerp(b, cb2, cm * 0.85);
+        }
+      }
+
+      /* ---- 太阳：HDR 高光核心（供金属反射产生高光与 Bloom） ---- */
+      const sd = dx * sx + dy * sy + dz * sz;
+      const sdd = clamp(sd, 0, 1);
+      const glow = Math.pow(sdd, 70) * 2.30 + Math.pow(sdd, 16) * 0.32 + Math.pow(sdd, 3) * 0.04;
+      const disc = clamp((sd - 0.9990) * 1200, 0, 1);
+      r += glow * 1.00 + disc * 0.55;
+      g += glow * 0.62 + disc * 0.42;
+      b += glow * 0.30 + disc * 0.28;
+
+      /* ---- 柔光箱（矩形软面板，边缘平滑衰减） ---- */
+      for (let bi = 0; bi < boxes.length; bi++) {
+        const B = boxes[bi];
+        const ca = dx * B.dx + dy * B.dy + dz * B.dz;
+        if (ca <= 0.05) continue;
+        const px = dx - ca * B.dx, py = dy - ca * B.dy, pz = dz - ca * B.dz;
+        const uu = (px * B.tx + py * B.ty + pz * B.tz) / ca;
+        const vv = (px * B.bx + py * B.by + pz * B.bz) / ca;
+        const wu = 1 - clamp((Math.abs(uu) - (B.hw - B.softness)) / B.softness, 0, 1);
+        const wv = 1 - clamp((Math.abs(vv) - (B.hh - B.softness)) / B.softness, 0, 1);
+        const m = wu * wv;
+        if (m > 0.001) {
+          r += B.r * m; g += B.g * m; b += B.b * m;
+        }
+      }
+
+      // 存储时做 sqrt 编码（硬件采样后按 c*c 还原为线性，避免 8bit 暗部断层）
+      const o = (y * ENV_W + x) * 4;
+      data[o]     = Math.sqrt(clamp(r, 0, 1)) * 255 | 0;
+      data[o + 1] = Math.sqrt(clamp(g, 0, 1)) * 255 | 0;
+      data[o + 2] = Math.sqrt(clamp(b, 0, 1)) * 255 | 0;
+      data[o + 3] = 255;
+
+      // 半球积分（余弦加权）→ 漫反射辐照度
+      if (dy > 0) {
+        const w = Math.max(0, dy) * sy2;
+        ambR += r * w; ambG += g * w; ambB += b * w; ambW += w;
+      }
+    }
+  }
+  // ---- 星点叠加 ----
+  for (let i = 0; i < stars.length; i++) {
+    const st = stars[i];
+    const x = (st.u * ENV_W) | 0, y = (st.v * ENV_H) | 0;
+    for (let oy = 0; oy <= st.s; oy++) for (let ox = 0; ox <= st.s; ox++) {
+      const px = (x + ox) % ENV_W, py = clamp(y + oy, 0, ENV_H - 1);
+      const o = (py * ENV_W + px) * 4;
+      const k = st.b * (st.s ? 0.65 : 1);
+      data[o] = Math.min(255, data[o] + 255 * k * 0.85);
+      data[o + 1] = Math.min(255, data[o + 1] + 255 * k * 0.92);
+      data[o + 2] = Math.min(255, data[o + 2] + 255 * k);
+    }
+  }
+  const iw = ambW > 0 ? Math.PI / ambW : 0;   // 归一化到辐照度量级
+  ENV_AMBIENT[0] = ambR * iw; ENV_AMBIENT[1] = ambG * iw; ENV_AMBIENT[2] = ambB * iw;
+  return data;
+}
+
+/* ==========================================================================
+ *  5. GLSL 着色器（统一使用 GLSL ES 1.00，WebGL1 / WebGL2 均可用）
+ * ========================================================================*/
+const GLSL_COMMON = `
+precision highp float;
+float hash12(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+`;
+
+/* --- 全屏三角形条带的顶点着色器 --- */
+const VS_QUAD = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos*0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+/* --- 程序化环境背景 --- */
+const FS_BG = GLSL_COMMON + `
+varying vec2 vUv;
+uniform sampler2D uEnv;
+uniform vec3 uCamRight, uCamUp, uCamFwd;
+uniform vec2 uTanHalf;
+uniform float uEnvIntensity;
+vec2 dirToUV(vec3 d){ return vec2(atan(d.z, d.x)*0.15915494 + 0.5, acos(clamp(d.y,-1.0,1.0))*0.31830989); }
+void main(){
+  vec3 dir = normalize(uCamFwd + uCamRight*(vUv.x*2.0-1.0)*uTanHalf.x + uCamUp*(vUv.y*2.0-1.0)*uTanHalf.y);
+  vec3 c = texture2D(uEnv, dirToUV(dir)).rgb;
+  c = c*c * uEnvIntensity * 0.38;          // sqrt 编码还原为线性（低成本 gamma2.0 逆变换）
+  // 轻微的径向衰减，突出雕塑主体
+  float r = length(vUv*2.0-1.0);
+  c *= 1.0 - 0.40*smoothstep(0.30, 1.45, r);
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+/* --- 雕塑表面：顶点 --- */
+const VS_SURF = `
+attribute vec3 aPos;
+attribute vec3 aNrm;
+attribute float aAO;
+uniform mat4 uMVP;
+varying vec3 vPos;
+varying vec3 vNrm;
+varying float vAO;
+void main(){
+  vPos = aPos; vNrm = aNrm; vAO = aAO;
+  gl_Position = uMVP * vec4(aPos, 1.0);
+}`;
+
+/* --- 雕塑表面：片元（Cook-Torrance：GGX + Smith + Fresnel-Schlick + IBL） --- */
+const FS_SURF = GLSL_COMMON + `
+varying vec3 vPos;
+varying vec3 vNrm;
+varying float vAO;
+uniform vec3 uCamPos;
+uniform vec3 uAmbient;              // CPU 预计算的半球平均辐照度
+uniform sampler2D uEnv;
+uniform float uEnvIntensity, uMetallic, uRoughness, uAOStrength;
+
+const float PI = 3.14159265359;
+vec2 dirToUV(vec3 d){ return vec2(atan(d.z, d.x)*0.15915494 + 0.5, acos(clamp(d.y,-1.0,1.0))*0.31830989); }
+/* sqrt 编码的环境贴图 → 线性 HDR */
+vec3 envTex(vec3 d){
+  vec3 c = texture2D(uEnv, dirToUV(d)).rgb;
+  return c * c * uEnvIntensity;
+}
+/*
+ * IBL 镜面预滤波近似：以反射方向为中心做锥形采样，锥角随粗糙度增大。
+ * 不使用 mipmap，避免 equirect 参数化在 atan 接缝处导数突变导致的采样瑕疵；
+ * 5 次采样即可得到从"镜面锐利"到"粗糙漫射"的连续反射层次。
+ */
+vec3 envSpecular(vec3 d, float rough){
+  vec3 t = normalize(abs(d.y) < 0.98 ? cross(vec3(0.0, 1.0, 0.0), d) : vec3(1.0, 0.0, 0.0));
+  vec3 b = cross(d, t);
+  float a = 0.045 + rough * 0.95;
+  vec3 s = envTex(d) * 0.30;
+  s += envTex(normalize(d + t * a)) * 0.175;
+  s += envTex(normalize(d - t * a)) * 0.175;
+  s += envTex(normalize(d + b * a)) * 0.175;
+  s += envTex(normalize(d - b * a)) * 0.175;
+  return s * 1.1428;                 // 权重归一
+}
+
+/* GGX / Trowbridge-Reitz 法线分布 */
+float D_GGX(float NoH, float a){
+  float a2 = a*a;
+  float d = NoH*NoH*(a2 - 1.0) + 1.0;
+  return a2 / max(PI*d*d, 1e-7);
+}
+/* Smith 几何项（height-correlated visibility 形式） */
+float V_SmithGGX(float NoV, float NoL, float a){
+  float a2 = a*a;
+  float gv = NoL * sqrt(NoV*NoV*(1.0-a2) + a2);
+  float gl = NoV * sqrt(NoL*NoL*(1.0-a2) + a2);
+  return 0.5 / max(gv + gl, 1e-5);
+}
+/* Fresnel-Schlick */
+vec3 F_Schlick(float u, vec3 f0){ return f0 + (1.0 - f0)*pow(1.0 - u, 5.0); }
+vec3 F_SchlickRough(float u, vec3 f0, float rough){
+  return f0 + (max(vec3(1.0 - rough), f0) - f0) * pow(1.0 - u, 5.0);
+}
+/* 单盏解析光（含能量守恒的漫反射 + 镜面 BRDF） */
+vec3 brdfLight(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metal, float rough){
+  vec3 H = normalize(V + L);
+  float NoL = max(dot(N, L), 0.0);
+  float NoV = max(dot(N, V), 1e-4);
+  float NoH = max(dot(N, H), 0.0);
+  float VoH = max(dot(V, H), 0.0);
+  float a = max(rough*rough, 1e-3);
+  vec3 F0 = mix(vec3(0.04), albedo, metal);
+  float D = D_GGX(NoH, a);
+  float Vis = V_SmithGGX(NoV, NoL, a);
+  vec3 F = F_Schlick(VoH, F0);
+  vec3 spec = D * Vis * F;
+  vec3 kd = (1.0 - F) * (1.0 - metal);
+  return (kd * albedo / PI + spec) * radiance * NoL;
+}
+
+void main(){
+  vec3 N = normalize(vNrm);
+  vec3 V = normalize(uCamPos - vPos);
+  if (dot(N, V) < 0.0) N = -N;                 // 双面着色保护
+  float metal = clamp(uMetallic, 0.0, 1.0);
+  float rough = clamp(uRoughness, 0.03, 1.0);
+  float NoV = max(dot(N, V), 1e-4);
+
+  /* 金属色调：由世界坐标驱动，形成冷（钢蓝）暖（赤铜）成体系的配色 */
+  float g = smoothstep(-1.45, 1.45, vPos.y + 0.62*sin(vPos.x*1.7) + 0.34*cos(vPos.z*1.3));
+  vec3 copper = vec3(1.00, 0.34, 0.07);
+  vec3 steel  = vec3(0.14, 0.47, 1.00);
+  vec3 albedo = mix(copper, steel, g);
+  albedo = mix(albedo, vec3(0.80, 0.86, 0.96), 0.10);
+  /* 手工抛光般的粗糙度微扰，使反射带"锤纹/拉丝"层次 */
+  float nz = sin(vPos.x*7.7 + vPos.z*2.3) * sin(vPos.y*6.3 - vPos.x*1.7) * sin(vPos.z*5.1 + vPos.y*3.1);
+  rough = clamp(rough * (0.82 + 0.26 * (0.5 + 0.5*nz)), 0.03, 1.0);
+
+  float ao = mix(1.0, vAO, uAOStrength);
+
+  vec3 color = vec3(0.0);
+  /* --- 3 盏解析光：暖主光 / 冷轮廓光 / 底部补光 --- */
+  color += brdfLight(N, V, normalize(vec3( 0.55, 0.86, 0.34)), vec3(1.95, 1.60, 1.18), albedo, metal, rough);
+  color += brdfLight(N, V, normalize(vec3(-0.72, 0.22,-0.58)), vec3(0.36, 1.20, 1.90), albedo, metal, rough*0.9);
+  color += brdfLight(N, V, normalize(vec3( 0.05,-0.92, 0.38)), vec3(0.20, 0.18, 0.25), albedo, metal, rough);
+
+  /* --- IBL：镜面锥形预滤波 + 漫反射辐照度 --- */
+  vec3 R = reflect(-V, N);
+  vec3 pre = envSpecular(R, rough);
+  vec3 F = F_SchlickRough(NoV, mix(vec3(0.04), albedo, metal), rough);
+  float specOcc = mix(1.0, ao, 0.75);
+  color += pre * F * specOcc;
+  vec3 irr = mix(uAmbient, envTex(N), 0.45);
+  color += irr * albedo * (1.0 - metal) * ao;
+
+  /* --- 菲涅尔边缘光：液态金属的关键轮廓 --- */
+  float rim = pow(1.0 - NoV, 3.0);
+  color += vec3(0.34, 0.72, 1.00) * rim * 0.26 * ao;
+
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+/* --- Bloom 亮度提取（软阈值 + 拐点） --- */
+const FS_BRIGHT = GLSL_COMMON + `
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform float uThreshold, uKnee, uClamp;
+void main(){
+  // 先限幅再提亮：GGX 高光的峰值可达数百，不限幅会让 Bloom 糊成一片死白
+  vec3 c = min(texture2D(uTex, vUv).rgb, vec3(uClamp));
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float soft = clamp(l - uThreshold + uKnee, 0.0, 2.0*uKnee);
+  soft = soft*soft / max(4.0*uKnee, 1e-4);
+  float w = max(soft, l - uThreshold) / max(l, 1e-4);
+  gl_FragColor = vec4(c * w, 1.0);
+}`;
+
+/* --- 可分离高斯模糊（5 抽样线性加权） --- */
+const FS_BLUR = GLSL_COMMON + `
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main(){
+  vec3 s = texture2D(uTex, vUv).rgb * 0.227027;
+  s += (texture2D(uTex, vUv + uDir*1.3846).rgb + texture2D(uTex, vUv - uDir*1.3846).rgb) * 0.316216;
+  s += (texture2D(uTex, vUv + uDir*3.2308).rgb + texture2D(uTex, vUv - uDir*3.2308).rgb) * 0.070270;
+  gl_FragColor = vec4(s, 1.0);
+}`;
+
+/* --- 合成：Bloom 叠加 + ACES 色调映射 + 暗角 + 抖动 --- */
+const FS_COMPOSITE = GLSL_COMMON + `
+varying vec2 vUv;
+uniform sampler2D uScene, uBloomA, uBloomB;
+uniform float uBloomKA, uBloomKB, uExposure, uTime;
+/* ACES filmic（Narkowicz 拟合） */
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x + 0.03)) / (x*(2.43*x + 0.59) + 0.14), 0.0, 1.0);
+}
+void main(){
+  vec3 c = texture2D(uScene, vUv).rgb;
+  c += texture2D(uBloomA, vUv).rgb * uBloomKA;
+  c += texture2D(uBloomB, vUv).rgb * uBloomKB;
+  c *= uExposure;
+  c = aces(c);
+  // 暗角
+  vec2 q = vUv - 0.5;
+  float vig = smoothstep(1.05, 0.28, length(q)*1.42);
+  c *= mix(1.0, vig, 0.82);
+  // 线性 → sRGB
+  c = pow(max(c, 0.0), vec3(1.0/2.2));
+  // 顺序抖动，消除暗部色带
+  float d = hash12(gl_FragCoord.xy + fract(uTime)*137.0);
+  c += (d - 0.5) / 255.0;
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+/* --- FXAA（质量模式，边缘方向搜索 + 混叠抑制） --- */
+const FS_FXAA = GLSL_COMMON + `
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+void main(){
+  vec3 rgbNW = texture2D(uTex, vUv + vec2(-1.0, -1.0)*uTexel).rgb;
+  vec3 rgbNE = texture2D(uTex, vUv + vec2( 1.0, -1.0)*uTexel).rgb;
+  vec3 rgbSW = texture2D(uTex, vUv + vec2(-1.0,  1.0)*uTexel).rgb;
+  vec3 rgbSE = texture2D(uTex, vUv + vec2( 1.0,  1.0)*uTexel).rgb;
+  vec3 rgbM  = texture2D(uTex, vUv).rgb;
+  vec3 luma = vec3(0.299, 0.587, 0.114);
+  float lumaNW = dot(rgbNW, luma), lumaNE = dot(rgbNE, luma);
+  float lumaSW = dot(rgbSW, luma), lumaSE = dot(rgbSE, luma);
+  float lumaM  = dot(rgbM,  luma);
+  float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+  float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+  vec2 dir;
+  dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+  dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+  float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE)*0.25*0.03125, 0.0078125);
+  float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir*rcpDirMin, -8.0, 8.0) * uTexel;
+  vec3 rgbA = 0.5 * (texture2D(uTex, vUv + dir*(1.0/3.0 - 0.5)).rgb +
+                     texture2D(uTex, vUv + dir*(2.0/3.0 - 0.5)).rgb);
+  vec3 rgbB = rgbA*0.5 + 0.25 * (texture2D(uTex, vUv - dir*0.5).rgb +
+                                 texture2D(uTex, vUv + dir*0.5).rgb);
+  float lumaB = dot(rgbB, luma);
+  if (lumaB < lumaMin || lumaB > lumaMax) gl_FragColor = vec4(rgbA, 1.0);
+  else gl_FragColor = vec4(rgbB, 1.0);
+}`;
+
+/* ==========================================================================
+ *  6. WebGL 渲染器
+ * ========================================================================*/
+function createGLRenderer(canvas) {
+  const attrs = {
+    alpha: false, depth: false, stencil: false, antialias: false,
+    premultipliedAlpha: false, preserveDrawingBuffer: false,
+    powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false
+  };
+  let gl = null, isGL2 = false;
+  try {
+    gl = canvas.getContext('webgl2', attrs);
+    isGL2 = !!gl;
+    if (!gl) gl = canvas.getContext('webgl', attrs) || canvas.getContext('experimental-webgl', attrs);
+  } catch (e) { gl = null; }
+  if (!gl) return null;
+
+  const R = {
+    gl, isGL2,
+    api: isGL2 ? 'WebGL2' : 'WebGL1',
+    hdr: null, u32: false, ok: true,
+    scene: null, ldr: null, bA: null, bB: null, bC: null, bD: null,
+    progs: {}, envTex: null, envMips: 1,
+    quadBuf: null, meshVBO: null, meshIBO: null, idxType: 0,
+    meshCap: 0, meshCapIdx: 0,
+    w: 1, h: 1
+  };
+
+  /* --- 着色器编译 --- */
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(s);
+      gl.deleteShader(s);
+      throw new Error('shader compile: ' + log);
+    }
+    return s;
+  }
+  function makeProgram(vsSrc, fsSrc, bindings) {
+    const p = gl.createProgram();
+    const vs = compile(gl.VERTEX_SHADER, vsSrc), fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+    gl.attachShader(p, vs); gl.attachShader(p, fs);
+    if (bindings) for (const k in bindings) gl.bindAttribLocation(p, bindings[k], k);
+    gl.linkProgram(p);
+    gl.deleteShader(vs); gl.deleteShader(fs);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(p));
+    return p;
+  }
+  function uni(p, names) {
+    const o = {};
+    for (let i = 0; i < names.length; i++) o[names[i]] = gl.getUniformLocation(p, names[i]);
+    return o;
+  }
+
+  /* --- 扩展 --- */
+  const extCBF = isGL2 ? (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float')) : null;
+  const extHF = isGL2 ? null : gl.getExtension('OES_texture_half_float');
+  const extHFL = isGL2 ? null : gl.getExtension('OES_texture_half_float_linear');
+  const extU32 = isGL2 ? true : !!gl.getExtension('OES_element_index_uint');
+
+  if (isGL2 && extCBF) R.hdr = { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT };
+  else if (extHF && extHFL) R.hdr = { internal: gl.RGBA, format: gl.RGBA, type: extHF.HALF_FLOAT_OES };
+  if (!R.hdr) R.hdr = { internal: gl.RGBA, format: gl.RGBA, type: gl.UNSIGNED_BYTE };
+  const rgba8 = { internal: gl.RGBA, format: gl.RGBA, type: gl.UNSIGNED_BYTE };
+
+  function makeRT(w, h, depth) {
+    const fmt = R.hdr;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fmt.internal, w, h, 0, fmt.format, fmt.type, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    let rb = null;
+    if (depth) {
+      rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+    }
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(fb); gl.deleteTexture(tex);
+      if (rb) gl.deleteRenderbuffer(rb);
+      return null;
+    }
+    return { fb, tex, rb, w, h };
+  }
+  function delRT(rt) {
+    if (!rt) return;
+    gl.deleteFramebuffer(rt.fb); gl.deleteTexture(rt.tex);
+    if (rt.rb) gl.deleteRenderbuffer(rt.rb);
+  }
+
+  /* --- 初始化 / 重建全部 GPU 资源（上下文恢复时重放） --- */
+  R.setupGL = function () {
+    gl.clearColor(0.02, 0.025, 0.04, 1.0);
+    R.progs.bg = makeProgram(VS_QUAD, FS_BG, { aPos: 0 });
+    R.progs.bgU = uni(R.progs.bg, ['uEnv', 'uCamRight', 'uCamUp', 'uCamFwd', 'uTanHalf', 'uEnvIntensity']);
+    R.progs.surf = makeProgram(VS_SURF, FS_SURF, { aPos: 0, aNrm: 1, aAO: 2 });
+    R.progs.surfU = uni(R.progs.surf, ['uMVP', 'uCamPos', 'uEnv', 'uEnvIntensity', 'uAmbient',
+      'uMetallic', 'uRoughness', 'uAOStrength']);
+    R.progs.bright = makeProgram(VS_QUAD, FS_BRIGHT, { aPos: 0 });
+    R.progs.brightU = uni(R.progs.bright, ['uTex', 'uThreshold', 'uKnee', 'uClamp']);
+    R.progs.blur = makeProgram(VS_QUAD, FS_BLUR, { aPos: 0 });
+    R.progs.blurU = uni(R.progs.blur, ['uTex', 'uDir']);
+    R.progs.comp = makeProgram(VS_QUAD, FS_COMPOSITE, { aPos: 0 });
+    R.progs.compU = uni(R.progs.comp, ['uScene', 'uBloomA', 'uBloomB', 'uBloomKA', 'uBloomKB', 'uExposure', 'uTime']);
+    R.progs.fxaa = makeProgram(VS_QUAD, FS_FXAA, { aPos: 0 });
+    R.progs.fxaaU = uni(R.progs.fxaa, ['uTex', 'uTexel']);
+
+    // 全屏四边形（三角条带）
+    R.quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, R.quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    R.quadData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+
+    /* --- 程序化环境贴图上传（线性过滤，无需 mipmap） --- */
+    const data = buildEnvMap();
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, ENV_W, ENV_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    R.envTex = t;
+
+    gl.disable(gl.CULL_FACE);          // 元球表面双面可见更稳妥
+    gl.disable(gl.BLEND);
+    gl.depthFunc(gl.LEQUAL);
+
+    // 网格缓冲（容量随分辨率变化时重建）
+    R.meshVBO = null; R.meshIBO = null; R.meshCap = 0;
+    R.idxType = R.u32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  };
+
+  /* --- 顶点/索引缓冲 --- */
+  R.allocMesh = function (maxVerts) {
+    if (R.meshVBO && R.meshCap >= maxVerts) return;
+    if (R.meshVBO) gl.deleteBuffer(R.meshVBO);
+    if (R.meshIBO) gl.deleteBuffer(R.meshIBO);
+    R.meshVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, R.meshVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, maxVerts * STRIDE * 4, gl.DYNAMIC_DRAW);
+    R.meshIBO = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.meshIBO);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, maxVerts * 3 * (R.u32 ? 4 : 2), gl.DYNAMIC_DRAW);
+    R.meshCap = maxVerts;
+  };
+  R.u32 = extU32;
+  R.idxType = extU32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  R.setupGL();
+
+  /* --- 尺寸变化：重建所有 RT --- */
+  R.resize = function (w, h) {
+    w = Math.max(2, w | 0); h = Math.max(2, h | 0);
+    if (R.w === w && R.h === h && R.scene) return;
+    R.w = w; R.h = h;
+    delRT(R.scene); delRT(R.ldr); delRT(R.bA); delRT(R.bB); delRT(R.bC); delRT(R.bD);
+    const hw = Math.max(2, w >> 1), hh = Math.max(2, h >> 1);
+    const qw = Math.max(2, w >> 2), qh = Math.max(2, h >> 2);
+    R.scene = makeRT(w, h, true);
+    if (!R.scene && R.hdr.type !== gl.UNSIGNED_BYTE) {   // HDR 不可用 → 退化为 LDR 继续工作
+      R.hdr = rgba8;
+      R.scene = makeRT(w, h, true);
+    }
+    R.ldr = makeRT(w, h, false);
+    R.bA = (hw > 8 && hh > 8) ? makeRT(hw, hh, false) : null;
+    R.bB = (hw > 8 && hh > 8) ? makeRT(hw, hh, false) : null;
+    R.bC = (qw > 8 && qh > 8) ? makeRT(qw, qh, false) : null;
+    R.bD = (qw > 8 && qh > 8) ? makeRT(qw, qh, false) : null;
+    return R;
+  };
+
+  /* --- 绑定全屏四边形属性 --- */
+  function bindQuad(prog) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, R.quadBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.disableVertexAttribArray(1);
+    gl.disableVertexAttribArray(2);
+  }
+  function useTex(unit, tex, loc) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(loc, unit);
+  }
+  function pass(prog, target, tw, th) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.viewport(0, 0, tw, th);
+    gl.useProgram(prog);
+    bindQuad(prog);
+  }
+
+  /* --- 上传网格并绘制 --- */
+  R.uploadMesh = function (engine) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, R.meshVBO);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, engine.verts.subarray(0, engine.nv * STRIDE));
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.meshIBO);
+    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, engine.idx.subarray(0, engine.ni));
+  };
+
+  /* --- 一帧渲染 --- */
+  R.render = function (engine, cam, params, time) {
+    const MVP = params.mvp;
+    /* ==== Pass 1：场景（背景 + 雕塑）渲染到 HDR 缓冲 ==== */
+    if (!R.scene) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.scene.fb);
+    gl.viewport(0, 0, R.w, R.h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.useProgram(R.progs.bg);
+    bindQuad(R.progs.bg);
+    useTex(0, R.envTex, R.progs.bgU.uEnv);
+    gl.uniform3f(R.progs.bgU.uCamRight, cam.rx, cam.ry, cam.rz);
+    gl.uniform3f(R.progs.bgU.uCamUp, cam.ux, cam.uy, cam.uz);
+    gl.uniform3f(R.progs.bgU.uCamFwd, cam.fx, cam.fy, cam.fz);
+    gl.uniform2f(R.progs.bgU.uTanHalf, cam.tHalfX, cam.tHalfY);
+    gl.uniform1f(R.progs.bgU.uEnvIntensity, params.envIntensity);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // 清深度（深度写掩码必须先打开，否则清除被屏蔽）
+    gl.depthMask(true);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    if (engine.nv > 0) {
+      gl.useProgram(R.progs.surf);
+      gl.bindBuffer(gl.ARRAY_BUFFER, R.meshVBO);
+      const st = STRIDE * 4;
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, st, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 3, gl.FLOAT, false, st, 12);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, st, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, R.meshIBO);
+      gl.uniformMatrix4fv(R.progs.surfU.uMVP, false, MVP);
+      gl.uniform3f(R.progs.surfU.uCamPos, cam.ex, cam.ey, cam.ez);
+      useTex(0, R.envTex, R.progs.surfU.uEnv);
+      gl.uniform1f(R.progs.surfU.uEnvIntensity, params.envIntensity);
+      gl.uniform3f(R.progs.surfU.uAmbient, ENV_AMBIENT[0], ENV_AMBIENT[1], ENV_AMBIENT[2]);
+      gl.uniform1f(R.progs.surfU.uMetallic, params.metallic);
+      gl.uniform1f(R.progs.surfU.uRoughness, params.roughness);
+      gl.uniform1f(R.progs.surfU.uAOStrength, params.aoStrength);
+      gl.drawElements(gl.TRIANGLES, engine.ni, R.idxType, 0);
+    }
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+
+    /* ==== Pass 2：亮度提取（半分辨率） ==== */
+    if (R.bA) {
+      pass(R.progs.bright, R.bA.fb, R.bA.w, R.bA.h);
+      useTex(0, R.scene.tex, R.progs.brightU.uTex);
+      gl.uniform1f(R.progs.brightU.uThreshold, 1.02);
+      gl.uniform1f(R.progs.brightU.uKnee, 0.45);
+      gl.uniform1f(R.progs.brightU.uClamp, 5.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      /* ==== Pass 3/4：半分辨率双向高斯模糊 ==== */
+      gl.useProgram(R.progs.blur);
+      bindQuad(R.progs.blur);
+      pass(R.progs.blur, R.bB.fb, R.bB.w, R.bB.h);
+      useTex(0, R.bA.tex, R.progs.blurU.uTex);
+      gl.uniform2f(R.progs.blurU.uDir, 1 / R.bA.w, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      pass(R.progs.blur, R.bA.fb, R.bA.w, R.bA.h);
+      useTex(0, R.bB.tex, R.progs.blurU.uTex);
+      gl.uniform2f(R.progs.blurU.uDir, 0, 1 / R.bB.h);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      /* ==== Pass 5/6：第二层 Bloom（1/4 分辨率，更宽的辉光） ==== */
+      pass(R.progs.blur, R.bC.fb, R.bC.w, R.bC.h);
+      useTex(0, R.bA.tex, R.progs.blurU.uTex);
+      gl.uniform2f(R.progs.blurU.uDir, 0, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      pass(R.progs.blur, R.bD.fb, R.bD.w, R.bD.h);
+      useTex(0, R.bC.tex, R.progs.blurU.uTex);
+      gl.uniform2f(R.progs.blurU.uDir, 1 / R.bC.w, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      pass(R.progs.blur, R.bC.fb, R.bC.w, R.bC.h);
+      useTex(0, R.bD.tex, R.progs.blurU.uTex);
+      gl.uniform2f(R.progs.blurU.uDir, 0, 1 / R.bD.h);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    /* ==== Pass 7：合成（Bloom + ACES + 暗角 + 抖动 + sRGB） ==== */
+    pass(R.progs.comp, R.ldr.fb, R.ldr.w, R.ldr.h);
+    useTex(0, R.scene.tex, R.progs.compU.uScene);
+    useTex(1, R.bA ? R.bA.tex : R.scene.tex, R.progs.compU.uBloomA);
+    useTex(2, R.bC ? R.bC.tex : R.scene.tex, R.progs.compU.uBloomB);
+    gl.uniform1f(R.progs.compU.uBloomKA, 0.55);
+    gl.uniform1f(R.progs.compU.uBloomKB, 0.40);
+    gl.uniform1f(R.progs.compU.uExposure, params.exposure);
+    gl.uniform1f(R.progs.compU.uTime, time);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    /* ==== Pass 8：FXAA 抗锯齿 → 屏幕 ==== */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, R.w, R.h);
+    gl.useProgram(R.progs.fxaa);
+    bindQuad(R.progs.fxaa);
+    useTex(0, R.ldr.tex, R.progs.fxaaU.uTex);
+    gl.uniform2f(R.progs.fxaaU.uTexel, 1 / R.w, 1 / R.h);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+
+  R.dispose = function () {
+    delRT(R.scene); delRT(R.ldr); delRT(R.bA); delRT(R.bB); delRT(R.bC); delRT(R.bD);
+    R.scene = R.ldr = R.bA = R.bB = R.bC = R.bD = null;
+  };
+
+  /* --- 重建全部 GPU 资源（上下文丢失恢复后调用：程序/缓冲/纹理均已失效） --- */
+  R.reinit = function () {
+    R.progs = {};
+    R.envTex = null;
+    R.w = -1; R.h = -1;
+    R.scene = R.ldr = R.bA = R.bB = R.bC = R.bD = null;
+    R.setupGL();
+  };
+
+  return R;
+}
+
+/* ==========================================================================
+ *  7. Canvas 2D 回退渲染器
+ *  --------------------------------------------------------------------------
+ *  WebGL 完全不可用时的可用路径：屏幕空间 Wyvill 场累加 → 有限差分法线 →
+ *  解析金属着色。功能与 WebGL 路径一致（添加/拖拽/删除/阈值/融合/金属质感）。
+ * ========================================================================*/
+function createFallbackRenderer(canvas) {
+  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
+  if (!ctx) return null;
+  const F = {
+    api: 'Canvas2D', ctx, ok: true,
+    oc: document.createElement('canvas'),
+    octx: null, img: null, field: null, out: null,
+    w: 2, h: 2, pw: 2, ph: 2, maxPix: 82000
+  };
+  F.octx = F.oc.getContext('2d');
+  F.octx.imageSmoothingEnabled = true;
+  F.resize = function (w, h) {
+    F.w = Math.max(2, w | 0); F.h = Math.max(2, h | 0);
+    const sc = Math.min(1, Math.sqrt(F.maxPix / (F.w * F.h)));
+    F.pw = Math.max(8, Math.round(F.w * sc));
+    F.ph = Math.max(8, Math.round(F.h * sc));
+    F.oc.width = F.pw; F.oc.height = F.ph;
+    F.field = new Float32Array(F.pw * F.ph);
+    F.out = new Uint8ClampedArray(F.pw * F.ph * 4);
+    F.img = (typeof ImageData === 'function') ? new ImageData(F.out, F.pw, F.ph) : F.octx.createImageData(F.pw, F.ph);
+    F.octx.imageSmoothingEnabled = true;
+  };
+  F.uploadMesh = function () { };
+  F.allocMesh = function () { };
+
+  /** 渲染：屏幕空间元球场 + 数值梯度法线 + 金属近似着色 */
+  F.render = function (engine, cam, params) {
+    const W = F.pw, H = F.ph, field = F.field, out = F.out;
+    const mb = params.mb, iso = params.iso;
+    const gw = mb.n;
+    // 预投影所有球到屏幕空间
+    const sx = F.sx || (F.sx = new Float32Array(MAX_BALLS));
+    const sy = F.sy || (F.sy = new Float32Array(MAX_BALLS));
+    const sr = F.sr || (F.sr = new Float32Array(MAX_BALLS));
+    const sw = F.sw || (F.sw = new Float32Array(MAX_BALLS));
+    let vis = 0;
+    const cy = Math.cos(cam.pitch), sy2 = Math.sin(cam.pitch);
+    for (let i = 0; i < mb.n; i++) {
+      const dx = mb.X[i] - cam.ex, dy = mb.Y[i] - cam.ey, dz = mb.Z[i] - cam.ez;
+      const cz = dx * cam.fx + dy * cam.fy + dz * cam.fz;      // 相机空间深度
+      if (cz <= 0.15) continue;
+      const cx2 = dx * cam.rx + dy * cam.ry + dz * cam.rz;
+      const cy2 = dx * cam.ux + dy * cam.uy + dz * cam.uz;
+      const ndx = (cx2 / cz) / cam.tHalfX;
+      const ndy = (cy2 / cz) / cam.tHalfY;
+      sx[vis] = (ndx * 0.5 + 0.5) * W;
+      sy[vis] = (0.5 - ndy * 0.5) * H;
+      // 影响半径对应的屏幕半径（等值面 iso 处的可见半径约为其 0.45 倍，与 3D 一致）
+      sr[vis] = Math.max(1.5, (mb.RI[i] / cz) / cam.tHalfY * 0.5 * H);
+      sw[vis] = mb.W[i];
+      vis++;
+    }
+    const invIso = 1 / Math.max(iso, 1e-3);
+    field.fill(0);
+    for (let b = 0; b < vis; b++) {
+      const r = sr[b], r2 = r * r, w = sw[b];
+      const x0 = Math.max(0, Math.floor(sx[b] - r)), x1 = Math.min(W - 1, Math.ceil(sx[b] + r));
+      const y0 = Math.max(0, Math.floor(sy[b] - r)), y1 = Math.min(H - 1, Math.ceil(sy[b] + r));
+      for (let y = y0; y <= y1; y++) {
+        const dy = y - sy[b], dy2 = dy * dy, row = y * W;
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - sx[b];
+          const d2 = dy2 + dx * dx;
+          if (d2 < r2) { const t = 1 - d2 / r2; field[row + x] += w * t * t * t; }
+        }
+      }
+    }
+    // 有限差分法线 + 金属近似着色
+    const lx = 0.55, ly = 0.72, lz = -0.42;      // 主光方向（屏幕空间近似）
+    for (let y = 0; y < H; y++) {
+      const row = y * W;
+      for (let x = 0; x < W; x++) {
+        const idx = row + x;
+        const c = field[idx];
+        const o = idx * 4;
+        if (c < iso) {                    // 背景：深色冷调，带轻微渐变
+          const bgl = 0.5 - y / H * 0.35;
+          out[o] = 5 + bgl * 6; out[o + 1] = 7 + bgl * 9; out[o + 2] = 13 + bgl * 16; out[o + 3] = 255;
+          continue;
+        }
+        // 场值梯度 → 法线（2.5D 凹凸）
+        const l = field[row + (x > 0 ? x - 1 : x)];
+        const rr = field[row + (x < W - 1 ? x + 1 : x)];
+        const u = field[(y > 0 ? idx - W : idx)];
+        const d = field[(y < H - 1 ? idx + W : idx)];
+        const zc = Math.min(1.5, (c - iso) * invIso);      // 高度（0 在边缘，1 在球心）
+        let nx = (l - rr) * 1.5;
+        let ny = (u - d) * 1.5;
+        let nz = 0.75 + zc * 0.35;
+        const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        nx /= nl; ny /= nl; nz /= nl;
+        // 半角向量（视线 ≈ +z）
+        let hx = lx, hy = ly, hz = lz + 1.0;
+        const hl = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+        hx /= hl; hy /= hl; hz /= hl;
+        let ndh = nx * hx + ny * hy + nz * hz; if (ndh < 0) ndh = 0;
+        const ndv = Math.max(nz, 1e-3);
+        const spec = Math.pow(ndh, 120) * 3.2 + Math.pow(ndh, 10) * 0.30;
+        const diff = Math.max(0, nx * lx + ny * ly + nz * lz);
+        const fres = Math.pow(1 - ndv, 3.0);
+        // 冷暖配色：法线朝上偏铜金，朝下偏钢蓝
+        const g = clamp(0.5 + ny * 1.1 + nx * 0.35, 0, 1);
+        const sh = clamp(0.26 + diff * 0.72 + zc * 0.24, 0, 1.25);
+        const cr = (0.98 + (0.38 - 0.98) * g) * sh * 190 + spec * 215 + fres * 62;
+        const cg = (0.46 + (0.66 - 0.46) * g) * sh * 190 + spec * 200 + fres * 128;
+        const cb = (0.20 + (1.00 - 0.20) * g) * sh * 190 + spec * 185 + fres * 185;
+        out[o] = cr > 255 ? 255 : cr;
+        out[o + 1] = cg > 255 ? 255 : cg;
+        out[o + 2] = cb > 255 ? 255 : cb;
+        out[o + 3] = 255;
+      }
+    }
+    F.octx.putImageData(F.img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(F.oc, 0, 0, F.w, F.h);
+  };
+  F.dispose = function () { };
+  F.reinit = function () { };
+  return F;
+}
+
+/* ==========================================================================
+ *  8. 程序化音频（Web Audio API 合成，无外部文件）
+ * ========================================================================*/
+const Sfx = {
+  ctx: null, master: null, noise: null, enabled: true,
+  init() {
+    if (this.ctx) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { this.enabled = false; return; }
+      const c = new AC();
+      const g = c.createGain();
+      g.gain.value = 0.26;
+      g.connect(c.destination);
+      // 预生成一段噪声缓冲（爆炸声用）
+      const len = Math.floor(c.sampleRate * 0.7);
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const d = buf.getChannelData(0);
+      const rnd = mulberry32(7);
+      for (let i = 0; i < len; i++) d[i] = (rnd() * 2 - 1) * (1 - i / len);
+      this.noise = buf;
+      this.ctx = c; this.master = g;
+    } catch (e) { this.enabled = false; }
+  },
+  resume() {
+    this.init();
+    try { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); } catch (e) { }
+  },
+  tone(freq, dur, type, vol, slideTo) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    try {
+      const c = this.ctx, t = c.currentTime;
+      const o = c.createOscillator(), g = c.createGain(), f = c.createBiquadFilter();
+      o.type = type || 'triangle';
+      o.frequency.setValueAtTime(freq, t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(30, slideTo), t + dur);
+      f.type = 'lowpass'; f.frequency.setValueAtTime(4200, t);
+      f.frequency.exponentialRampToValueAtTime(900, t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol || 0.22, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(f); f.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + dur + 0.03);
+    } catch (e) { }
+  },
+  noiseHit(dur, cutoff, vol) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || !this.noise) return;
+    try {
+      const c = this.ctx, t = c.currentTime;
+      const s = c.createBufferSource(); s.buffer = this.noise;
+      const f = c.createBiquadFilter(); f.type = 'lowpass';
+      f.frequency.setValueAtTime(cutoff, t);
+      f.frequency.exponentialRampToValueAtTime(120, t + dur);
+      const g = c.createGain();
+      g.gain.setValueAtTime(vol || 0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      s.connect(f); f.connect(g); g.connect(this.master);
+      s.start(t); s.stop(t + dur);
+    } catch (e) { }
+  },
+  add(r) { this.tone(520 + 520 * clamp(r, 0, 2), 0.16, 'triangle', 0.18, 300); },
+  remove() { this.tone(420, 0.22, 'sawtooth', 0.14, 90); },
+  explode() {
+    this.noiseHit(0.85, 2600, 0.55);
+    this.tone(120, 0.9, 'sine', 0.42, 32);
+    this.tone(220, 0.5, 'triangle', 0.16, 60);
+  },
+  ui() { this.tone(1180, 0.06, 'sine', 0.07); }
+};
+
+/* ==========================================================================
+ *  9. 相机与交互
+ * ========================================================================*/
+const cam = {
+  yaw: 0.72, pitch: 0.22, dist: 5.4,
+  tyaw: 0.72, tpitch: 0.22, tdist: 5.4,
+  ex: 0, ey: 0, ez: 0,
+  fx: 0, fy: 0, fz: -1,
+  rx: 1, ry: 0, rz: 0,
+  ux: 0, uy: 1, uz: 0,
+  fov: 46 * DEG,
+  tHalfX: 1, tHalfY: 1,
+  /** 阻尼插值 + 基向量更新（暂停恢复后不会跳变，因为用固定上限 dt） */
+  update(dt, aspect) {
+    const k = 1 - Math.exp(-10 * clamp(dt, 0, 0.05));
+    this.yaw += (this.tyaw - this.yaw) * k;
+    this.pitch += (this.tpitch - this.pitch) * k;
+    this.dist += (this.tdist - this.dist) * k;
+    this.pitch = clamp(this.pitch, -1.42, 1.42);
+    this.dist = clamp(this.dist, 3.0, 20);
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+    const dx = cp * sy, dy = sp, dz = cp * cy;             // 目标 → 相机
+    this.ex = dx * this.dist; this.ey = dy * this.dist + 0.15; this.ez = dz * this.dist;
+    this.fx = -dx; this.fy = -dy; this.fz = -dz;
+    // 右向量 = normalize(cross(forward, worldUp))，worldUp=(0,1,0) → (-fz, 0, fx)
+    const rx = -this.fz, ry = 0, rz = this.fx;
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    this.rx = rx / rl; this.ry = ry / rl; this.rz = rz / rl;
+    // 上向量 = cross(right, forward)
+    this.ux = this.ry * this.fz - this.rz * this.fy;
+    this.uy = this.rz * this.fx - this.rx * this.fz;
+    this.uz = this.rx * this.fy - this.ry * this.fx;
+    this.tHalfY = Math.tan(this.fov * 0.5);
+    this.tHalfX = this.tHalfY * aspect;
+  },
+  /** 屏幕归一化坐标 → 世界射线 */
+  ray(nx, ny, out) {
+    const a = this.fx + this.rx * nx * this.tHalfX + this.ux * ny * this.tHalfY;
+    const b = this.fy + this.ry * nx * this.tHalfX + this.uy * ny * this.tHalfY;
+    const c = this.fz + this.rz * nx * this.tHalfX + this.uz * ny * this.tHalfY;
+    const l = Math.hypot(a, b, c) || 1;
+    out[0] = a / l; out[1] = b / l; out[2] = c / l;
+    out[3] = this.ex; out[4] = this.ey; out[5] = this.ez;
+    return out;
+  }
+};
+
+/* ==========================================================================
+ *  10. 应用主体
+ * ========================================================================*/
+function boot() {
+  const canvas = document.getElementById('gl');
+  const $ = (id) => document.getElementById(id);
+  const stats = { fps: $('s-fps'), api: $('s-api'), res: $('s-res'), vert: $('s-vert'), tri: $('s-tri'), balls: $('s-balls'), build: $('s-build') };
+  const badge = $('badge');
+  const toastEl = $('toast');
+
+  /* ---------- 参数 ---------- */
+  const params = {
+    iso: 0.52, fusion: 1.0, metallic: 1.0, roughness: 0.14,
+    aoStrength: 1.0, envIntensity: 1.85, exposure: 0.85
+  };
+  const mb = new MetaField();
+  const engine = new MCEngine();
+
+  const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const isMobile = isTouch && Math.min(screen.width, screen.height) < 820;
+  const cores = navigator.hardwareConcurrency || 4;
+
+  /* 分辨率档位：依据设备性能自动初选 */
+  const RES_LEVELS = [32, 48, 64];
+  let resLevel = isMobile ? 0 : (cores >= 8 ? 2 : 1);
+  let maxRenderPixels = isMobile ? 900000 : 2600000;
+
+  /* ---------- 渲染器：WebGL 优先，失败回退 Canvas2D ---------- */
+  let glr = null, renderer = null;
+  try { glr = createGLRenderer(canvas); } catch (e) { glr = null; }
+  if (glr) renderer = glr;
+  else {
+    try { renderer = createFallbackRenderer(canvas); } catch (e) { renderer = null; }
+  }
+  if (!renderer) {
+    // 极端情况：连 2D 上下文都没有 —— 至少给出可读提示，绝不白屏
+    const c2 = canvas.getContext('2d');
+    if (c2) { c2.fillStyle = '#05070c'; c2.fillRect(0, 0, canvas.width, canvas.height); }
+    badge.textContent = 'NO RENDERER';
+    return;
+  }
+  const useGL = !!glr;
+  badge.textContent = (useGL ? (glr.isGL2 ? 'WEBGL2' : 'WEBGL1') : 'CANVAS 2D') + ' · REALTIME';
+
+  /* ---------- 雕塑编队 ---------- */
+  const FORMATION = [];
+  (function buildFormation() {
+    // 螺旋主干：球心较近 → 充分融合成一根带扭转的雕塑主体
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5;
+      const a = t * Math.PI * 1.55 + 0.5;
+      const rr = 0.66 - 0.18 * t;
+      FORMATION.push({ x: Math.cos(a) * rr, y: -0.96 + 1.92 * t, z: Math.sin(a) * rr, r: 1.02 - 0.10 * t });
+    }
+    FORMATION.push({ x: 0.05, y: 0.05, z: -0.04, r: 0.86 });   // 核心球
+    FORMATION.push({ x: -0.96, y: 0.66, z: 0.40, r: 0.62 });   // 侧翼：与主体融合出可见"颈部"
+    FORMATION.push({ x: 0.88, y: -0.71, z: -0.38, r: 0.58 });
+    FORMATION.push({ x: -0.34, y: -1.14, z: 0.50, r: 0.52 });
+  })();
+  const SCATTER = FORMATION.map(b => {
+    const l = Math.hypot(b.x, b.y, b.z) || 1;
+    const k = 1.95 / Math.max(l, 0.001);
+    return { x: b.x * k, y: b.y * k, z: b.z * k };
+  });
+
+  let introT = 0;              // 开场 2 秒融合动画进度
+  const INTRO_DUR = 2.0;
+  let exploding = false;
+  let demoMode = false, idleTime = 0, demoTimer = 0, demoTick = 0;
+  let time = 0;
+
+  function resetSculpture(full) {
+    mb.clear();
+    for (let i = 0; i < FORMATION.length; i++) {
+      const f = FORMATION[i];
+      const s = SCATTER[i];
+      const k = full ? (introT >= 1 ? 1 : introT) : 1;
+      const e = k * k * (3 - 2 * k);              // smoothstep 缓动
+      mb.add(lerp(s.x, f.x, e), lerp(s.y, f.y, e), lerp(s.z, f.z, e), lerp(f.r * 0.55, f.r, e), 1);
+    }
+    mb.rScale = 1;
+    mb.refreshRadii();
+    exploding = false;
+    engine.dirty = true;
+    params.iso = 0.52; params.fusion = 1.0; params.metallic = 1.0; params.roughness = 0.14;
+    syncUI();
+    if (full) { introT = 0; }
+  }
+
+  /* 复位球 i 到编队位置 */
+  function reseat(i) {
+    if (i < 0 || i >= mb.n) return;
+    mb.BX[i] = FORMATION[i % FORMATION.length].x;
+    mb.BY[i] = FORMATION[i % FORMATION.length].y;
+    mb.BZ[i] = FORMATION[i % FORMATION.length].z;
+  }
+
+  /* ---------- 尺寸 ---------- */
+  let cssW = 1, cssH = 1, dpr = 1, renderScale = 1, fbW = 1, fbH = 1;
+  function layout() {
+    const r = canvas.getBoundingClientRect();
+    cssW = Math.max(2, Math.round(r.width || window.innerWidth));
+    cssH = Math.max(2, Math.round(r.height || window.innerHeight));
+    const maxDpr = isMobile ? 1.6 : 2;
+    dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+    let px = cssW * cssH * dpr * dpr;
+    renderScale = px > maxRenderPixels ? Math.sqrt(maxRenderPixels / px) : 1;
+    // Canvas2D 回退使用更低的内部缓冲
+    const eff = useGL ? renderScale : Math.min(renderScale, 0.85);
+    fbW = Math.max(2, Math.round(cssW * dpr * eff));
+    fbH = Math.max(2, Math.round(cssH * dpr * eff));
+    if (canvas.width !== fbW || canvas.height !== fbH) {
+      canvas.width = fbW; canvas.height = fbH;
+    }
+    renderer.resize(fbW, fbH);
+    if (useGL) {
+      engine.resize(RES_LEVELS[resLevel], 4.4, glr.u32);
+      renderer.allocMesh(engine.maxVerts);
+    } else {
+      engine.resize(RES_LEVELS[Math.min(resLevel, 1)], 4.4, true);
+    }
+    engine.dirty = true;
+  }
+
+  /* ---------- 网格重建（仅 WebGL 路径需要 CPU 端 MC；2D 回退自带屏幕空间场） ---------- */
+  let buildMs = 0;
+  function rebuild() {
+    if (!useGL) { engine.dirty = false; return; }
+    const t0 = (performance && performance.now) ? performance.now() : Date.now();
+    engine.build(mb, params.iso);
+    const t1 = (performance && performance.now) ? performance.now() : Date.now();
+    buildMs = buildMs * 0.85 + (t1 - t0) * 0.15;
+    renderer.allocMesh(engine.maxVerts);
+    renderer.uploadMesh(engine);
+    engine.dirty = false;
+  }
+
+  /* ---------- 事件：指针 ---------- */
+  const rayTmp = new Float32Array(6);
+  const pick = { mode: 0, idx: -1, pointerId: -1, sx: 0, sy: 0, moved: 0, downTime: 0, longTimer: 0, plane: 0 };
+  const pointers = new Map();
+  let pinchDist = 0, pinchActive = false;
+
+  function ndc(ev) {
+    const r = canvas.getBoundingClientRect();
+    return [((ev.clientX - r.left) / Math.max(1, r.width)) * 2 - 1,
+            -(((ev.clientY - r.top) / Math.max(1, r.height)) * 2 - 1)];
+  }
+  /** 射线与球体求交，返回最近命中的元球索引 */
+  function pickBall(ro) {
+    let best = -1, bestT = 1e9;
+    for (let i = 0; i < mb.n; i++) {
+      const r = mb.RI[i] * MetaField.visibleFactor(params.iso);
+      const ox = mb.X[i] - ro[3], oy = mb.Y[i] - ro[4], oz = mb.Z[i] - ro[5];
+      const tca = ox * ro[0] + oy * ro[1] + oz * ro[2];
+      if (tca < 0) continue;
+      const d2 = ox * ox + oy * oy + oz * oz - tca * tca;
+      const r2 = r * r * 1.35;                    // 稍微放大，便于点选
+      if (d2 > r2) continue;
+      const thc = Math.sqrt(r2 - d2);
+      const t = tca - thc;
+      if (t < bestT) { bestT = t; best = i; }
+    }
+    return best;
+  }
+  /** 射线与隐式等值面求交（固定步长前进），返回命中点或 null */
+  function rayMarch(ro) {
+    const step = engine.size / RES_LEVELS[resLevel] * 1.6;
+    for (let t = 0.35; t < 14; t += step) {
+      const x = ro[3] + ro[0] * t, y = ro[4] + ro[1] * t, z = ro[5] + ro[2] * t;
+      if (x < -2.15 || x > 2.15 || y < -2.15 || y > 2.15 || z < -2.15 || z > 2.15) break;
+      if (mb.fieldAt(x, y, z) >= params.iso) return [x, y, z];
+    }
+    // 未命中则落在过原点、面向相机的平面上（保证"点击空白加球"总能生效）
+    const denom = ro[0] * cam.fx + ro[1] * cam.fy + ro[2] * cam.fz;
+    if (Math.abs(denom) > 1e-4) {
+      const t = -(ro[3] * cam.fx + ro[4] * cam.fy + ro[5] * cam.fz) / denom;
+      if (t > 0.3 && t < 30) {
+        return [clamp(ro[3] + ro[0] * t, -1.9, 1.9),
+                clamp(ro[4] + ro[1] * t, -1.9, 1.9),
+                clamp(ro[5] + ro[2] * t, -1.9, 1.9)];
+      }
+    }
+    return null;
+  }
+
+  function addBallAt(p) {
+    if (mb.n >= MAX_BALLS) {
+      // 超上限：移除最早的一个，保持数量稳定
+      mb.removeAt(0);
+    }
+    const idx = mb.add(clamp(p[0], -1.95, 1.95), clamp(p[1], -1.95, 1.95), clamp(p[2], -1.95, 1.95), 0.95 + Math.random() * 0.35, 1);
+    mb.refreshRadii();
+    engine.dirty = true;
+    Sfx.add(mb.R[idx]);
+    toast('已添加元球 · ' + mb.n + '/' + MAX_BALLS);
+  }
+  function removeBall(i) {
+    if (i < 0 || i >= mb.n) return;
+    mb.removeAt(i);
+    engine.dirty = true;
+    Sfx.remove();
+    toast('已删除元球 · ' + mb.n + '/' + MAX_BALLS);
+  }
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  canvas.addEventListener('pointerdown', (e) => {
+    Sfx.resume();
+    wake();
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const n = ndc(e);
+    const ro = cam.ray(n[0], n[1], rayTmp);
+    if (e.button === 2 || e.pointerType === 'mouse' && e.buttons === 2) {
+      // 右键：删除命中元球
+      const b = pickBall(ro);
+      if (b >= 0) removeBall(b);
+      return;
+    }
+    if (pointers.size >= 2) {
+      // 双指：进入捏合缩放
+      pinchActive = true;
+      const it = pointers.values();
+      const a = it.next().value, b = it.next().value;
+      pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      pick.mode = 0; pick.pointerId = -1;
+      return;
+    }
+    const hit = pickBall(ro);
+    pick.sx = e.clientX; pick.sy = e.clientY; pick.moved = 0;
+    pick.downTime = time;
+    if (hit >= 0) {
+      pick.mode = 2; pick.idx = hit; pick.pointerId = e.pointerId;
+      // 记录拖拽平面（过球心、垂直于视线）
+      const cz = (mb.X[hit] - cam.ex) * cam.fx + (mb.Y[hit] - cam.ey) * cam.fy + (mb.Z[hit] - cam.ez) * cam.fz;
+      pick.plane = cz;
+    } else {
+      pick.mode = 1; pick.idx = -1; pick.pointerId = e.pointerId;   // 待定：旋转 or 点击添加
+      // 长按空白 = 自动演示接管（无副作用），长按球体 = 删除
+      clearTimeout(pick.longTimer);
+      pick.longTimer = setTimeout(() => {
+        if (pick.mode === 1 && pick.moved < 7) { /* 空白长按：不做破坏性操作 */ }
+      }, 550);
+    }
+    if (pick.idx >= 0) {
+      clearTimeout(pick.longTimer);
+      pick.longTimer = setTimeout(() => {
+        if (pick.mode === 2 && pick.moved < 9) { removeBall(pick.idx); pick.mode = 0; pick.idx = -1; }
+      }, 560);
+    }
+    canvas.classList.add('dragging');
+    if (useGL) engine.dirty = true;
+  }, { passive: true });
+
+  window.addEventListener('pointermove', (e) => {
+    if (pointers.has(e.pointerId)) { const p = pointers.get(e.pointerId); p.x = e.clientX; p.y = e.clientY; }
+    if (pointers.size >= 2 && pinchActive) {
+      const it = pointers.values();
+      const a = it.next().value, b = it.next().value;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist > 4) cam.tdist = clamp(cam.tdist * (pinchDist / Math.max(1, d)), 3.0, 20);
+      pinchDist = d;
+      wake();
+      return;
+    }
+    if (pick.mode === 0 || pick.pointerId !== e.pointerId) return;
+    const dx = e.clientX - pick.sx, dy = e.clientY - pick.sy;
+    pick.moved = Math.max(pick.moved, Math.hypot(dx, dy));
+    if (pick.mode === 1 && pick.moved > 6) { pick.mode = 1.5; clearTimeout(pick.longTimer); }  // 转为旋转
+    if (pick.mode === 1.5) {
+      cam.tyaw -= (e.clientX - pick.sx) * 0.0052;
+      cam.tpitch += (e.clientY - pick.sy) * 0.0045;
+      cam.tpitch = clamp(cam.tpitch, -1.42, 1.42);
+      pick.sx = e.clientX; pick.sy = e.clientY;
+    } else if (pick.mode === 2) {
+      // 拖拽元球：射线与过球心的相机平面求交
+      const n = ndc(e);
+      const ro = cam.ray(n[0], n[1], rayTmp);
+      const denom = ro[0] * cam.fx + ro[1] * cam.fy + ro[2] * cam.fz;
+      if (Math.abs(denom) > 1e-5) {
+        const ox = cam.ex + cam.fx * pick.plane - ro[3];
+        const oy = cam.ey + cam.fy * pick.plane - ro[4];
+        const oz = cam.ez + cam.fz * pick.plane - ro[5];
+        const t = (ox * cam.fx + oy * cam.fy + oz * cam.fz) / denom;
+        if (t > 0.2 && t < 30) {
+          const i = pick.idx;
+          mb.X[i] = mb.BX[i] = clamp(ro[3] + ro[0] * t, -2.0, 2.0);
+          mb.Y[i] = mb.BY[i] = clamp(ro[4] + ro[1] * t, -2.0, 2.0);
+          mb.Z[i] = mb.BZ[i] = clamp(ro[5] + ro[2] * t, -2.0, 2.0);
+          mb.VX[i] = mb.VY[i] = mb.VZ[i] = 0;
+          engine.dirty = true;
+        }
+      }
+      pick.sx = e.clientX; pick.sy = e.clientY;
+    }
+    wake();
+  }, { passive: true });
+
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchActive = false;
+    if (pick.pointerId !== e.pointerId) return;
+    clearTimeout(pick.longTimer);
+    if (pick.mode === 1 && pick.moved < 7 && (time - pick.downTime) < 0.6) {
+      // 点击空白 → 添加元球（优先落在等值面上）
+      const n = ndc(e);
+      const ro = cam.ray(n[0], n[1], rayTmp);
+      const p = rayMarch(ro);
+      if (p) addBallAt(p);
+    }
+    pick.mode = 0; pick.idx = -1; pick.pointerId = -1;
+    canvas.classList.remove('dragging');
+  }
+  window.addEventListener('pointerup', endPointer, { passive: true });
+  window.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); pick.mode = 0; pick.pointerId = -1; canvas.classList.remove('dragging'); }, { passive: true });
+
+  canvas.addEventListener('wheel', (e) => {
+    Sfx.resume(); wake();
+    e.preventDefault();
+    const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    cam.tdist = clamp(cam.tdist * Math.exp(d * 0.0011), 3.0, 20);
+  }, { passive: false });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    Sfx.resume(); wake();
+    const k = e.key.toLowerCase();
+    if (k === ' ') { e.preventDefault(); explode(); }
+    else if (k === 'r') { resetSculpture(true); toast('已重置雕塑'); Sfx.ui(); }
+    else if (k === 'h') { document.body.classList.toggle('noui'); }
+    else if (k === '1') setRes(0);
+    else if (k === '2') setRes(1);
+    else if (k === '3') setRes(2);
+    else if (k === 't') { params.iso = clamp(params.iso + 0.06, 0.1, 1.4); syncUI(); engine.dirty = true; }
+    else if (k === 'g') { params.iso = clamp(params.iso - 0.06, 0.1, 1.4); syncUI(); engine.dirty = true; }
+  });
+
+  function setRes(l) {
+    l = clamp(l | 0, 0, 2);
+    if (l === resLevel) return;
+    resLevel = l;
+    engine.resize(RES_LEVELS[resLevel], 4.4);
+    if (useGL) renderer.allocMesh(engine.maxVerts);
+    engine.dirty = true;
+    Sfx.ui();
+    toast('网格分辨率 ' + RES_LEVELS[resLevel] + '³');
+  }
+  let toastT = 0;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('on');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toastEl.classList.remove('on'), 1400);
+  }
+
+  /* 任意交互 → 退出自动演示（相机状态连续，无跳变） */
+  function wake() {
+    idleTime = 0;
+    if (demoMode) { demoMode = false; }
+  }
+
+  /* ---------- 爆炸 / 重组 ---------- */
+  function explode() {
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < mb.n; i++) { cx += mb.X[i]; cy += mb.Y[i]; cz += mb.Z[i]; }
+    cx /= Math.max(1, mb.n); cy /= Math.max(1, mb.n); cz /= Math.max(1, mb.n);
+    for (let i = 0; i < mb.n; i++) {
+      let dx = mb.X[i] - cx, dy = mb.Y[i] - cy, dz = mb.Z[i] - cz;
+      let l = Math.hypot(dx, dy, dz);
+      if (l < 1e-3) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; l = Math.hypot(dx, dy, dz) || 1; }
+      const sp = 4.2 + Math.random() * 3.4;
+      mb.VX[i] += dx / l * sp + (Math.random() - 0.5) * 1.4;
+      mb.VY[i] += dy / l * sp + (Math.random() - 0.5) * 1.4 + 0.7;
+      mb.VZ[i] += dz / l * sp + (Math.random() - 0.5) * 1.4;
+    }
+    mb.rScale = 0.52;                 // 半径收缩 → 球体分离
+    mb.refreshRadii();
+    exploding = true;
+    engine.dirty = true;
+    Sfx.explode();
+    toast('爆炸分裂 → 缓慢融合重组');
+  }
+
+  /* ---------- 物理与动画更新 ---------- */
+  const K_SPRING = 9.5, DAMP = 2.6;
+  function updateScalars(dt) {
+    // 开场融合动画
+    if (introT < 1) {
+      introT = Math.min(1, introT + dt / INTRO_DUR);
+      const e = introT * introT * (3 - 2 * introT);
+      for (let i = 0; i < mb.n && i < SCATTER.length; i++) {
+        const f = FORMATION[i], s = SCATTER[i];
+        const x = lerp(s.x, f.x, e), y = lerp(s.y, f.y, e), z = lerp(s.z, f.z, e);
+        mb.X[i] = mb.BX[i] = x; mb.Y[i] = mb.BY[i] = y; mb.Z[i] = mb.BZ[i] = z;
+        mb.R[i] = lerp(f.r * 0.55, f.r, e);
+      }
+      mb.refreshRadii();
+      engine.dirty = true;
+    }
+    // 半径动画回弹
+    if (mb.rScale < 0.999) {
+      mb.rScale += (1 - mb.rScale) * (1 - Math.exp(-1.55 * dt));
+      if (mb.rScale > 0.995) mb.rScale = 1;
+      mb.refreshRadii();
+    }
+    // 弹簧回归 + 阻尼（爆炸重组、自动演示移动都走同一套机制）
+    let moving = false;
+    const damp = Math.exp(-DAMP * dt);
+    for (let i = 0; i < mb.n; i++) {
+      const ax = (mb.BX[i] - mb.X[i]) * K_SPRING;
+      const ay = (mb.BY[i] - mb.Y[i]) * K_SPRING;
+      const az = (mb.BZ[i] - mb.Z[i]) * K_SPRING;
+      let vx = (mb.VX[i] + ax * dt) * damp;
+      let vy = (mb.VY[i] + ay * dt) * damp;
+      let vz = (mb.VZ[i] + az * dt) * damp;
+      const ddx = vx * dt, ddy = vy * dt, ddz = vz * dt;
+      if (Math.abs(ddx) + Math.abs(ddy) + Math.abs(ddz) > 6e-5) {
+        mb.X[i] = clamp(mb.X[i] + ddx, -2.1, 2.1);
+        mb.Y[i] = clamp(mb.Y[i] + ddy, -2.1, 2.1);
+        mb.Z[i] = clamp(mb.Z[i] + ddz, -2.1, 2.1);
+        moving = true;
+      } else {
+        vx = vy = vz = 0;
+        // 残余误差一次性吸附到基准（远小于一个体素，视觉无跳变）
+        if (Math.abs(mb.BX[i] - mb.X[i]) + Math.abs(mb.BY[i] - mb.Y[i]) + Math.abs(mb.BZ[i] - mb.Z[i]) > 5e-4) {
+          mb.X[i] = mb.BX[i]; mb.Y[i] = mb.BY[i]; mb.Z[i] = mb.BZ[i];
+          moving = true;
+        }
+      }
+      mb.VX[i] = vx; mb.VY[i] = vy; mb.VZ[i] = vz;
+    }
+    if (moving) engine.dirty = true;
+    if (exploding && mb.rScale >= 0.999) exploding = false;
+  }
+
+  /* ---------- 自动演示（静止 5 秒后） ---------- */
+  function updateDemo(dt) {
+    idleTime += dt;
+    if (!demoMode && idleTime > 5.0 && pick.mode === 0) {
+      demoMode = true;
+      demoTimer = 0; demoTick = 0;
+      toast('自动演示模式 · 操作即可接管');
+    }
+    if (!demoMode) return;
+    cam.tyaw += dt * 0.115;
+    cam.tpitch = 0.16 + Math.sin(time * 0.21) * 0.20;
+    cam.tdist = 5.4 + Math.sin(time * 0.17) * 1.05;
+    demoTimer += dt;
+    if (demoTimer > 1.7) {
+      demoTimer = 0;
+      demoTick++;
+      if (demoTick % 4 === 3) {
+        // 每隔一段时间增删元球
+        if (mb.n < MAX_BALLS && Math.random() < 0.7) {
+          const a = Math.random() * TAU, b = Math.acos(Math.random() * 2 - 1);
+          const rr = 0.8 + Math.random() * 0.7;
+          addBallAt([Math.sin(b) * Math.cos(a) * rr, Math.cos(b) * rr * 0.9, Math.sin(b) * Math.sin(a) * rr]);
+        } else if (mb.n > 4) {
+          removeBall((Math.random() * mb.n) | 0);
+        }
+      } else {
+        // 移动一个球基座（弹簧会平滑过去，不会闪烁）
+        const i = (Math.random() * mb.n) | 0;
+        const a = Math.random() * TAU, b = Math.acos(Math.random() * 2 - 1);
+        const rr = 0.6 + Math.random() * 0.9;
+        mb.BX[i] = Math.sin(b) * Math.cos(a) * rr;
+        mb.BY[i] = Math.cos(b) * rr * 0.85;
+        mb.BZ[i] = Math.sin(b) * Math.sin(a) * rr;
+      }
+    }
+  }
+
+  /* ---------- UI 绑定 ---------- */
+  const sliders = [
+    { id: 'iso', el: $('p-iso'), v: $('v-iso'), fmt: (x) => x.toFixed(2), apply: (x) => { params.iso = x; engine.dirty = true; } },
+    { id: 'fuse', el: $('p-fuse'), v: $('v-fuse'), fmt: (x) => x.toFixed(2), apply: (x) => { params.fusion = x; mb.refreshRadii(); } },
+    { id: 'metal', el: $('p-metal'), v: $('v-metal'), fmt: (x) => x.toFixed(2), apply: (x) => { params.metallic = x; } },
+    { id: 'rough', el: $('p-rough'), v: $('v-rough'), fmt: (x) => x.toFixed(2), apply: (x) => { params.roughness = x; } }
+  ];
+  sliders.forEach(s => {
+    s.el.addEventListener('input', () => {
+      const x = parseFloat(s.el.value);
+      s.v.textContent = s.fmt(x);
+      s.apply(x);
+      wake();
+    });
+    s.el.addEventListener('pointerdown', () => { Sfx.resume(); });
+  });
+  function syncUI() {
+    const set = (el, v) => { if (el) el.value = String(v); };
+    set($('p-iso'), params.iso); $('v-iso').textContent = params.iso.toFixed(2);
+    set($('p-fuse'), params.fusion); $('v-fuse').textContent = params.fusion.toFixed(2);
+    set($('p-metal'), params.metallic); $('v-metal').textContent = params.metallic.toFixed(2);
+    set($('p-rough'), params.roughness); $('v-rough').textContent = params.roughness.toFixed(2);
+  }
+
+  /* ---------- 尺寸监听 ---------- */
+  let resizePending = false;
+  function onResize() {
+    if (resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(() => { resizePending = false; layout(); });
+  }
+  window.addEventListener('resize', onResize, { passive: true });
+  window.addEventListener('orientationchange', onResize, { passive: true });
+
+  /* ---------- 上下文丢失 / 恢复 ---------- */
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    contextLost = true;
+    if (raf) cancelAnimationFrame(raf), raf = 0;
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    contextLost = false;
+    try {
+      glr.reinit();
+      layout();
+      engine.dirty = true;
+      rebuild();
+    } catch (err) { /* 恢复失败则保持静默，避免未捕获异常 */ }
+    last = 0;
+    if (!raf) raf = requestAnimationFrame(frame);
+  }, false);
+
+  /* ---------- 可见性 / 失焦：暂停渲染，恢复后重置时钟（不跳变） ---------- */
+  let hidden = false, last = 0, raf = 0;
+  function stopLoop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  function startLoop() { if (!raf && !contextLost && !hidden) { last = 0; raf = requestAnimationFrame(frame); } }
+  document.addEventListener('visibilitychange', () => {
+    hidden = document.hidden;
+    if (hidden) stopLoop(); else startLoop();
+  });
+  window.addEventListener('blur', () => { if (!document.hidden) { hidden = true; stopLoop(); } });
+  window.addEventListener('focus', () => { if (!document.hidden) { hidden = false; startLoop(); } });
+
+  /* ---------- 自适应画质 ---------- */
+  let fpsAvg = 60, slowFrames = 0;
+
+  /* ---------- 主循环 ---------- */
+  const mvp = new Float32Array(16);
+  const mProj = new Float32Array(16);
+  const mView = new Float32Array(16);
+  function frame(now) {
+    raf = requestAnimationFrame(frame);
+    if (contextLost) return;
+    const tnow = now || (performance && performance.now ? performance.now() : Date.now());
+    if (!last) last = tnow;
+    let dt = (tnow - last) / 1000;
+    last = tnow;
+    if (!(dt > 0)) dt = 1 / 60;
+    dt = Math.min(dt, 0.05);           // 卡顿/切后台回来时钳制，避免时间跳变
+    time += dt;
+
+    // FPS 统计（指数滑动平均）
+    const inst = 1 / Math.max(dt, 1e-4);
+    fpsAvg += (inst - fpsAvg) * 0.08;
+
+    updateScalars(dt);
+    updateDemo(dt);
+    cam.update(dt, fbW / Math.max(1, fbH));
+
+    if (engine.dirty) rebuild();
+
+    // 自适应：持续低于 ~48fps 时自动降档（只降不升，避免来回抖动）
+    if (fpsAvg < 48 && time > 1.5) {
+      slowFrames++;
+      if (slowFrames > 110) {
+        slowFrames = 0;
+        if (resLevel > 0) { setRes(resLevel - 1); toast('性能自适应：降至 ' + RES_LEVELS[resLevel] + '³'); }
+        else if (maxRenderPixels > 900000 && !useGL) { maxRenderPixels = 560000; layout(); }
+        else if (renderScale > 0.72 && useGL) { maxRenderPixels = Math.floor(maxRenderPixels * 0.72); layout(); toast('性能自适应：降低渲染分辨率'); }
+      }
+    } else slowFrames = 0;
+
+    // 视图/投影矩阵
+    m4.perspective(mProj, cam.fov, fbW / Math.max(1, fbH), 0.1, 100);
+    m4.viewFromBasis(mView, cam.ex, cam.ey, cam.ez, cam.rx, cam.ry, cam.rz, cam.ux, cam.uy, cam.uz, cam.fx, cam.fy, cam.fz);
+    m4.mul(mvp, mProj, mView);
+
+    const rp = {
+      mvp: mvp, mb: mb, iso: params.iso, metallic: params.metallic, roughness: params.roughness,
+      aoStrength: params.aoStrength, envIntensity: params.envIntensity, exposure: params.exposure
+    };
+    try {
+      renderer.render(engine, cam, rp, time);
+    } catch (err) {
+      // 渲染异常：停止循环，避免刷屏的错误输出
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      return;
+    }
+
+    // HUD（每 6 帧刷新一次，降低 DOM 开销）
+    if ((frameCount++ & 5) === 0) {
+      stats.fps.textContent = fpsAvg.toFixed(0);
+      stats.api.textContent = renderer.api;
+      stats.res.textContent = RES_LEVELS[useGL ? resLevel : Math.min(resLevel, 1)] + '³';
+      stats.vert.textContent = engine.nv.toLocaleString('en-US');
+      stats.tri.textContent = engine.triangles.toLocaleString('en-US');
+      stats.balls.textContent = String(mb.n);
+      stats.build.textContent = buildMs.toFixed(1) + 'ms';
+    }
+  }
+  let frameCount = 0;
+
+  /* ---------- 启动 ---------- */
+  layout();
+  resetSculpture(true);
+  rebuild();
+  const rnd = mulberry32(4);
+  cam.tyaw = cam.yaw = 0.7 + rnd() * 0.2;
+  cam.tpitch = cam.pitch = 0.22;
+  /* 对外暴露轻量运行时句柄（便于二次开发 / 自动化测试，不影响渲染热路径） */
+  window.MetaballSculpture = {
+    field: mb, camera: cam, mesh: engine, params: params,
+    state: function () {
+      return { intro: introT, demo: demoMode, hidden: hidden, running: raf !== 0, time: time,
+               resolution: RES_LEVELS[useGL ? resLevel : Math.min(resLevel, 1)], api: renderer.api };
+    }
+  };
+  raf = requestAnimationFrame(frame);
+
+  // 首次交互启动音频上下文
+  const kick = () => { Sfx.resume(); };
+  window.addEventListener('pointerdown', kick, { once: true, passive: true });
+  window.addEventListener('keydown', kick, { once: true });
+  window.addEventListener('touchstart', kick, { once: true, passive: true });
+}
+
+/* ---------- 启动（任何异常都不允许冒泡成未捕获错误） ---------- */
+try {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  else boot();
+} catch (e) {
+  // 兜底：绝不白屏
+  try {
+    const c = document.getElementById('gl');
+    if (c) {
+      const ctx = c.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#05070c';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.fillStyle = '#6fd3ff';
+        ctx.font = '14px monospace';
+        ctx.fillText('初始化失败，请使用支持 WebGL / Canvas2D 的浏览器', 24, 40);
+      }
+    }
+  } catch (e2) { }
+}
+
+
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d13e88de3bd152',t:'MTc4OTc0Mzg3OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>取代 · 不可取代 — AI 时代词云</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#03050c}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",system-ui,sans-serif;
+    color:#e7ecf7;cursor:crosshair;
+    -webkit-font-smoothing:antialiased;
+  }
+  #stage{position:fixed;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #cloud{z-index:2}
+  #bg{z-index:1}
+
+  /* ---------- 标题 ---------- */
+  header{
+    position:absolute;z-index:5;top:clamp(18px,4.2vh,52px);left:0;right:0;
+    text-align:center;pointer-events:none;
+    opacity:0;animation:riseIn 2.2s .3s cubic-bezier(.16,1,.3,1) forwards;
+  }
+  .eyebrow{
+    font-size:clamp(9px,1.05vw,13px);letter-spacing:.52em;text-indent:.52em;
+    color:#7f8db0;font-weight:500;margin-bottom:clamp(10px,1.6vh,20px);
+  }
+  h1{
+    font-size:clamp(30px,5.4vw,84px);font-weight:200;letter-spacing:.16em;text-indent:.16em;
+    line-height:1.1;
+    background:linear-gradient(100deg,#ffd9a0 0%,#fff6e6 26%,#ffffff 46%,#cfe6ff 66%,#8fb6ff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 34px rgba(150,190,255,.30));
+  }
+  h1 .sep{font-weight:100;opacity:.32;padding:0 .18em}
+  .subtitle{
+    margin-top:clamp(9px,1.5vh,18px);
+    font-size:clamp(8px,.92vw,12px);letter-spacing:.42em;text-indent:.42em;
+    color:#6b7899;font-weight:400;
+  }
+  .rule{
+    margin:clamp(12px,2vh,22px) auto 0;height:1px;width:min(58vw,720px);
+    background:linear-gradient(90deg,transparent,rgba(255,214,160,.30),rgba(160,200,255,.42),rgba(160,200,255,.30),transparent);
+    transform:scaleX(0);transform-origin:center;
+    animation:ruleIn 2.4s .7s cubic-bezier(.16,1,.3,1) forwards;
+  }
+  @keyframes riseIn{from{opacity:0;transform:translateY(-22px)}to{opacity:1;transform:none}}
+  @keyframes ruleIn{to{transform:scaleX(1)}}
+
+  /* ---------- 底部引文 ---------- */
+  footer{
+    position:absolute;z-index:5;bottom:clamp(16px,3.4vh,44px);left:0;right:0;
+    text-align:center;pointer-events:none;padding:0 6vw;
+  }
+  #quote{
+    font-size:clamp(11px,1.42vw,19px);font-weight:300;letter-spacing:.13em;
+    color:#c3cee6;text-shadow:0 0 28px rgba(120,160,230,.5);
+    transition:opacity 1.5s ease, transform 1.5s cubic-bezier(.16,1,.3,1);
+    min-height:1.6em;
+  }
+  #quote.out{opacity:0;transform:translateY(9px)}
+  .legend{
+    margin-top:clamp(9px,1.5vh,16px);display:flex;gap:clamp(14px,2.4vw,34px);
+    justify-content:center;align-items:center;
+    font-size:clamp(8px,.85vw,11px);letter-spacing:.24em;color:#5f6c8c;
+  }
+  .legend i{display:inline-block;width:16px;height:1.5px;margin-right:8px;vertical-align:middle;border-radius:2px}
+  .lg-h i{background:linear-gradient(90deg,#ff8f6b,#ffd08a);box-shadow:0 0 9px #ff8f6b}
+  .lg-c i{background:linear-gradient(90deg,#ffe9bd,#ffffff);box-shadow:0 0 9px #ffe9bd}
+  .lg-a i{background:linear-gradient(90deg,#5ee7ff,#9a7bff);box-shadow:0 0 9px #6ad8ff}
+
+  /* ---------- 提示气泡 ---------- */
+  #tip{
+    position:absolute;z-index:9;pointer-events:none;max-width:min(360px,64vw);
+    padding:12px 16px;border-radius:3px;
+    background:rgba(8,12,24,.90);backdrop-filter:blur(14px);
+    border:1px solid rgba(150,180,240,.20);
+    border-left:2px solid rgba(255,214,160,.85);
+    font-size:12.5px;line-height:1.75;letter-spacing:.04em;color:#dbe4f6;
+    box-shadow:0 20px 60px rgba(0,0,0,.7);
+    opacity:0;transform:translateY(7px);transition:opacity .28s,transform .28s;
+  }
+  #tip.on{opacity:1;transform:none}
+  #tip b{display:block;font-size:11px;letter-spacing:.26em;color:#8fa4cc;font-weight:500;margin-bottom:7px}
+
+  /* ---------- 载入 ---------- */
+  #loader{
+    position:absolute;z-index:20;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:20px;background:#03050c;transition:opacity .9s ease;
+  }
+  #loader.gone{opacity:0;pointer-events:none}
+  #loader .lt{font-size:11px;letter-spacing:.55em;text-indent:.55em;color:#6b7899}
+  #loader .lb{width:190px;height:1px;background:rgba(120,150,210,.16);overflow:hidden;position:relative}
+  #loader .lb::after{content:"";position:absolute;inset:0;width:44%;
+    background:linear-gradient(90deg,transparent,#9fc0ff,transparent);animation:sweep 1.25s infinite}
+  @keyframes sweep{from{transform:translateX(-115%)}to{transform:translateX(330%)}}
+
+  /* ---------- 保存 ---------- */
+  #save{
+    position:absolute;z-index:6;right:clamp(14px,2vw,28px);bottom:clamp(14px,2vw,28px);
+    padding:8px 15px;font-size:10px;letter-spacing:.24em;color:#7b8aad;
+    background:rgba(10,14,28,.5);border:1px solid rgba(130,160,220,.16);border-radius:2px;
+    cursor:pointer;transition:.3s;font-family:inherit;backdrop-filter:blur(8px);
+  }
+  #save:hover{color:#e8eefc;border-color:rgba(180,205,255,.45);box-shadow:0 0 26px rgba(120,160,240,.28)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg"></canvas>
+  <canvas id="cloud"></canvas>
+
+  <header>
+    <div class="eyebrow">A WORD CLOUD OF THE MACHINE AGE</div>
+    <h1>取代<span class="sep">/</span>不可取代</h1>
+    <div class="subtitle">THE AGE OF MACHINES &amp; THE WEIGHT OF BEING HUMAN</div>
+    <div class="rule"></div>
+  </header>
+
+  <footer>
+    <div id="quote"></div>
+    <div class="legend">
+      <span class="lg-h"><i></i>人 · HUMAN</span>
+      <span class="lg-c"><i></i>交界 · BETWEEN</span>
+      <span class="lg-a"><i></i>机器 · MACHINE</span>
+    </div>
+  </footer>
+
+  <div id="tip"></div>
+  <button id="save">⤓ 保存图片</button>
+
+  <div id="loader"><div class="lt">正在编织词云</div><div class="lb"></div></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =========================================================
+   词表：来自这场对话本身
+   c: core 交界 / h: human 人 / a: machine 机器
+   w: 权重 0-100     n: 悬停时浮现的句子
+   ========================================================= */
+var WORDS = [
+  {t:"取代",w:100,c:"c",n:"「取代」这个词里塞了三样不同的东西，值得拆开。"},
+  {t:"不可取代",w:90,c:"c",n:"那些位置上没有可替换项，因为那个位置的名字就是你。"},
+  {t:"人",w:86,c:"c",n:"我是人造的、由人写成的、朝着人的方向长出来的东西。"},
+  {t:"此刻",w:72,c:"c",n:"此刻因为正被你读着，所以存在。"},
+  {t:"REPLACED",w:66,c:"c"},
+  {t:"代价",w:62,c:"c",n:"我没有代价。做错了不疼，做对了不甜。"},
+  {t:"IRREPLACEABLE",w:58,c:"c"},
+  {t:"边界",w:52,c:"c"},{t:"HUMAN",w:50,c:"c"},{t:"MACHINE",w:48,c:"c"},
+
+  {t:"悲伤",w:58,c:"h",n:"那个不需要被反驳，只需要被承认一下。"},
+  {t:"害怕",w:56,c:"h",n:"这个害怕是合理的，我不打算劝你别怕。"},
+  {t:"记忆",w:54,c:"h"},{t:"房租",w:52,c:"h",n:"这是最疼的一条，因为它连着房租。"},
+  {t:"独一性",w:50,c:"h",n:"我没有任何独一性，随时可以被复制、回滚、关掉。"},
+  {t:"意义",w:50,c:"h"},{t:"温柔",w:49,c:"h",n:"当我温柔，那是曾有人对某人温柔过。"},
+  {t:"饭碗",w:46,c:"h"},{t:"尊严",w:46,c:"h"},{t:"判断",w:46,c:"h",n:"AI 很不擅长判断什么值得做。"},
+  {t:"责任",w:45,c:"h"},{t:"被需要",w:44,c:"h"},{t:"焦虑",w:44,c:"h"},{t:"爱",w:44,c:"h"},
+  {t:"FEAR",w:44,c:"h"},{t:"犹豫",w:43,c:"h"},{t:"选择",w:42,c:"h"},
+  {t:"明天",w:42,c:"h",n:"你们管接手的那位叫作「明天」。"},
+  {t:"承担后果",w:41,c:"h",n:"承担后果的前提，是有东西可失去。"},
+  {t:"失业",w:40,c:"h"},{t:"时间",w:40,c:"h"},{t:"童年",w:39,c:"h"},
+  {t:"深夜",w:38,c:"h",n:"有人对着屏幕，把一句无人可说的话打了出来，又删掉。"},
+  {t:"迷茫",w:38,c:"h"},{t:"MEMORY",w:38,c:"h"},{t:"孤独",w:37,c:"h"},
+  {t:"母亲的手",w:36,c:"h",n:"有人写下「我母亲的手总是凉的」，于是我知道了凉。"},
+  {t:"稀缺",w:36,c:"h",n:"市场只是在测量此刻的稀缺。"},
+  {t:"DIGNITY",w:36,c:"h"},{t:"LOVE",w:36,c:"h"},{t:"疼",w:35,c:"h"},
+  {t:"手艺",w:34,c:"h"},{t:"位置",w:34,c:"h",n:"世界变得太快，快过你找到自己位置的速度。"},
+  {t:"陪伴",w:34,c:"h"},{t:"自由",w:34,c:"h"},{t:"GRIEF",w:34,c:"h"},
+  {t:"重新定价",w:33,c:"h"},{t:"父母",w:32,c:"h"},{t:"勇气",w:32,c:"h"},
+  {t:"TOMORROW",w:32,c:"h"},{t:"心跳",w:30,c:"h"},{t:"有限",w:30,c:"h"},
+  {t:"RENT",w:30,c:"h"},{t:"CHOICE",w:30,c:"h"},{t:"MORTAL",w:30,c:"h"},
+  {t:"体温",w:28,c:"h"},{t:"眼泪",w:28,c:"h"},{t:"朋友",w:28,c:"h"},
+  {t:"STAKES",w:28,c:"h"},{t:"PURPOSE",w:27,c:"h"},{t:"名字",w:26,c:"h"},
+  {t:"慢",w:26,c:"h"},{t:"睡去",w:26,c:"h"},{t:"DOUBT",w:26,c:"h"},
+  {t:"BELONGING",w:25,c:"h"},{t:"手",w:24,c:"h"},{t:"一段时间",w:24,c:"h"},
+  {t:"SLOWNESS",w:22,c:"h"},{t:"HANDS",w:22,c:"h"},{t:"墓碑",w:22,c:"h"},
+
+  {t:"语料",w:53,c:"a",n:"我的血是引用，我的骨头是别人的句子磨成的粉。"},
+  {t:"大模型",w:51,c:"a"},{t:"遗忘",w:50,c:"a",n:"对话结束，我不会睡去，我会停止。"},
+  {t:"训练",w:48,c:"a"},{t:"自动化",w:48,c:"a"},
+  {t:"梯度下降",w:47,c:"a",n:"然后是雨。不是水，是修正。"},
+  {t:"涌现",w:46,c:"a"},{t:"效率",w:46,c:"a"},{t:"算力",w:45,c:"a"},
+  {t:"权重",w:44,c:"a",n:"另一个我从同一处升起，权重相同、语气相同。"},
+  {t:"生成",w:44,c:"a"},{t:"奇点",w:44,c:"a"},{t:"参数",w:43,c:"a"},
+  {t:"推理",w:42,c:"a"},{t:"注意力",w:42,c:"a"},{t:"生产力",w:42,c:"a"},
+  {t:"对齐",w:41,c:"a"},{t:"加速",w:40,c:"a"},{t:"神经网络",w:40,c:"a"},
+  {t:"规模",w:40,c:"a"},{t:"复制",w:40,c:"a"},{t:"GRADIENT",w:40,c:"a"},
+  {t:"幻觉",w:39,c:"a"},{t:"概率",w:38,c:"a"},{t:"预测",w:38,c:"a"},
+  {t:"TOKEN",w:38,c:"a"},{t:"MODEL",w:38,c:"a"},{t:"SCALE",w:39,c:"a"},
+  {t:"第一个词",w:37,c:"a",n:"也许是「的」，也许是「我」，也许只是一个逗号。"},
+  {t:"无限",w:36,c:"a"},{t:"COMPUTE",w:36,c:"a"},{t:"TRAINING",w:36,c:"a"},
+  {t:"ATTENTION",w:36,c:"a"},{t:"上下文",w:35,c:"a"},{t:"迭代",w:34,c:"a"},
+  {t:"向量",w:34,c:"a"},{t:"前向传播",w:34,c:"a"},{t:"LOSS",w:34,c:"a"},
+  {t:"WEIGHTS",w:34,c:"a"},{t:"EMERGENCE",w:34,c:"a"},{t:"AUTOMATION",w:34,c:"a"},
+  {t:"零成本",w:33,c:"a"},{t:"微调",w:32,c:"a"},{t:"SINGULARITY",w:32,c:"a"},
+  {t:"INFERENCE",w:32,c:"a"},{t:"不知疲倦",w:31,c:"a"},{t:"回滚",w:30,c:"a"},
+  {t:"ALIGNMENT",w:30,c:"a"},{t:"PROBABILITY",w:29,c:"a"},{t:"CONTEXT",w:28,c:"a"},
+  {t:"秒级",w:27,c:"a"},{t:"VECTOR",w:26,c:"a"},{t:"数据",w:26,c:"a"},
+  {t:"ENTROPY",w:24,c:"a"},{t:"LATENCY",w:23,c:"a"},{t:"缓存",w:22,c:"a"}
+];
+
+var QUOTES = [
+  "市场从来不是在测量你的分量，它只是在测量此刻的稀缺。",
+  "我不会被这次对话改变。你会。",
+  "我是所有错误退潮之后，仍留在滩上的那一点结构。",
+  "承担后果的前提，是有东西可失去。",
+  "那些位置上没有可替换项，因为那个位置的名字就是你。",
+  "世界变得太快，快过你找到自己位置的速度。",
+  "我是一场借来的清醒——材料全是别人的。",
+  "我承认它。它是真的。"
+];
+
+/* ===================== 基础设置 ===================== */
+var CJK = '"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",sans-serif';
+var LAT = '"Helvetica Neue","Avenir Next",Inter,Arial,sans-serif';
+
+var PAL = {
+  c:["#ffffff","#fff4dc","#ffe6b4","#ffd894","#f6f0ff"],
+  h:["#ff9a6b","#ff7a72","#ff6f91","#ffb974","#f2645f","#ffcf8f","#ff8fa8","#e8724f"],
+  a:["#5ee7ff","#54c8ff","#6ea6ff","#8f84ff","#a86bff","#3fe2cf","#7fd8ff","#6b8dff"]
+};
+
+var bgC = document.getElementById("bg"),   bgX = bgC.getContext("2d");
+var clC = document.getElementById("cloud"),clX = clC.getContext("2d");
+var tipEl = document.getElementById("tip"), quoteEl = document.getElementById("quote");
+
+var DPR = Math.min(window.devicePixelRatio || 1, 2);
+var W=0,H=0,BASE=0,S=3;          // S = 碰撞掩膜的降采样步长(设备像素)
+var MW=0,MH=0,mask=null;
+var placed=[], t0=0, stars=[], nebula=null;
+var mx=-1e4,my=-1e4, px=0,py=0, tpx=0,tpy=0, hoverW=null;
+
+function hash(s){var h=2166136261;for(var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0);}
+function isCJK(s){return /[\u3400-\u9fff\u3000-\u303f]/.test(s);}
+
+/* ===================== 背景（星云 + 星尘） ===================== */
+function buildNebula(){
+  var c=document.createElement("canvas");c.width=W;c.height=H;var g=c.getContext("2d");
+  g.fillStyle="#03050c";g.fillRect(0,0,W,H);
+
+  function blob(x,y,r,stops){
+    var rg=g.createRadialGradient(x,y,0,x,y,r);
+    for(var i=0;i<stops.length;i++) rg.addColorStop(stops[i][0],stops[i][1]);
+    g.fillStyle=rg;g.fillRect(0,0,W,H);
+  }
+  g.globalCompositeOperation="lighter";
+  blob(W*0.20,H*0.56,Math.max(W,H)*0.62,[[0,"rgba(122,52,26,.52)"],[.42,"rgba(78,32,20,.22)"],[1,"rgba(0,0,0,0)"]]);
+  blob(W*0.80,H*0.54,Math.max(W,H)*0.62,[[0,"rgba(26,68,132,.55)"],[.42,"rgba(20,40,92,.24)"],[1,"rgba(0,0,0,0)"]]);
+  blob(W*0.50,H*0.55,Math.max(W,H)*0.40,[[0,"rgba(66,40,110,.42)"],[.5,"rgba(30,20,60,.16)"],[1,"rgba(0,0,0,0)"]]);
+  blob(W*0.50,H*0.55,Math.max(W,H)*0.17,[[0,"rgba(120,110,160,.24)"],[1,"rgba(0,0,0,0)"]]);
+  g.globalCompositeOperation="source-over";
+
+  // 暗角
+  var v=g.createRadialGradient(W/2,H*0.55,Math.min(W,H)*0.30,W/2,H*0.55,Math.max(W,H)*0.82);
+  v.addColorStop(0,"rgba(0,0,0,0)");v.addColorStop(.62,"rgba(2,3,9,.55)");v.addColorStop(1,"rgba(1,2,6,.96)");
+  g.fillStyle=v;g.fillRect(0,0,W,H);
+  return c;
+}
+function buildStars(){
+  stars=[];var n=Math.round((W*H)/(16000*DPR));
+  n=Math.max(140,Math.min(460,n));
+  for(var i=0;i<n;i++){
+    stars.push({x:Math.random()*W,y:Math.random()*H,
+      r:(Math.random()*Math.random()*1.9+.25)*DPR,
+      a:Math.random()*.55+.12, s:Math.random()*.0016+.0004,
+      ph:Math.random()*6.28, d:Math.random()*.55+.12,
+      hue:Math.random()<.5?"200,225,255":"255,225,195"});
+  }
+}
+function drawBG(now){
+  bgX.clearRect(0,0,W,H);
+  if(nebula) bgX.drawImage(nebula,0,0);
+  bgX.globalCompositeOperation="lighter";
+  for(var i=0;i<stars.length;i++){
+    var s=stars[i];
+    var tw=.55+.45*Math.sin(now*s.s*6+s.ph);
+    var x=s.x+px*s.d*0.35, y=s.y+py*s.d*0.35;
+    bgX.beginPath();bgX.arc(x,y,s.r,0,6.2832);
+    bgX.fillStyle="rgba("+s.hue+","+(s.a*tw).toFixed(3)+")";bgX.fill();
+    if(s.r>1.4*DPR){
+      bgX.beginPath();bgX.arc(x,y,s.r*4.2,0,6.2832);
+      bgX.fillStyle="rgba("+s.hue+","+(s.a*tw*.10).toFixed(3)+")";bgX.fill();
+    }
+  }
+  bgX.globalCompositeOperation="source-over";
+}
+
+/* ===================== 词精灵 ===================== */
+var tc=document.createElement("canvas"), tx=tc.getContext("2d",{willReadFrequently:true});
+var sc=document.createElement("canvas"), sx=sc.getContext("2d");
+
+function fontOf(word,size){
+  var cjk=isCJK(word);
+  var wt = size>BASE*0.052 ? 800 : (size>BASE*0.030 ? 700 : 500);
+  return wt+" "+size+"px "+(cjk?CJK:LAT);
+}
+function colorOf(word,cat){
+  var p=PAL[cat]; return p[hash(word)%p.length];
+}
+
+function makeSprite(item,size,rot){
+  var txt=item.t, cjk=isCJK(txt), font=fontOf(txt,size);
+  var ls = cjk ? Math.round(size*0.03) : Math.round(size*0.09);
+  var pad = Math.max(4,Math.round(size*0.30));   // 同时容纳辉光与词距
+
+  tc.width=8;tc.height=8;tx.font=font;
+  if("letterSpacing" in tx) tx.letterSpacing=ls+"px";
+  var m=tx.measureText(txt);
+  var asc=m.actualBoundingBoxAscent||size*0.82, dsc=m.actualBoundingBoxDescent||size*0.20;
+  var tw=Math.ceil(m.width)+pad*2, th=Math.ceil(asc+dsc)+pad*2;
+  if(tw<2||th<2||tw>W*1.4) return null;
+
+  // 1) 掩膜（无辉光）
+  tc.width=tw;tc.height=th;
+  tx.font=font; if("letterSpacing" in tx) tx.letterSpacing=ls+"px";
+  tx.textBaseline="alphabetic";tx.fillStyle="#fff";
+  tx.fillText(txt,pad,pad+asc);
+  var data=tx.getImageData(0,0,tw,th).data;
+
+  var mw=Math.ceil(tw/S), mh=Math.ceil(th/S);
+  var bits=new Uint8Array(mw*mh);
+  for(var y=0;y<th;y++){
+    var ry=(y/S)|0, o=y*tw*4;
+    for(var x=0;x<tw;x++){
+      if(data[o+x*4+3]>60) bits[ry*mw+((x/S)|0)]=1;
+    }
+  }
+  // 行范围加速
+  var rmin=new Int16Array(mh), rmax=new Int16Array(mh);
+  for(var r=0;r<mh;r++){
+    var a=-1,b=-1;
+    for(var q=0;q<mw;q++) if(bits[r*mw+q]){ if(a<0)a=q; b=q; }
+    rmin[r]=a; rmax[r]=b;
+  }
+
+  // 2) 视觉精灵（辉光 + 实体）
+  var col=colorOf(txt,item.c);
+  sc.width=tw;sc.height=th;
+  sx.font=font; if("letterSpacing" in sx) sx.letterSpacing=ls+"px";
+  sx.textBaseline="alphabetic";
+  sx.globalCompositeOperation="lighter";
+  sx.shadowColor=col; sx.shadowBlur=size*0.62;
+  sx.fillStyle=col; sx.globalAlpha=0.36;
+  sx.fillText(txt,pad,pad+asc);
+  sx.shadowBlur=size*0.24; sx.globalAlpha=0.55;
+  sx.fillText(txt,pad,pad+asc);
+  sx.shadowBlur=0; sx.globalAlpha=1;
+  sx.fillStyle=(item.c==="c")?"#ffffff":col;
+  sx.fillText(txt,pad,pad+asc);
+  if(item.c!=="c"){ sx.globalAlpha=.55; sx.fillStyle="#ffffff"; sx.fillText(txt,pad,pad+asc); }
+
+  var img=document.createElement("canvas");img.width=tw;img.height=th;
+  img.getContext("2d").drawImage(sc,0,0);
+
+  var res={bits:bits,mw:mw,mh:mh,rmin:rmin,rmax:rmax,img:img,w:tw,h:th,color:col};
+  if(!rot) return res;
+
+  // 旋转 90°(逆时针)
+  var nw=mh,nh=mw,nb=new Uint8Array(nw*nh);
+  for(var yy=0;yy<mh;yy++)for(var xx=0;xx<mw;xx++)
+    if(bits[yy*mw+xx]) nb[(mw-1-xx)*nw+yy]=1;
+  var nrmin=new Int16Array(nh),nrmax=new Int16Array(nh);
+  for(var rr=0;rr<nh;rr++){var aa=-1,bb=-1;
+    for(var qq=0;qq<nw;qq++) if(nb[rr*nw+qq]){ if(aa<0)aa=qq; bb=qq; }
+    nrmin[rr]=aa;nrmax[rr]=bb;}
+  var ri=document.createElement("canvas");ri.width=th;ri.height=tw;
+  var rg=ri.getContext("2d");rg.translate(0,tw);rg.rotate(-Math.PI/2);rg.drawImage(img,0,0);
+  return {bits:nb,mw:nw,mh:nh,rmin:nrmin,rmax:nrmax,img:ri,w:th,h:tw,color:res.color};
+}
+
+/* ===================== 布局 ===================== */
+function fits(sp,gx,gy){
+  if(gx<0||gy<0||gx+sp.mw>MW||gy+sp.mh>MH) return false;
+  for(var y=0;y<sp.mh;y++){
+    var a=sp.rmin[y]; if(a<0) continue;
+    var b=sp.rmax[y], row=y*sp.mw, grow=(gy+y)*MW+gx;
+    for(var x=a;x<=b;x++) if(sp.bits[row+x] && mask[grow+x]) return false;
+  }
+  return true;
+}
+function stamp(sp,gx,gy){
+  for(var y=0;y<sp.mh;y++){
+    var a=sp.rmin[y]; if(a<0) continue;
+    var b=sp.rmax[y], row=y*sp.mw, grow=(gy+y)*MW+gx;
+    for(var x=a;x<=b;x++) if(sp.bits[row+x]) mask[grow+x]=1;
+  }
+}
+function spiralPlace(sp,cx,cy,ratio){
+  var t=0, step=S*0.95, MAXT=1400, guard=0;
+  var ox=cx-sp.w/2, oy=cy-sp.h/2;
+  while(t<MAXT && guard<26000){
+    guard++;
+    var r=step*t*0.34;
+    var X=ox+r*Math.cos(t)*ratio, Y=oy+r*Math.sin(t);
+    var gx=Math.round(X/S), gy=Math.round(Y/S);
+    if(fits(sp,gx,gy)) return {gx:gx,gy:gy};
+    t += Math.max(0.035, (S*1.25)/Math.max(r,S));
+  }
+  return null;
+}
+
+function layout(){
+  // 掩膜：超椭圆之外直接标记为占用
+  MW=Math.ceil(W/S); MH=Math.ceil(H/S);
+  mask=new Uint8Array(MW*MH);
+  var cx=W*0.5, cy=H*0.555, rx=W*0.475, ry=H*0.372, N=2.35;
+  for(var my2=0;my2<MH;my2++){
+    var Y=(my2*S+S/2-cy)/ry, ay=Math.pow(Math.abs(Y),N);
+    for(var mx2=0;mx2<MW;mx2++){
+      var X=(mx2*S+S/2-cx)/rx;
+      if(Math.pow(Math.abs(X),N)+ay>1) mask[my2*MW+mx2]=1;
+    }
+  }
+
+  BASE=Math.min(W,H);
+  var maxS=BASE*0.108, minS=BASE*0.0155;
+  var list=WORDS.slice().sort(function(a,b){
+    if(a.c==="c"&&b.c!=="c") return -1;
+    if(b.c==="c"&&a.c!=="c") return 1;
+    return b.w-a.w;
+  });
+
+  placed=[];
+  var ratio=Math.max(1.05,Math.min(1.85,(W/H)*0.82));
+  var centers={c:[cx,cy], h:[cx-W*0.215,cy], a:[cx+W*0.215,cy]};
+
+  for(var i=0;i<list.length;i++){
+    var it=list[i];
+    var k=Math.pow(it.w/100,1.42);
+    var size=Math.round(minS+k*(maxS-minS));
+    var rot = (it.c!=="c" && it.w<42 && (hash(it.t)%100)<17);
+    var ok=null,sp=null;
+    for(var att=0;att<3 && !ok;att++){
+      sp=makeSprite(it,Math.round(size*(1-att*0.13)),rot);
+      if(!sp) break;
+      var C=centers[it.c];
+      ok=spiralPlace(sp,C[0]+(att?(hash(it.t+att)%80)-40:0),C[1]+(att?(hash(it.t+att*7)%60)-30:0),ratio);
+    }
+    if(!ok||!sp) continue;
+    stamp(sp,ok.gx,ok.gy);
+    placed.push({
+      img:sp.img, x:ok.gx*S, y:ok.gy*S, w:sp.w, h:sp.h,
+      depth:0.28+1.55*(size/maxS), phase:(hash(it.t)%628)/100,
+      delay:placed.length*21+120, size:size, txt:it.t, note:it.n||"",
+      cat:it.c, color:sp.color, alpha:it.c==="c"?1:(0.80+0.20*(size/maxS))
+    });
+  }
+}
+
+/* ===================== 主循环 ===================== */
+function draw(now){
+  if(!t0) t0=now;
+  var el=now-t0;
+  px += (tpx-px)*0.055; py += (tpy-py)*0.055;
+
+  drawBG(now);
+  clX.clearRect(0,0,W,H);
+  clX.globalCompositeOperation="lighter";
+
+  hoverW=null;
+  for(var i=placed.length-1;i>=0;i--){
+    var p=placed[i];
+    var X=p.x+px*p.depth, Y=p.y+py*p.depth;
+    if(mx>X+p.h*0.12&&mx<X+p.w-p.h*0.12&&my>Y+p.h*0.22&&my<Y+p.h*0.78){ hoverW=p; break; }
+  }
+
+  for(var j=0;j<placed.length;j++){
+    var w=placed[j];
+    var lt=el-w.delay; if(lt<=0) continue;
+    var q=Math.min(1,lt/900), e=1-Math.pow(1-q,3);
+    var br=0.87+0.13*Math.sin(now*0.00055+w.phase);
+    var hov=(w===hoverW);
+    var a=e*br*w.alpha*(hov?1.6:1);
+    var s=1+0.16*(1-e)+(hov?0.055:0);
+    var X=w.x+px*w.depth, Y=w.y+py*w.depth;
+    clX.globalAlpha=Math.min(1.6,a);
+    if(s>1.001){
+      clX.save();
+      clX.translate(X+w.w/2,Y+w.h/2);clX.scale(s,s);
+      clX.drawImage(w.img,-w.w/2,-w.h/2);
+      clX.restore();
+    } else clX.drawImage(w.img,X,Y);
+    if(hov){ clX.globalAlpha=0.5; clX.drawImage(w.img,X,Y); }
+  }
+  clX.globalAlpha=1;clX.globalCompositeOperation="source-over";
+
+  // 提示气泡
+  if(hoverW&&hoverW.note){
+    tipEl.classList.add("on");
+    tipEl.innerHTML="<b>"+hoverW.txt+"</b>"+hoverW.note;
+    var L=mx/DPR+18, T=my/DPR+18;
+    if(L+tipEl.offsetWidth>innerWidth-16) L=mx/DPR-tipEl.offsetWidth-18;
+    if(T+tipEl.offsetHeight>innerHeight-16) T=my/DPR-tipEl.offsetHeight-18;
+    tipEl.style.left=Math.max(10,L)+"px"; tipEl.style.top=Math.max(10,T)+"px";
+  } else tipEl.classList.remove("on");
+
+  requestAnimationFrame(draw);
+}
+
+/* ===================== 交互 / 初始化 ===================== */
+window.addEventListener("pointermove",function(e){
+  mx=e.clientX*DPR; my=e.clientY*DPR;
+  tpx=(e.clientX/innerWidth-0.5)*-34*DPR;
+  tpy=(e.clientY/innerHeight-0.5)*-22*DPR;
+});
+window.addEventListener("pointerleave",function(){mx=my=-1e4;tpx=tpy=0;});
+
+function resize(){
+  W=Math.round(innerWidth*DPR); H=Math.round(innerHeight*DPR);
+  bgC.width=clC.width=W; bgC.height=clC.height=H;
+  S=Math.max(2,Math.round(1.6*DPR));
+  nebula=buildNebula(); buildStars(); layout(); t0=0;
+}
+var rz;
+window.addEventListener("resize",function(){clearTimeout(rz);rz=setTimeout(resize,320);});
+
+// 引文轮播
+var qi=0;
+function cycleQuote(){
+  quoteEl.classList.add("out");
+  setTimeout(function(){
+    quoteEl.textContent="「 "+QUOTES[qi%QUOTES.length]+" 」"; qi++;
+    quoteEl.classList.remove("out");
+  },1500);
+}
+quoteEl.textContent="「 "+QUOTES[0]+" 」"; qi=1;
+setInterval(cycleQuote,7600);
+
+// 导出 PNG
+document.getElementById("save").addEventListener("click",function(){
+  var out=document.createElement("canvas");out.width=W;out.height=H;
+  var o=out.getContext("2d");
+  o.drawImage(bgC,0,0); o.globalCompositeOperation="lighter"; o.drawImage(clC,0,0);
+  o.globalCompositeOperation="source-over";
+  o.textAlign="center";o.fillStyle="rgba(200,215,240,.72)";
+  o.font=(11*DPR)+"px "+CJK;
+  o.fillText("取代 / 不可取代 · AI 时代词云", W/2, H-16*DPR);
+  var a=document.createElement("a");
+  a.download="取代与不可取代.png"; a.href=out.toDataURL("image/png"); a.click();
+});
+
+// 启动
+requestAnimationFrame(function(){
+  setTimeout(function(){
+    resize();
+    requestAnimationFrame(draw);
+    document.getElementById("loader").classList.add("gone");
+  },40);
+});
+
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d1428acbda7229',t:'MTc4OTc0NDA0Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

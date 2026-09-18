@@ -1,0 +1,2158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#03060c">
+<meta name="description" content="南极庭院工程 · 漠河—南极地球隧道：贯穿地心的12600公里真空隧道可视化。改编自刘慈欣《地球大炮》。">
+<title>地心长城 · 漠河—南极地球隧道 | 南极庭院工程</title>
+<style>
+/* ===================== 全局与配色 ===================== */
+:root{
+  --bg:#03060c; --bg2:#070c16; --panel:rgba(8,14,24,.74); --panel2:rgba(10,17,29,.92);
+  --fg:#dbe7f5; --fg2:#93a8c0; --dim:#61748c;
+  --cyan:#4ad4ff; --blue:#2f7fff; --deep:#1b4ea8;
+  --amber:#ffb648; --red:#ff5a3c; --hot:#ff7a2f;
+  --line:rgba(122,170,220,.18); --line2:rgba(122,170,220,.35);
+  --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  --sans:"PingFang SC","Harmony Sans","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+body.cabin{overflow:hidden}
+a{color:var(--cyan);text-decoration:none}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:.02em}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+::selection{background:rgba(74,212,255,.3)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:#05080f}
+::-webkit-scrollbar-thumb{background:#1d2e45;border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#2c4666}
+
+/* ===================== 三维画布 ===================== */
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0;touch-action:none}
+#fallback2d{position:fixed;inset:0;width:100%;height:100%;display:none;z-index:0}
+#labelLayer{position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+#vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 45%,transparent 40%,rgba(0,0,0,.55) 100%)}
+
+/* 三维标签 */
+.lbl{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;
+  font-size:11px;letter-spacing:.06em;color:#cfe4f7;text-shadow:0 0 8px rgba(0,0,0,.9);transition:opacity .25s}
+.lbl .dot{width:7px;height:7px;border:1px solid var(--cyan);background:rgba(74,212,255,.25);
+  border-radius:50%;display:inline-block;vertical-align:middle;margin-right:6px;box-shadow:0 0 8px rgba(74,212,255,.8)}
+.lbl .txt{display:inline-block;vertical-align:middle;padding:2px 7px;border:1px solid var(--line);
+  background:rgba(4,9,17,.72);border-radius:2px;backdrop-filter:blur(3px)}
+.lbl .sub{display:block;font-size:9.5px;color:var(--dim);letter-spacing:.1em;font-family:var(--mono)}
+.lbl.station .txt{border-color:rgba(74,212,255,.55);color:#eaf7ff}
+.lbl.core .txt{border-color:rgba(255,122,47,.6);color:#ffd9b8}
+.lbl.core .dot{border-color:var(--hot);background:rgba(255,122,47,.35);box-shadow:0 0 10px rgba(255,122,47,.9)}
+.lbl.layer .txt{background:rgba(4,9,17,.5);color:#a9c0d8;font-size:10px}
+.lbl.layer .dot{display:none}
+.lbl.hide{opacity:0}
+
+/* ===================== 顶栏 ===================== */
+#nav{position:fixed;top:0;left:0;right:0;height:54px;z-index:40;display:flex;align-items:center;
+  gap:18px;padding:0 18px;background:linear-gradient(180deg,rgba(3,6,12,.9),rgba(3,6,12,.35) 70%,transparent);
+  backdrop-filter:blur(6px);border-bottom:1px solid rgba(122,170,220,.08)}
+#nav .brand{display:flex;align-items:center;gap:10px;font-size:13px;letter-spacing:.14em}
+#nav .glyph{width:22px;height:22px;border:1px solid var(--cyan);border-radius:50%;position:relative;flex:0 0 auto}
+#nav .glyph::after{content:"";position:absolute;left:50%;top:-4px;bottom:-4px;width:1px;
+  background:linear-gradient(180deg,transparent,var(--cyan),var(--hot),var(--cyan),transparent);transform:translateX(-50%) rotate(12deg)}
+#nav .brand b{font-weight:600;color:#eaf3ff}
+#nav .brand span{color:var(--dim);font-size:10px;letter-spacing:.24em;display:block;font-family:var(--mono)}
+#nav .links{margin-left:auto;display:flex;gap:2px}
+#nav .links a{padding:7px 11px;font-size:12.5px;color:var(--fg2);border:1px solid transparent;border-radius:2px;transition:.2s}
+#nav .links a:hover{color:#fff;border-color:var(--line);background:rgba(74,212,255,.06)}
+#nav .stat{font-family:var(--mono);font-size:10.5px;color:var(--amber);border:1px solid rgba(255,182,72,.35);
+  padding:4px 8px;border-radius:2px;background:rgba(255,182,72,.06);letter-spacing:.08em}
+@media(max-width:900px){#nav .links{display:none}#nav .stat{display:none}}
+
+/* ===================== 英雄区 ===================== */
+#hero{position:relative;z-index:2;height:100vh;height:100svh;min-height:560px;pointer-events:none}
+.hero-title{position:absolute;left:26px;bottom:132px;max-width:min(560px,64vw);pointer-events:auto}
+.hero-kicker{font-family:var(--mono);font-size:11px;letter-spacing:.34em;color:var(--cyan);margin-bottom:10px;
+  display:flex;align-items:center;gap:10px}
+.hero-kicker::before{content:"";width:34px;height:1px;background:var(--cyan);display:inline-block}
+.hero-title h1{font-size:clamp(30px,5.4vw,62px);line-height:1.04;letter-spacing:.01em;
+  text-shadow:0 4px 40px rgba(0,0,0,.8)}
+.hero-title h1 em{font-style:normal;color:var(--cyan);text-shadow:0 0 30px rgba(74,212,255,.45)}
+.hero-sub{margin-top:14px;color:var(--fg2);font-size:13.5px;line-height:1.85;max-width:480px}
+.hero-sub b{color:#e8f4ff;font-weight:500}
+.hero-figs{display:flex;gap:22px;margin-top:18px;flex-wrap:wrap}
+.hero-figs div{border-left:1px solid var(--line2);padding-left:10px}
+.hero-figs .n{font-family:var(--mono);font-size:19px;color:#fff}
+.hero-figs .k{font-size:10.5px;color:var(--dim);letter-spacing:.14em;margin-top:2px}
+.hero-cta{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
+.btn{font-family:var(--sans);font-size:13px;color:#dff0ff;background:rgba(15,26,44,.8);border:1px solid var(--line2);
+  padding:10px 18px;border-radius:2px;cursor:pointer;letter-spacing:.06em;transition:.2s;pointer-events:auto}
+.btn:hover{background:rgba(47,127,255,.22);border-color:var(--cyan);color:#fff;box-shadow:0 0 18px rgba(74,212,255,.22)}
+.btn.primary{background:linear-gradient(180deg,rgba(47,127,255,.35),rgba(27,78,168,.35));border-color:rgba(74,212,255,.6);color:#fff}
+.btn.primary:hover{background:linear-gradient(180deg,rgba(74,212,255,.45),rgba(47,127,255,.4))}
+.scroll-hint{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);font-family:var(--mono);
+  font-size:10px;letter-spacing:.28em;color:var(--dim);animation:bob 2.4s ease-in-out infinite;pointer-events:none}
+@keyframes bob{0%,100%{transform:translate(-50%,0);opacity:.5}50%{transform:translate(-50%,7px);opacity:1}}
+
+/* ===================== 控制面板 ===================== */
+#panel{position:fixed;top:66px;right:16px;width:268px;z-index:30;background:var(--panel);
+  border:1px solid var(--line);border-radius:3px;backdrop-filter:blur(12px);
+  box-shadow:0 20px 60px rgba(0,0,0,.55);overflow:hidden;pointer-events:auto;transition:transform .3s,opacity .3s}
+#panel.folded{transform:translateX(calc(100% - 40px))}
+#panel .ph{display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line);
+  background:rgba(74,212,255,.06);font-size:11.5px;letter-spacing:.16em;color:#cfe8fb;cursor:pointer;user-select:none}
+#panel .ph .led{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+#panel .pb{padding:11px;display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 150px);overflow-y:auto}
+.grp{display:flex;flex-direction:column;gap:6px}
+.grp>label{font-size:10px;letter-spacing:.18em;color:var(--dim);font-family:var(--mono)}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+.seg button{flex:1 1 auto;min-width:38px;padding:7px 4px;font-size:11.5px;color:var(--fg2);background:rgba(255,255,255,.03);
+  border:1px solid var(--line);border-radius:2px;cursor:pointer;transition:.16s;font-family:var(--sans)}
+.seg button:hover{color:#fff;border-color:var(--line2);background:rgba(74,212,255,.1)}
+.seg button.on{background:rgba(74,212,255,.2);border-color:var(--cyan);color:#fff;box-shadow:inset 0 0 12px rgba(74,212,255,.18)}
+.sw{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--fg2);cursor:pointer;padding:3px 0}
+.sw:hover{color:#fff}
+.sw i{width:30px;height:16px;border-radius:9px;border:1px solid var(--line2);background:rgba(0,0,0,.4);position:relative;transition:.2s;flex:0 0 auto}
+.sw i::after{content:"";position:absolute;left:2px;top:1.5px;width:11px;height:11px;border-radius:50%;background:var(--dim);transition:.2s}
+.sw.on i{background:rgba(74,212,255,.25);border-color:var(--cyan)}
+.sw.on i::after{left:15px;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:rgba(122,170,220,.25);
+  border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--cyan);box-shadow:0 0 10px rgba(74,212,255,.8);cursor:pointer;border:2px solid #06121f}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--cyan);border:2px solid #06121f}
+.hintline{font-size:10px;color:var(--dim);line-height:1.6;font-family:var(--mono)}
+
+/* ===================== 底部状态条 ===================== */
+#statusbar{position:fixed;left:0;right:0;bottom:0;z-index:25;padding:10px 18px 12px;
+  background:linear-gradient(0deg,rgba(3,6,12,.94),rgba(3,6,12,.6) 60%,transparent);
+  border-top:1px solid rgba(122,170,220,.1);pointer-events:auto;transition:opacity .3s}
+.sb-row{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap;margin-bottom:9px}
+.sb-item .k{font-size:9.5px;letter-spacing:.18em;color:var(--dim);font-family:var(--mono)}
+.sb-item .v{font-family:var(--mono);font-size:17px;color:#eaf6ff;line-height:1.25}
+.sb-item .v u{text-decoration:none;font-size:10.5px;color:var(--fg2);margin-left:3px}
+.sb-item.hi .v{color:var(--cyan)}
+.sb-item.hot .v{color:var(--amber)}
+#stLayerBox{margin-left:auto;text-align:right}
+#stLayer{font-size:13px;color:#ffd9b8;letter-spacing:.08em}
+/* 线路进度 */
+.track{position:relative;height:26px}
+.track .rail{position:absolute;left:0;right:0;top:9px;height:3px;background:rgba(122,170,220,.16);border-radius:2px;overflow:hidden}
+.track .fill{position:absolute;left:0;top:0;bottom:0;width:0;
+  background:linear-gradient(90deg,var(--blue),var(--cyan) 35%,var(--amber) 50%,var(--cyan) 65%,var(--blue));
+  box-shadow:0 0 12px rgba(74,212,255,.6)}
+.track .dot{position:absolute;top:4px;width:13px;height:13px;margin-left:-6.5px;border-radius:50%;
+  background:#fff;box-shadow:0 0 14px 3px rgba(255,255,255,.75);transition:none}
+.track .tick{position:absolute;top:5px;width:1px;height:11px;background:rgba(122,170,220,.5)}
+.track .tick.major{background:var(--amber);height:15px;top:3px}
+.track .tk{position:absolute;top:19px;transform:translateX(-50%);font-size:9px;color:var(--dim);
+  font-family:var(--mono);letter-spacing:.05em;white-space:nowrap}
+@media(max-width:720px){
+  .hero-title{left:14px;right:14px;bottom:150px;max-width:none}
+  .sb-row{gap:14px}.sb-item .v{font-size:14px}
+  .track .tk{display:none}.track .tk.keep{display:block}
+  #panel{top:auto;bottom:0;right:0;left:0;width:100%;border-radius:0;border-left:none;border-right:none;
+    max-height:70vh;transform:translateY(calc(100% - 36px))}
+  #panel.folded{transform:translateY(calc(100% - 36px))}
+  #panel.open{transform:translateY(0)}
+  #panel .pb{max-height:52vh}
+  #statusbar{bottom:36px}
+}
+
+/* ===================== 舱内 HUD ===================== */
+#hud{position:fixed;inset:0;z-index:20;pointer-events:none;opacity:0;transition:opacity .45s;display:none}
+#hud.on{opacity:1;display:block}
+.hud-frame{position:absolute;inset:22px;border:1px solid rgba(74,212,255,.16);border-radius:4px}
+.hud-frame::before,.hud-frame::after{content:"";position:absolute;width:26px;height:26px;border:2px solid rgba(74,212,255,.55)}
+.hud-frame::before{left:-1px;top:-1px;border-right:none;border-bottom:none}
+.hud-frame::after{right:-1px;bottom:-1px;border-left:none;border-top:none}
+.hud-vig{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 32%,rgba(0,4,10,.82) 100%)}
+.hud-scan{position:absolute;inset:0;opacity:.16;background:repeating-linear-gradient(0deg,rgba(74,212,255,.14) 0 1px,transparent 1px 3px)}
+.hud-cross{position:absolute;left:50%;top:50%;width:56px;height:56px;transform:translate(-50%,-50%);opacity:.5}
+.hud-cross::before,.hud-cross::after{content:"";position:absolute;background:rgba(74,212,255,.7)}
+.hud-cross::before{left:50%;top:0;bottom:0;width:1px;transform:translateX(-50%)}
+.hud-cross::after{top:50%;left:0;right:0;height:1px;transform:translateY(-50%)}
+.hud-side{position:absolute;top:78px;display:flex;flex-direction:column;gap:15px}
+.hud-side.l{left:46px}.hud-side.r{right:46px;text-align:right;align-items:flex-end}
+.hud-cell .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:rgba(74,212,255,.75)}
+.hud-cell .v{font-family:var(--mono);font-size:26px;color:#eaf9ff;text-shadow:0 0 16px rgba(74,212,255,.55);line-height:1.15}
+.hud-cell .v u{text-decoration:none;font-size:11px;color:rgba(147,168,192,.9);margin-left:4px}
+.hud-cell.small .v{font-size:17px}
+.hud-top{position:absolute;left:50%;top:44px;transform:translateX(-50%);text-align:center}
+.hud-top .lay{font-size:15px;letter-spacing:.34em;color:#ffd9b8;text-shadow:0 0 20px rgba(255,122,47,.6)}
+.hud-top .depthbar{width:min(46vw,420px);height:2px;background:rgba(122,170,220,.2);margin:9px auto 0;position:relative}
+.hud-top .depthbar i{position:absolute;top:-3px;width:8px;height:8px;background:#fff;border-radius:50%;
+  box-shadow:0 0 10px #fff;margin-left:-4px}
+.hud-report{position:absolute;left:50%;bottom:112px;transform:translateX(-50%);width:min(78vw,720px);text-align:center;
+  font-size:13.5px;line-height:1.7;color:#bfe8ff;font-family:var(--mono);letter-spacing:.04em;
+  border:1px solid rgba(74,212,255,.22);background:rgba(4,12,22,.66);padding:10px 16px;border-radius:2px;
+  opacity:0;transition:opacity .4s;backdrop-filter:blur(4px)}
+.hud-report.show{opacity:1}
+.hud-report.hot{color:#ffd0b0;border-color:rgba(255,122,47,.45);background:rgba(24,8,4,.6)}
+.hud-note{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);font-size:11px;color:var(--dim);
+  font-family:var(--mono);letter-spacing:.12em;text-align:center;line-height:1.8}
+.hud-warn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:clamp(22px,5vw,48px);
+  letter-spacing:.3em;color:#ffdca8;text-shadow:0 0 40px rgba(255,150,60,.8);opacity:0;transition:opacity .5s;text-align:center}
+.hud-warn.show{opacity:1}
+@media(max-width:720px){
+  .hud-side.l{left:26px}.hud-side.r{right:26px}
+  .hud-cell .v{font-size:19px}.hud-cell.small .v{font-size:14px}
+  .hud-report{bottom:130px;font-size:11.5px;width:88vw}
+}
+
+/* ===================== 正文 ===================== */
+#content{position:relative;z-index:3;
+  background:linear-gradient(180deg,transparent 0,rgba(3,6,12,.86) 4%,#03060c 12%,#03060c 100%)}
+.sec{max-width:1180px;margin:0 auto;padding:96px 24px;scroll-margin-top:70px}
+.sec-head{margin-bottom:38px}
+.sec-num{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--cyan);margin-bottom:10px}
+.sec-head h2{font-size:clamp(22px,3.2vw,34px);letter-spacing:.04em}
+.sec-head p{margin:12px 0 0;color:var(--fg2);font-size:14px;line-height:1.9;max-width:760px}
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .8s cubic-bezier(.2,.7,.3,1),transform .8s cubic-bezier(.2,.7,.3,1)}
+.reveal.in{opacity:1;transform:none}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px}
+.card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(10,18,31,.82),rgba(6,11,20,.82));
+  padding:20px 18px;border-radius:3px;position:relative;overflow:hidden;transition:.3s}
+.card:hover{border-color:var(--line2);transform:translateY(-3px);box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.card::after{content:"";position:absolute;left:0;top:0;width:100%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:.5}
+.card .n{font-family:var(--mono);font-size:29px;color:#fff;letter-spacing:-.01em}
+.card .n u{text-decoration:none;font-size:13px;color:var(--cyan);margin-left:4px}
+.card .k{font-size:12px;color:var(--fg2);margin-top:7px;letter-spacing:.1em}
+.card .d{font-size:11.5px;color:var(--dim);margin-top:9px;line-height:1.75}
+.two{display:grid;grid-template-columns:1.15fr .85fr;gap:26px;align-items:start}
+@media(max-width:860px){.two{grid-template-columns:1fr}.sec{padding:70px 18px}}
+.prose{color:var(--fg2);font-size:14px;line-height:2}
+.prose p{margin:0 0 16px}
+.prose b,.prose strong{color:#e9f4ff;font-weight:600}
+.prose .hl{color:var(--cyan)}
+.quote{border-left:2px solid var(--hot);padding:6px 0 6px 18px;margin:22px 0;color:#d9c4b2;
+  font-size:13.5px;line-height:2;background:linear-gradient(90deg,rgba(255,122,47,.06),transparent)}
+.quote cite{display:block;margin-top:8px;font-style:normal;font-size:11px;color:var(--dim);letter-spacing:.1em}
+/* 数据表 */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th,.tbl td{padding:11px 12px;border-bottom:1px solid rgba(122,170,220,.12);text-align:left}
+.tbl th{font-size:10px;letter-spacing:.18em;color:var(--dim);font-family:var(--mono);font-weight:400}
+.tbl td{color:var(--fg2)}
+.tbl td.mono{font-family:var(--mono);color:#dbeaf9}
+.tbl tr:hover td{background:rgba(74,212,255,.04);color:#fff}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:8px;vertical-align:middle}
+/* 时间线 */
+.timeline{position:relative;padding-left:34px}
+.timeline::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:1px;
+  background:linear-gradient(180deg,var(--cyan),var(--hot) 55%,rgba(122,170,220,.2))}
+.tl-item{position:relative;padding:0 0 30px 0}
+.tl-item::before{content:"";position:absolute;left:-30px;top:4px;width:11px;height:11px;border-radius:50%;
+  background:#03060c;border:2px solid var(--cyan);box-shadow:0 0 12px rgba(74,212,255,.7)}
+.tl-item.bad::before{border-color:var(--red);box-shadow:0 0 12px rgba(255,90,60,.8)}
+.tl-item.done::before{background:var(--cyan)}
+.tl-y{font-family:var(--mono);font-size:12px;color:var(--cyan);letter-spacing:.1em}
+.tl-item.bad .tl-y{color:var(--red)}
+.tl-h{font-size:15px;color:#eaf4ff;margin:5px 0 6px}
+.tl-d{font-size:12.5px;color:var(--fg2);line-height:1.9;max-width:660px}
+.tl-tag{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;padding:2px 7px;
+  border:1px solid var(--line2);border-radius:2px;color:var(--fg2);margin-left:8px;vertical-align:middle}
+/* 图表 */
+.chartbox{border:1px solid var(--line);background:rgba(6,11,20,.7);border-radius:3px;padding:16px}
+#chart{width:100%;height:280px;display:block}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:11px;color:var(--fg2);font-family:var(--mono)}
+.legend i{display:inline-block;width:16px;height:2px;vertical-align:middle;margin-right:7px}
+/* 页脚 */
+footer{border-top:1px solid rgba(122,170,220,.12);padding:38px 24px 60px;text-align:center;color:var(--dim);font-size:11.5px;line-height:2}
+footer b{color:var(--fg2);font-weight:500}
+/* 载入层 */
+#loading{position:fixed;inset:0;z-index:99;background:#03060c;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;transition:opacity .8s}
+#loading.out{opacity:0;pointer-events:none}
+#loading .ring{width:66px;height:66px;border:1px solid rgba(74,212,255,.25);border-top-color:var(--cyan);
+  border-radius:50%;animation:spin 1.1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading .t{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--cyan)}
+#loading .bar{width:220px;height:2px;background:rgba(122,170,220,.2);overflow:hidden}
+#loading .bar i{display:block;height:100%;width:0;background:var(--cyan);transition:width .4s;box-shadow:0 0 10px var(--cyan)}
+#loading .sub{font-size:10.5px;color:var(--dim);letter-spacing:.1em;font-family:var(--mono)}
+/* 提示气泡 */
+#toast{position:fixed;left:50%;top:76px;transform:translateX(-50%) translateY(-14px);z-index:60;
+  background:rgba(6,14,24,.94);border:1px solid var(--line2);color:#dff0ff;font-size:12.5px;
+  padding:9px 16px;border-radius:2px;opacity:0;transition:.35s;pointer-events:none;letter-spacing:.06em;
+  backdrop-filter:blur(6px);max-width:80vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+body.cabin #content,body.cabin #statusbar,body.cabin .hero-title,body.cabin .scroll-hint,body.cabin #nav{opacity:0;pointer-events:none}
+body.cabin #labelLayer{opacity:0}
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<canvas id="fallback2d"></canvas>
+<div id="labelLayer"></div>
+<div id="vignette"></div>
+
+<!-- ============ 顶栏 ============ -->
+<header id="nav">
+  <div class="brand">
+    <div class="glyph"></div>
+    <div><b>南极庭院工程</b><span>ANTARCTIC COURTYARD PROJECT</span></div>
+  </div>
+  <nav class="links">
+    <a href="#overview">工程概览</a>
+    <a href="#profile">地球剖面</a>
+    <a href="#physics">运行原理</a>
+    <a href="#build">建设方案</a>
+    <a href="#tech">关键技术</a>
+    <a href="#origin">原著溯源</a>
+  </nav>
+  <div class="stat">STATUS · 运营中</div>
+</header>
+
+<!-- ============ 英雄区 ============ -->
+<section id="hero">
+  <div class="hero-title">
+    <div class="hero-kicker">TRANS-EARTH TUNNEL · 地心长城</div>
+    <h1>漠河 <em>—</em> 南极<br>地球隧道</h1>
+    <p class="hero-sub">
+      一条贯穿地心的真空竖井，把中国东北与南极半岛连成<b>一次自由落体</b>的距离。<br>
+      跳下去，就到了。
+    </p>
+    <div class="hero-figs">
+      <div><div class="n">12,600<u style="font-size:12px;color:#4ad4ff"> km</u></div><div class="k">隧道全长</div></div>
+      <div><div class="n">42:12</div><div class="k">单程时间</div></div>
+      <div><div class="n">7.8<u style="font-size:12px;color:#4ad4ff"> km/s</u></div><div class="k">地心速度</div></div>
+      <div><div class="n">0.00<u style="font-size:12px;color:#4ad4ff"> G</u></div><div class="k">全程体感</div></div>
+    </div>
+    <div class="hero-cta">
+      <button class="btn primary" id="btnStart">开始坠落</button>
+      <button class="btn" id="btnCabin">进入舱内视角</button>
+      <button class="btn" id="btnCut">剖开地球</button>
+    </div>
+  </div>
+  <div class="scroll-hint">向下滚动 · 工程档案</div>
+</section>
+
+<!-- ============ 控制面板 ============ -->
+<aside id="panel">
+  <div class="ph" id="panelToggle"><span class="led"></span>控制台 · CONSOLE</div>
+  <div class="pb">
+    <div class="grp">
+      <label>视角 VIEW</label>
+      <div class="seg" id="segView">
+        <button data-view="ext" class="on">外部视角</button>
+        <button data-view="cabin">舱内第一人称</button>
+      </div>
+    </div>
+    <div class="grp">
+      <label>航行 FLIGHT</label>
+      <div class="seg">
+        <button id="btnPlay" class="on">暂停</button>
+        <button id="btnReset">重置</button>
+        <button id="btnJump">立即到达</button>
+      </div>
+    </div>
+    <div class="grp">
+      <label>时间倍率 TIME · 单程 2 分钟 @1x</label>
+      <div class="seg" id="segSpeed">
+        <button data-speed="1" class="on">1x</button>
+        <button data-speed="2">2x</button>
+        <button data-speed="5">5x</button>
+        <button data-speed="10">10x</button>
+        <button data-speed="50">50x</button>
+      </div>
+    </div>
+    <div class="grp">
+      <label>行程 <span id="scrubTxt" class="mono">0%</span></label>
+      <input type="range" id="scrub" min="0" max="1000" value="0">
+    </div>
+    <div class="grp">
+      <label>地球剖面 EARTH</label>
+      <div class="seg" id="segEarth">
+        <button data-earth="solid" class="on">不透明</button>
+        <button data-earth="glass">半透明</button>
+        <button data-earth="cut">纵剖面</button>
+      </div>
+      <div class="seg"><button id="btnAlign">对齐剖面视角</button></div>
+    </div>
+    <div class="grp">
+      <label>图层 LAYERS</label>
+      <div class="sw on" data-tg="tunnel"><span>隧道与光圈</span><i></i></div>
+      <div class="sw on" data-tg="labels"><span>站点标注</span><i></i></div>
+      <div class="sw on" data-tg="clouds"><span>云层</span><i></i></div>
+      <div class="sw on" data-tg="night"><span>昼夜与城市灯光</span><i></i></div>
+      <div class="sw on" data-tg="spin"><span>地球自转</span><i></i></div>
+      <div class="sw on" data-tg="stars"><span>深空星野</span><i></i></div>
+      <div class="sw" data-tg="cannon"><span style="color:#ffb648">地球大炮模式</span><i></i></div>
+    </div>
+    <div class="grp">
+      <label>太阳方位 SUN <span id="sunTxt" class="mono">150°</span></label>
+      <input type="range" id="sunAz" min="0" max="360" value="150">
+      <label style="margin-top:4px">太阳高度 <span id="sunElTxt" class="mono">14°</span></label>
+      <input type="range" id="sunEl" min="-40" max="60" value="14">
+    </div>
+    <div class="hintline" id="perfLine">拖拽旋转 · 滚轮缩放 · 双击复位</div>
+  </div>
+</aside>
+
+<!-- ============ 底部状态条 ============ -->
+<div id="statusbar">
+  <div class="sb-row">
+    <div class="sb-item hi"><div class="k">DEPTH 行程深度</div><div class="v"><span id="stDepth">0</span><u>km</u></div></div>
+    <div class="sb-item"><div class="k">VELOCITY 速度</div><div class="v"><span id="stSpeed">0.00</span><u>km/s</u></div></div>
+    <div class="sb-item"><div class="k">GRAVITY 当地引力</div><div class="v"><span id="stG">1.00</span><u>G</u></div></div>
+    <div class="sb-item hot"><div class="k">MISSION TIME 任务时间</div><div class="v mono"><span id="stTime">00:00</span></div></div>
+    <div class="sb-item"><div class="k">ETA 剩余</div><div class="v mono"><span id="stEta">42:12</span></div></div>
+    <div class="sb-item" id="stLayerBox"><div class="k">CURRENT LAYER 所在圈层</div><div class="v"><span id="stLayer">地壳 · 漠河站</span></div></div>
+  </div>
+  <div class="track" id="track">
+    <div class="rail"><div class="fill" id="progFill"></div></div>
+    <div class="dot" id="progDot" style="left:0"></div>
+  </div>
+</div>
+
+<!-- ============ 舱内 HUD ============ -->
+<div id="hud">
+  <div class="hud-vig"></div>
+  <div class="hud-scan"></div>
+  <div class="hud-frame"></div>
+  <div class="hud-cross"></div>
+  <div class="hud-top">
+    <div class="lay" id="hudLayer">地壳</div>
+    <div class="depthbar"><i id="hudDepthDot" style="left:0"></i></div>
+  </div>
+  <div class="hud-side l">
+    <div class="hud-cell"><div class="k">DEPTH 深度</div><div class="v"><span id="hudDepth">0</span><u>km</u></div></div>
+    <div class="hud-cell"><div class="k">VELOCITY 速度</div><div class="v"><span id="hudSpeed">0.00</span><u>km/s</u></div></div>
+    <div class="hud-cell small"><div class="k">LOCAL GRAVITY 当地引力</div><div class="v"><span id="hudG">1.00</span><u>G</u></div></div>
+    <div class="hud-cell small"><div class="k">FELT 舱内体感</div><div class="v"><span id="hudFelt">0.00</span><u>G</u></div></div>
+  </div>
+  <div class="hud-side r">
+    <div class="hud-cell"><div class="k">ELAPSED 已用时间</div><div class="v mono"><span id="hudTime">00:00</span></div></div>
+    <div class="hud-cell"><div class="k">ETA 预计到达</div><div class="v mono"><span id="hudEta">42:12</span></div></div>
+    <div class="hud-cell small"><div class="k">HULL TEMP 井壁温度</div><div class="v"><span id="hudTemp">18</span><u>&#8451;</u></div></div>
+    <div class="hud-cell small"><div class="k">CROSSINGS 穿越次数</div><div class="v"><span id="hudCross">0</span></div></div>
+  </div>
+  <div class="hud-report" id="hudReport"></div>
+  <div class="hud-warn" id="hudWarn"></div>
+  <div class="hud-note">密封服自检正常 · 冷却系统待机 · 拖动可环视舱外 · <span id="hudModeTxt">自由落体模式</span></div>
+</div>
+
+<!-- ============ 正文：工程宣传页 ============ -->
+<main id="content">
+
+  <section class="sec" id="overview">
+    <div class="sec-head reveal">
+      <div class="sec-num">01 / OVERVIEW</div>
+      <h2>把南极变成庭院</h2>
+      <p>从北京去南极，将比从北京去天津更方便——这不是比喻。旅行时间更短，消耗的能源和造成的污染都更少。
+      南极庭院工程用一条贯穿地心的真空隧道，把地球的两端折叠成一次 42 分钟的自由落体。</p>
+    </div>
+    <div class="cards reveal">
+      <div class="card"><div class="n">12,600<u>km</u></div><div class="k">隧道全长</div><div class="d">漠河站至南极站，振幅 12,600 千米的简谐振动通道，井径 10 米。</div></div>
+      <div class="card"><div class="n">42<u>分12秒</u></div><div class="k">单程时间</div><div class="d">纯自由落体，不消耗任何能源；往返一个完整周期 84 分 24 秒。</div></div>
+      <div class="card"><div class="n">7.8<u>km/s</u></div><div class="k">地心过站速度</div><div class="d">恰为第一宇宙速度——你以能飞出地球的速度，却正处在这颗星球的中心。</div></div>
+      <div class="card"><div class="n">200<u>节</u></div><div class="k">地心列车编组</div><div class="d">车厢直径 8 米、长 50 米，单列可运两万吨货物或近万名乘客。</div></div>
+      <div class="card"><div class="n">10<u>cm</u></div><div class="k">最小危险物</div><div class="d">一枚落入井中的螺栓，相对速度可达 16 km/s，动能等同一枚炸弹。</div></div>
+      <div class="card"><div class="n">1,500<u>&#8451;</u></div><div class="k">地心段井壁温度</div><div class="d">新固态材料的绝热层之外，是四千摄氏度的铁镍激流。</div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="profile">
+    <div class="sec-head reveal">
+      <div class="sec-num">02 / CROSS SECTION</div>
+      <h2>隧道穿过的六个世界</h2>
+      <p>隧道不是笔直的。从漠河严格沿直线贯穿地心，出口将落在阿根廷南部；为了让终点落在南极大陆最东端的南极半岛，
+      并抵消地球自转带来的科里奥利偏移，隧道被设计成一条极其轻微的弧线——它的弯曲，正好让坠落者平滑地通过。</p>
+    </div>
+    <div class="two">
+      <div class="reveal">
+        <table class="tbl">
+          <thead><tr><th>圈层</th><th>深度区间</th><th>行程速度</th><th>工程特征</th></tr></thead>
+          <tbody>
+            <tr><td><span class="swatch" style="background:#7d8ea3"></span>地壳</td><td class="mono">0 – 35 km</td><td class="mono">0 → 1.4 km/s</td><td>莫霍闸 · 第一道安全闸门</td></tr>
+            <tr><td><span class="swatch" style="background:#b8532f"></span>地幔 · 黏性物质区</td><td class="mono">35 – 1,000 km</td><td class="mono">1.4 → 4.3 km/s</td><td>软流层，井圈需持续冷却</td></tr>
+            <tr><td><span class="swatch" style="background:#8f3a22"></span>地幔 · 刚性物质区</td><td class="mono">1,000 – 2,891 km</td><td class="mono">4.3 → 6.5 km/s</td><td>双层交错井圈，铆接接合部</td></tr>
+            <tr><td><span class="swatch" style="background:#ff8a3c"></span>外核 · 液态铁镍</td><td class="mono">2,891 – 5,150 km</td><td class="mono">6.5 → 7.7 km/s</td><td>古登堡闸 · 铁镍流冲击段</td></tr>
+            <tr><td><span class="swatch" style="background:#ffd08a"></span>内核 · 固态铁镍</td><td class="mono">5,150 – 6,300 km</td><td class="mono">7.7 → 7.8 km/s</td><td>井壁光圈转为红色</td></tr>
+            <tr><td><span class="swatch" style="background:#fff2d0"></span>地心</td><td class="mono">6,300 km</td><td class="mono">7.8 km/s · 0 G</td><td>加速度归零，开始减速上升</td></tr>
+          </tbody>
+        </table>
+        <p class="prose" style="margin-top:18px;font-size:12.5px">
+          隧道由内外两层相互交错的<b>新固态井圈</b>构成，接合部采用铆接工艺。井壁每隔一段距离设置一道环绕光圈，
+          既是里程标识，也是坠落者唯一的速度参照——当速度足够快时，这些光圈会连成一片刺目的蓝光。
+        </p>
+      </div>
+      <div class="reveal">
+        <div class="card" style="padding:22px">
+          <div class="sec-num" style="margin-bottom:14px">TUNNEL SPEC / 井体规格</div>
+          <table class="tbl">
+            <tr><td>井径</td><td class="mono">10.0 m</td></tr>
+            <tr><td>车厢直径 / 长度</td><td class="mono">8 m / 50 m</td></tr>
+            <tr><td>井内环境</td><td class="mono">真空 &lt; 10&#8315;&#8309; Pa</td></tr>
+            <tr><td>安全闸门</td><td class="mono">莫霍闸 · 古登堡闸</td></tr>
+            <tr><td>起点站</td><td class="mono">漠河 52.97&deg;N 122.53&deg;E</td></tr>
+            <tr><td>终点站</td><td class="mono">南极半岛 63.4&deg;S 57.0&deg;W</td></tr>
+            <tr><td>直线出口(未修正)</td><td class="mono">阿根廷南部</td></tr>
+            <tr><td>弯曲修正角</td><td class="mono">10.4&deg;</td></tr>
+          </table>
+          <div class="d" style="font-size:11.5px;color:var(--dim);line-height:1.8;margin-top:14px">
+            注：页面中隧道直径为可视化夸张显示（实际 10 m 在地球尺度上不足一个像素）。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="physics">
+    <div class="sec-head reveal">
+      <div class="sec-num">03 / PRINCIPLE</div>
+      <h2>不消耗能源的旅行</h2>
+      <p>在均匀密度假设下，地球内部的引力与到地心的距离成正比，坠落者的运动是一次标准的简谐振动：
+      加速度随深度线性减小，速度在地心达到最大，随后对称减速，抵达另一端时速度恰好归零。
+      "扔下去就到了"——整个过程不消耗任何能源。</p>
+    </div>
+    <div class="two">
+      <div class="chartbox reveal">
+        <canvas id="chart"></canvas>
+        <div class="legend">
+          <span><i style="background:#4ad4ff"></i>速度 v (km/s)</span>
+          <span><i style="background:#ffb648"></i>当地引力 g (G)</span>
+          <span><i style="background:#ff5a3c"></i>当前位置</span>
+        </div>
+      </div>
+      <div class="prose reveal">
+        <p><b>运动方程</b><br>
+        <span class="mono hl">a(x) = -&omega;&sup2;x &nbsp; &omega; = &radic;(g&#8320;/R) = 1.240&times;10&#8315;&sup3; rad/s</span><br>
+        <span class="mono hl">T = 2&pi;/&omega; = 84 分 24 秒 &nbsp;&nbsp; 单程 = T/2 = 42 分 12 秒</span></p>
+        <p>原著中面罩显示的每一组读数——100 km 处 1.4 km/s、2800 km 处 6.5 km/s、地心 8 km/s——
+        与该模型的计算结果<b>完全吻合</b>。本页面的所有仪表读数即由此方程实时积分得出。</p>
+        <p><b>关于失重</b>：坠落全程都是自由落体，舱内体感始终是 <b class="hl">0.00 G</b>。
+        仪表上的"当地引力"是隧道所在位置的<b>引力场强度</b>：地表 1 G，地心 0 G。
+        在地心，你以第一宇宙速度悬停在星球中心，整个地球在你周围旋转。</p>
+        <div class="quote">
+          "你现在已达到可以飞出地球的速度，却正处在这个星球的中心，地球正在围着你旋转，所有的海洋和大陆，所有的城市和所有的人，都在围着你旋转。"
+          <cite>——《地球大炮》</cite>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="build">
+    <div class="sec-head reveal">
+      <div class="sec-num">04 / CONSTRUCTION</div>
+      <h2>建设方案与阶段</h2>
+      <p>工程以"新固态"物质的自沉降特性为基础：这种在核爆向心压缩中诞生的超高密度物质，能像石块沉入水中一样穿过固态岩层，
+      为隧道掘进提供先导孔。此后是长达数十年的井圈装配、真空化与运营准备。</p>
+    </div>
+    <div class="timeline reveal">
+      <div class="tl-item done"><div class="tl-y">阶段 0 · 材料奇迹<span class="tl-tag">已完成</span></div>
+        <div class="tl-h">地下核爆销毁场 · "糖衣"实验</div>
+        <div class="tl-d">八颗十万吨级弹头围成的立方体中心，一块被"糖衣"纳米材料包裹的合金在向心压缩中转变为<b>新固态</b>物质，
+        并自行沉入地层，留下一个直径 10 厘米、深逾三万米的规则圆孔。地球隧道的物理基础由此诞生。</div></div>
+      <div class="tl-item done"><div class="tl-y">阶段 1 · 论证与授权<span class="tl-tag">已完成</span></div>
+        <div class="tl-h">南极庭院设想 · 全球电视演讲</div>
+        <div class="tl-d">南极大陆被确定为全球共同开发区域，"未来在地球顶上"成为口号。总工程师沈渊提出：
+        用一条贯穿地心的隧道，使南极成为国家的庭院。演讲开始时全国观众哄笑，随后安静——因为这个设想真的可行。</div></div>
+      <div class="tl-item bad"><div class="tl-y">阶段 2 · 勘探设计<span class="tl-tag">重大事故</span></div>
+        <div class="tl-h">地下航行与"落日六号"</div>
+        <div class="tl-d">大量地下船航行完成地幔与地核结构测绘。勘探船"落日六号"在地幔失事并下沉至地核，
+        三名乘员中两人遇难，女领航员<b>沈静</b>被永久封闭于地心，仅存中微子单向接收能力。</div></div>
+      <div class="tl-item done"><div class="tl-y">阶段 3 · 井圈掘进<span class="tl-tag">6–18 年</span></div>
+        <div class="tl-h">双层交错井圈装配</div>
+        <div class="tl-d">先以新固态先导体开孔，再逐段掏空外井圈内的地下物质、装入内井圈，接合部铆接。
+        地核段施工中，外井圈须独立承受铁镍流冲击——这是整条隧道最脆弱的工序。</div></div>
+      <div class="tl-item bad"><div class="tl-y">阶段 3.7 · 中部断裂灾难<span class="tl-tag">1527 人殒命</span></div>
+        <div class="tl-h">地核下 490 千米 · 铁镍流击穿</div>
+        <div class="tl-d">一股流速为观测最高值 5 倍的铁镍流使两段井圈错位，四千摄氏度的地核物质涌入隧道并沿井上升。
+        总指挥沈渊下令关闭<b>古登堡闸</b>，130 余部升降机中仅 61 部通过闸门。此后建立全线双闸门制度。</div></div>
+      <div class="tl-item done"><div class="tl-y">阶段 4 · 真空化与调试<span class="tl-tag">已完成</span></div>
+        <div class="tl-h">抽真空 · 光圈标识 · 安全雷达</div>
+        <div class="tl-d">全井抽至高真空，两端建过渡气闸；井壁每隔固定距离安装环绕光圈作为里程与速度标识；
+        部署落物监测雷达——后来的事实证明，它对吸波材料无效。</div></div>
+      <div class="tl-item bad"><div class="tl-y">阶段 5 · 运营与螺栓失落灾难<span class="tl-tag">3000 人遇难</span></div>
+        <div class="tl-h">地心列车正式通车</div>
+        <div class="tl-d">地心列车每时每刻穿行于隧道之中。运营第 N 年，漠河站一名维修工人失手将一枚直径不到 10 厘米的
+        吸波材料螺栓掉入井中；它穿过地球、折返，在地心以 16 km/s 的相对速度击中一列上行列车。隧道封闭。</div></div>
+      <div class="tl-item"><div class="tl-y">阶段 6 · 再启动<span class="tl-tag">规划中</span></div>
+        <div class="tl-h">地球大炮 · 工业大迁移</div>
+        <div class="tl-d">在南半球一侧的 6,300 千米井体外表面缠绕新型新固态导线，使半条隧道成为一根巨型电磁线圈；
+        以地核船在地核中拉设上百个大回路采集地核电流。物体通过地心后<b>继续加速</b>，
+        以 15 km/s 的速度射出南极炮口——超过第二宇宙速度。地球隧道由运输通道变为人类进入太空的发射器。</div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="tech">
+    <div class="sec-head reveal">
+      <div class="sec-num">05 / TECHNOLOGY</div>
+      <h2>四项不可替代的技术</h2>
+    </div>
+    <div class="cards reveal">
+      <div class="card"><div class="k" style="color:#4ad4ff;letter-spacing:.2em;font-family:var(--mono);font-size:10px">MATERIAL</div>
+        <div class="n" style="font-size:19px;margin-top:8px">新固态物质</div>
+        <div class="d">密度介于普通固态与简并态之间，可在固态岩层中自行下沉；具有优异的绝热性能，
+        使地心段井壁温度维持在 1500 摄氏度量级。第二代新固态同时是优良导体，为地球大炮线圈提供了可能。</div></div>
+      <div class="card"><div class="k" style="color:#4ad4ff;letter-spacing:.2em;font-family:var(--mono);font-size:10px">VACUUM</div>
+        <div class="n" style="font-size:19px;margin-top:8px">全井高真空</div>
+        <div class="d">若井内存在空气，8 km/s 的运动将在几秒内把一切烧成等离子体。两端各设一座百米级圆柱形气闸建筑，
+        进出均需穿着密封服并经历三分钟的减压过程。</div></div>
+      <div class="card"><div class="k" style="color:#4ad4ff;letter-spacing:.2em;font-family:var(--mono);font-size:10px">SAFETY</div>
+        <div class="n" style="font-size:19px;margin-top:8px">双闸门制度</div>
+        <div class="d">莫霍闸（地壳/地幔界面）与古登堡闸（地幔/地核界面）可在数十秒内封闭井道，
+        阻止地核物质沿隧道上升——那意味着一股冲上同温层的铁镍液柱，与整个北半球的白昼。</div></div>
+      <div class="card"><div class="k" style="color:#4ad4ff;letter-spacing:.2em;font-family:var(--mono);font-size:10px">GUIDANCE</div>
+        <div class="n" style="font-size:19px;margin-top:8px">无接触导向</div>
+        <div class="d">隧道的轻微弯曲用于抵消地球自转的科里奥利效应，使坠落体在无接触状态下平滑通过全程；
+        列车与井壁之间不存在机械接触，也就不存在摩擦损耗。</div></div>
+      <div class="card"><div class="k" style="color:#ffb648;letter-spacing:.2em;font-family:var(--mono);font-size:10px">STATION · NORTH</div>
+        <div class="n" style="font-size:19px;margin-top:8px">漠河起点站</div>
+        <div class="d">一座完美圆柱形的建筑，上百米高，表面光滑一体，没有任何开口——那是气闸。
+        平原上散布着几座锈红色的<b>铁山</b>，那是掘进时从地下带出的整块金属。井口横着一道不到一米宽的小桥。</div></div>
+      <div class="card"><div class="k" style="color:#ffb648;letter-spacing:.2em;font-family:var(--mono);font-size:10px">STATION · SOUTH</div>
+        <div class="n" style="font-size:19px;margin-top:8px">南极终点站</div>
+        <div class="d">位于南极大陆最东端的南极半岛，井口设密封盖板。停运后，高大的车库中悬着一排直径略小于井口的
+        圆柱体——那是停放中的地心列车。改造为地球大炮后，车库被拆除，井口直接面对天空。</div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="origin">
+    <div class="sec-head reveal">
+      <div class="sec-num">06 / ORIGIN</div>
+      <h2>原著溯源 ·《地球大炮》</h2>
+      <p>本页面的全部设定、数据与播报文本均取自刘慈欣中篇小说《地球大炮》（2003）。
+      主人公沈华北在核销毁实验中意外制造出新固态物质，因血癌进入冬眠；
+      74 年后苏醒时，他的儿子沈渊已用这项技术建成了地球隧道，也已成为全人类的公敌。</p>
+    </div>
+    <div class="two">
+      <div class="prose reveal">
+        <div class="quote">"它是走切线，还是穿过地心？"<br>
+        "是穿过地心，由中国的漠河穿过地球到达南极大陆的最东端南极半岛。"<br>
+        "据我所知，从那里贯穿地球应该到达阿根廷南部。"<br>
+        "不错，但隧道有轻微的弯曲。"<cite>——第八章 大隧道</cite></div>
+        <div class="quote">"您现在已到达 100 千米深度，速度 1.4 千米／秒，您已经穿过莫霍不连续面，由地壳进入地幔。"
+        <cite>——密封服面罩显示（本页面 HUD 播报即复刻此系统）</cite></div>
+        <div class="quote">他每天要穿过地球 30 次左右，就这样日复一日，年复一年，在漠河和南极半岛间，
+        做着周期为 84 分钟、振幅为 12,600 千米的简谐振动。<cite>——第十章 沈渊之死</cite></div>
+      </div>
+      <div class="prose reveal">
+        <p><b>三个人</b><br>
+        <span class="hl">沈华北</span>：新固态之父，两次冬眠的时间移民，最终乘地球大炮飞出地球。<br>
+        <span class="hl">沈渊</span>：南极庭院工程总指挥，天才与罪人；隧道封闭后每天在其中往返坠落三十次，
+        直至心脏病发作，遗体在最后一次通过地心时被烧成灰。<br>
+        <span class="hl">沈静</span>：勘探船"落日六号"幸存领航员，随铁镍流永远运行在地核之中。</p>
+        <p><b>结局</b><br>
+        半个世纪后，隧道成为"地球大炮"。炮管中同时运行着五六颗"炮弹"，每八到十分钟射出一艘太空船；
+        工业大迁移最盛时，两三分钟一发，一批批太空船组成上升的流星雨。
+        南极大陆重新恢复了白色。</p>
+        <div class="quote">"长城和金字塔都是完全失败的超级工程……但时间使这些都无关紧要，
+        只有凝结于其上的人类精神永远光彩照人！与这条伟大的<b>地心长城</b>相比，你们这些哭哭啼啼的孟姜女是多么可怜！"
+        <cite>——第十一章 南极</cite></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <b>南极庭院工程 · 地球隧道可视化</b><br>
+    设定与数据取自刘慈欣《地球大炮》 · 物理模型为理想引力列车（均匀密度假设）<br>
+    纯前端实现 · Three.js · 单文件 HTML · 非官方同人作品，仅供学习与欣赏
+  </footer>
+</main>
+
+<div id="toast"></div>
+
+<!-- ============ 载入层 ============ -->
+<div id="loading">
+  <div class="ring"></div>
+  <div class="t">ANTARCTIC COURTYARD PROJECT</div>
+  <div class="bar"><i id="loadingBar"></i></div>
+  <div class="sub" id="loadingText">正在装载地球…</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script>
+/* =========================================================================
+   地心长城 · 漠河—南极地球隧道   核心引擎
+   数据全部取自刘慈欣《地球大炮》；物理模型为理想引力列车（简谐振动）
+   ========================================================================= */
+(function(){
+'use strict';
+var APP = window.APP = {};
+
+/* ---------------- 1. 常量与原著数据 ---------------- */
+var DEG = Math.PI/180;
+var R_KM   = 6371;                 // 地球半径 km
+var SCALE  = 1/1000;               // 场景单位：1 单位 = 1000 km
+var R3     = R_KM*SCALE;           // 6.371
+var AMP    = 6300;                 // 隧道半程 km（原著：振幅 12600 km）
+var OMEGA  = Math.sqrt(9.8/(R_KM*1000));   // 1.2402e-3 rad/s
+var HALF_T = Math.PI/OMEGA;        // 2532 s = 42 分 12 秒
+var VMAX   = OMEGA*AMP*1000;       // 7814 m/s ≈ 7.8 km/s
+var WALL_ONEWAY = 120;             // 1x 时单程墙钟秒数
+var TIME_SCALE  = HALF_T/WALL_ONEWAY;      // 21.1 倍
+var V_EXIT = 15000;                // 地球大炮出膛速度 m/s（原著）
+
+var MOHE = {lat:52.97, lon:122.53, name:'漠河站', sub:'MOHE STATION 0 km'};
+var APEX = {lat:-63.40, lon:-57.00, name:'南极站', sub:'ANTARCTIC STATION 12600 km'};
+
+// 圈层：以"行程深度"（自漠河沿隧道走过的距离）划分，与原著面罩播报一致
+var LAYERS = [
+  {n:'地壳',            s:'CRUST',        d0:0,    d1:35,   col:0x7d8ea3, r0:6336, r1:6371},
+  {n:'地幔 · 黏性物质区', s:'ASTHENOSPHERE',d0:35,   d1:1000, col:0xb8532f, r0:5371, r1:6336},
+  {n:'地幔 · 刚性物质区', s:'MESOSPHERE',   d0:1000, d1:2891, col:0x8f3a22, r0:3480, r1:5371},
+  {n:'外核 · 液态铁镍',  s:'OUTER CORE',   d0:2891, d1:5150, col:0xff8a3c, r0:1221, r1:3480},
+  {n:'内核 · 固态铁镍',  s:'INNER CORE',   d0:5150, d1:12600-5150, col:0xffd08a, r0:0, r1:1221}
+];
+function layerAt(depth){                       // depth: 行程深度 0..12600
+  var d = depth<=AMP ? depth : (12600-depth);  // 上行按对称折算
+  for(var i=0;i<LAYERS.length;i++){ if(d>=LAYERS[i].d0 && d<LAYERS[i].d1) return LAYERS[i]; }
+  return LAYERS[4];
+}
+// 原著面罩播报（下行 6 条 + 上行 5 条），按行程深度触发
+var REPORTS = [
+ {d:100,   t:'您现在已到达100千米深度，速度1.4千米／秒，您已经穿过莫霍不连续面，由地壳进入地幔。'},
+ {d:300,   t:'您现在已到达300千米深度，速度2.4千米／秒，已进入地幔黏性物质区。'},
+ {d:1500,  t:'您现在已到达1500千米深度，速度5.1千米／秒，已进入地幔刚性物质区。'},
+ {d:2800,  t:'您现在已到达2800千米深度，速度6.5千米／秒，您正在穿过古登堡不连续面，进入地核。'},
+ {d:5800,  t:'您现在已到达5800千米深度，速度7.8千米／秒，您已进入固态地核，正在接近地心！',hot:1},
+ {d:6300,  t:'您现在已到达6300千米深度，速度8千米／秒，正在穿过地心！',hot:1},
+ {d:6800,  t:'您已通过地心，现在正在上升，并开始减速。您已经上升了500千米，速度7.8千米／秒，仍在固态地核中。',hot:1},
+ {d:8500,  t:'您现在已从地心上升了2200千米，速度7.5千米／秒，已重新进入地核的液态部分。'},
+ {d:9800,  t:'您现在已从地心上升了3500千米，速度6.5千米／秒，正在穿过古登堡不连续面，重新进入地幔。'},
+ {d:11100, t:'您现在已从地心上升了4800千米，速度5.1千米／秒，正在穿过地幔的刚性物质区。'},
+ {d:12500, t:'您现在已从地心上升了6200千米，速度1.4千米／秒，已经穿过莫霍不连续面，进入地壳。注意，您正在接近地球隧道的南极顶点！'},
+ {d:12599, t:'您已经到达地球隧道的南极顶点！'}
+];
+APP.K = {R_KM:R_KM,SCALE:SCALE,R3:R3,AMP:AMP,OMEGA:OMEGA,HALF_T:HALF_T,VMAX:VMAX,
+         WALL_ONEWAY:WALL_ONEWAY,TIME_SCALE:TIME_SCALE,V_EXIT:V_EXIT,
+         MOHE:MOHE,APEX:APEX,LAYERS:LAYERS,REPORTS:REPORTS,layerAt:layerAt};
+
+/* ---------------- 2. 工具 ---------------- */
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function lerp(a,b,t){return a+(b-a)*t;}
+function smooth(e0,e1,x){var t=clamp((x-e0)/(e1-e0),0,1);return t*t*(3-2*t);}
+APP.clamp=clamp; APP.lerp=lerp; APP.smooth=smooth;
+function ll2v(lat,lon,r){
+  var p=(90-lat)*DEG, t=(lon+180)*DEG;
+  return new THREE.Vector3(-r*Math.cos(t)*Math.sin(p), r*Math.cos(p), r*Math.sin(t)*Math.sin(p));
+}
+APP.ll2v = ll2v;
+// 简易值噪声
+function hash2(x,y){var n=Math.sin(x*127.1+y*311.7)*43758.5453;return n-Math.floor(n);}
+function vnoise(x,y){
+  var xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+  var u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
+  var a=hash2(xi,yi),b=hash2(xi+1,yi),c=hash2(xi,yi+1),d=hash2(xi+1,yi+1);
+  return lerp(lerp(a,b,u),lerp(c,d,u),v);
+}
+function fbm(x,y,oct){var s=0,a=.5,f=1;for(var i=0;i<oct;i++){s+=a*vnoise(x*f,y*f);f*=2;a*=.5;}return s;}
+
+/* ---------------- 3. 物理仿真 ---------------- */
+var sim = APP.sim = {
+  t:0,                 // 物理时间 s
+  playing:false,
+  speed:1,
+  cannon:false,
+  mode:'shm',          // shm | cannonUp | launched
+  s:-AMP*1000,         // 距地心的隧道弧长坐标 m（-A..A）
+  v:0,                 // 速率 m/s
+  felt:0,              // 体感加速度 m/s^2
+  gloc:9.8,            // 当地引力场强 m/s^2
+  crossings:0,
+  launchDist:0,        // 出膛后飞行距离 m
+  reportIdx:0,
+  reset:function(){
+    this.t=0;this.mode='shm';this.s=-AMP*1000;this.v=0;this.felt=0;this.gloc=9.8;
+    this.crossings=0;this.launchDist=0;this.reportIdx=0;
+  },
+  vOfS:function(s){    // 大炮模式上行段速度曲线：地心 7.8 -> 炮口 15 km/s
+    var A=AMP*1000, k=clamp(s/A,0,1);
+    return Math.sqrt(VMAX*VMAX*(1-k*k) + V_EXIT*V_EXIT*k*k);
+  },
+  setProgress:function(p){   // 0..1 单程进度（拖动进度条）
+    p=clamp(p,0,1);
+    this.mode='shm'; this.t=p*HALF_T; this.launchDist=0;
+    this.s=-AMP*1000*Math.cos(OMEGA*this.t);
+    this.v=AMP*1000*OMEGA*Math.sin(OMEGA*this.t);
+    this.reportIdx=0;
+    var dep=(this.s/1000+AMP);
+    while(this.reportIdx<REPORTS.length && REPORTS[this.reportIdx].d<=dep) this.reportIdx++;
+  },
+  step:function(dtWall){
+    if(!this.playing) return null;
+    var dt = dtWall*TIME_SCALE*this.speed;      // 物理时间步长
+    var A = AMP*1000, ev=null;
+    if(this.mode==='shm'){
+      var prevS=this.s;
+      this.t += dt;
+      this.s = -A*Math.cos(OMEGA*this.t);
+      this.v = A*OMEGA*Math.sin(OMEGA*this.t);
+      this.gloc = OMEGA*OMEGA*Math.abs(this.s);
+      this.felt = 0;                            // 自由落体：全程失重
+      if(prevS<0 && this.s>=0){ this.crossings++; ev='core';
+        if(this.cannon){ this.mode='cannonUp'; this.s=0; this.v=VMAX; ev='cannon'; }
+      }
+    } else if(this.mode==='cannonUp'){
+      // 数值积分（4 个子步保证稳定）
+      var n=4, h=dt/n;
+      for(var i=0;i<n;i++){
+        var v1=this.vOfS(this.s);
+        var s2=this.s+v1*h*0.5;
+        this.s += this.vOfS(s2)*h;
+        if(this.s>=A){ this.s=A; break; }
+      }
+      var ds=Math.max(1,A*0.0005);
+      var v0=this.vOfS(this.s), v2=this.vOfS(Math.min(A,this.s+ds));
+      this.v=v0;
+      this.gloc = OMEGA*OMEGA*Math.abs(this.s);
+      this.felt = v0*(v2-v0)/ds + this.gloc;    // 推力 = dv/dt + 需克服的引力
+      this.t += dt;
+      if(this.s>=A){ this.mode='launched'; this.launchDist=0; ev='launch'; }
+    } else {                                    // launched：出膛后飞离地球
+      this.v = Math.max(9000, V_EXIT - this.launchDist*0.00004);
+      this.launchDist += this.v*dt;
+      this.gloc = 9.8*Math.pow(R_KM*1000/(R_KM*1000+this.launchDist),2);
+      this.felt = 0;
+      this.t += dt;
+    }
+    return ev;
+  },
+  depthKm:function(){ return this.s/1000 + AMP; },          // 行程深度 0..12600
+  progress:function(){ return clamp((this.s/1000+AMP)/(2*AMP),0,1); },
+  elapsed:function(){ return this.mode==='shm' ? (this.t%(2*HALF_T)) : this.t; },
+  eta:function(){
+    if(this.mode!=='shm') return 0;
+    var tt=this.t%(2*HALF_T);
+    return tt<HALF_T ? HALF_T-tt : 2*HALF_T-tt;
+  },
+  // 井壁温度（原著：地心段 >1500℃，新固态绝热）
+  wallTemp:function(){
+    var d=this.depthKm(), x=Math.min(d,12600-d)/AMP;
+    return Math.round(18 + 1500*Math.pow(x,1.55));
+  }
+};
+
+/* ---------------- 4. 程序化纹理（外链失效时的降级方案） ---------------- */
+var LANDS = [
+ // 北美
+ [[-168,65],[-164,60],[-152,58],[-146,60],[-135,57],[-130,52],[-124,48],[-124,40],[-117,32],[-110,23],[-105,20],[-97,16],[-92,15],[-87,13],[-83,9],[-79,8],[-81,12],[-84,15],[-87,21],[-90,21],[-97,26],[-94,29],[-89,29],[-82,25],[-80,32],[-76,35],[-70,42],[-66,45],[-60,47],[-56,52],[-64,58],[-78,62],[-95,68],[-115,70],[-130,70],[-155,71],[-168,66]],
+ // 格陵兰
+ [[-45,60],[-52,64],[-55,70],[-60,76],[-50,82],[-30,83],[-20,77],[-22,70],[-33,66],[-42,60]],
+ // 南美
+ [[-81,-4],[-79,2],[-76,8],[-71,12],[-63,11],[-60,6],[-52,5],[-44,-2],[-35,-6],[-38,-13],[-39,-18],[-48,-25],[-53,-34],[-57,-38],[-62,-40],[-65,-45],[-68,-50],[-70,-54],[-75,-52],[-73,-45],[-73,-37],[-71,-30],[-70,-22],[-71,-18],[-76,-14],[-79,-8]],
+ // 非洲
+ [[-17,15],[-16,21],[-12,28],[-6,36],[10,37],[19,31],[25,32],[33,31],[35,24],[38,18],[43,12],[51,12],[48,5],[41,-2],[40,-11],[35,-19],[33,-26],[27,-34],[19,-35],[14,-23],[12,-17],[9,-1],[9,4],[3,6],[-4,5],[-8,4],[-13,9],[-16,12]],
+ // 欧亚
+ [[-9,43],[-2,48],[2,51],[4,53],[8,54],[8,57],[11,58],[13,55],[19,55],[24,57],[21,60],[25,65],[22,66],[29,70],[38,68],[45,68],[55,69],[60,70],[69,73],[74,73],[80,73],[90,76],[100,77],[110,76],[113,73],[130,72],[140,73],[150,70],[160,70],[170,69],[180,66],[177,62],[170,60],[162,58],[163,56],[156,51],[155,48],[143,54],[141,52],[135,44],[130,42],[127,40],[122,39],[121,37],[119,35],[121,31],[118,25],[113,22],[110,21],[107,17],[109,12],[106,9],[103,1],[100,6],[98,10],[95,16],[91,22],[88,22],[85,20],[80,15],[77,8],[75,15],[73,20],[70,22],[67,24],[60,25],[57,25],[54,25],[50,29],[48,30],[43,30],[40,37],[36,36],[29,41],[27,40],[23,38],[19,40],[13,45],[16,41],[12,38],[8,44],[3,43],[-1,38],[-9,39]],
+ // 澳大利亚
+ [[113,-22],[114,-26],[115,-32],[118,-35],[124,-33],[129,-32],[134,-33],[138,-35],[141,-38],[146,-39],[150,-37],[153,-31],[153,-27],[148,-20],[143,-14],[136,-12],[130,-12],[125,-14],[122,-17],[117,-21]],
+ // 日本 / 新西兰 / 英国 / 马达加斯加 / 印尼
+ [[130,31],[132,34],[136,35],[140,36],[141,39],[141,45],[145,44],[142,42],[139,35],[135,33],[131,31]],
+ [[173,-35],[175,-37],[178,-38],[176,-41],[173,-41],[171,-44],[167,-46],[166,-45],[170,-43],[172,-40]],
+ [[-5,50],[-4,53],[-3,55],[-5,58],[-6,56],[-6,52],[-1,51]],
+ [[43,-12],[49,-13],[50,-16],[47,-25],[45,-25],[43,-21]],
+ [[95,5],[104,2],[112,-3],[118,-4],[115,-8],[105,-7],[100,0]],
+ [[131,-1],[141,-3],[147,-8],[141,-9],[134,-5]],
+ // 南极半岛（隧道终点）
+ [[-57,-63.2],[-55,-64.5],[-58,-66],[-62,-68],[-65,-70],[-70,-72],[-73,-74],[-60,-74],[-56,-70],[-54,-66],[-55,-63.6]]
+];
+function drawLandPath(ctx,poly,W,H,off){
+  ctx.beginPath();
+  for(var i=0;i<poly.length;i++){
+    var x=((poly[i][0]+180)/360)*W+off, y=((90-poly[i][1])/180)*H;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+}
+function makeLandMask(W,H){
+  var c=document.createElement('canvas');c.width=W;c.height=H;
+  var x=c.getContext('2d');
+  x.fillStyle='#000';x.fillRect(0,0,W,H);
+  x.fillStyle='#fff';
+  for(var k=-1;k<=1;k++){ for(var i=0;i<LANDS.length;i++){ drawLandPath(x,LANDS[i],W,H,k*W); x.fill(); } }
+  // 南极大陆
+  x.beginPath();
+  for(var lon=-180;lon<=180;lon+=4){
+    var lat=-69+3.4*Math.sin(lon*0.052)+2.2*Math.sin(lon*0.11+1.2);
+    var px=((lon+180)/360)*W, py=((90-lat)/180)*H;
+    if(lon===-180) x.moveTo(px,py); else x.lineTo(px,py);
+  }
+  x.lineTo(W,H);x.lineTo(0,H);x.closePath();x.fill();
+  return c;
+}
+function makeProceduralEarth(){
+  var W=1024,H=512;
+  var mask=makeLandMask(W,H), mctx=mask.getContext('2d');
+  var md=mctx.getImageData(0,0,W,H).data;
+  var day=document.createElement('canvas');day.width=W;day.height=H;
+  var night=document.createElement('canvas');night.width=W;night.height=H;
+  var water=document.createElement('canvas');water.width=W;water.height=H;
+  var topo=document.createElement('canvas');topo.width=W;topo.height=H;
+  var dI=day.getContext('2d').createImageData(W,H);
+  var nI=night.getContext('2d').createImageData(W,H);
+  var wI=water.getContext('2d').createImageData(W,H);
+  var tI=topo.getContext('2d').createImageData(W,H);
+  for(var y=0;y<H;y++){
+    var lat=90-(y/H)*180, al=Math.abs(lat);
+    for(var x=0;x<W;x++){
+      var i=(y*W+x)*4, land=md[i]>110;
+      var nz=fbm(x*0.035,y*0.035,4), nz2=fbm(x*0.11+40,y*0.11,3);
+      var r,g,b;
+      if(land){
+        var ice=smooth(63,72,al);
+        var dry=smooth(.45,.72,nz2*0.6+smooth(14,26,al)*0.55-smooth(46,60,al)*0.4);
+        r=lerp(58,150,dry); g=lerp(96,128,dry); b=lerp(48,80,dry);
+        r=lerp(r,236,ice); g=lerp(g,242,ice); b=lerp(b,250,ice);
+        var sh=(nz-0.5)*46; r+=sh;g+=sh;b+=sh*0.7;
+        // 地形高度图
+        var hgt=110+nz*120+nz2*40;
+        tI.data[i]=hgt;tI.data[i+1]=hgt;tI.data[i+2]=hgt;tI.data[i+3]=255;
+        wI.data[i]=0;wI.data[i+1]=0;wI.data[i+2]=0;wI.data[i+3]=255;
+        // 城市灯光：中低纬 + 噪声聚集
+        var pop=Math.max(0,1-Math.abs(al-38)/44)*Math.pow(fbm(x*0.5,y*0.5,2),3.2);
+        var lit=pop>0.055?clamp((pop-0.055)*22,0,1):0;
+        nI.data[i]=255*lit;nI.data[i+1]=214*lit;nI.data[i+2]=150*lit;nI.data[i+3]=255;
+      } else {
+        var deep=smooth(.35,.62,nz);
+        r=lerp(6,12,deep); g=lerp(24,52,deep); b=lerp(58,104,deep);
+        var pice=smooth(70,80,al); r=lerp(r,225,pice);g=lerp(g,235,pice);b=lerp(b,245,pice);
+        tI.data[i]=40+nz*22;tI.data[i+1]=40+nz*22;tI.data[i+2]=40+nz*22;tI.data[i+3]=255;
+        var wv=255*(1-pice);
+        wI.data[i]=wv;wI.data[i+1]=wv;wI.data[i+2]=wv;wI.data[i+3]=255;
+        nI.data[i]=0;nI.data[i+1]=0;nI.data[i+2]=0;nI.data[i+3]=255;
+      }
+      dI.data[i]=clamp(r,0,255);dI.data[i+1]=clamp(g,0,255);dI.data[i+2]=clamp(b,0,255);dI.data[i+3]=255;
+    }
+  }
+  day.getContext('2d').putImageData(dI,0,0);
+  night.getContext('2d').putImageData(nI,0,0);
+  water.getContext('2d').putImageData(wI,0,0);
+  topo.getContext('2d').putImageData(tI,0,0);
+  // 云
+  var cl=document.createElement('canvas');cl.width=W;cl.height=H;
+  var ci=cl.getContext('2d').createImageData(W,H);
+  for(var y2=0;y2<H;y2++){
+    var lat2=90-(y2/H)*180;
+    var band=0.55+0.45*Math.cos((lat2-8)*DEG*3.1);
+    for(var x2=0;x2<W;x2++){
+      var j=(y2*W+x2)*4;
+      var n=fbm(x2*0.028,y2*0.045,5);
+      var a=clamp((n*band-0.44)*3.4,0,1);
+      ci.data[j]=255;ci.data[j+1]=255;ci.data[j+2]=255;ci.data[j+3]=a*235;
+    }
+  }
+  cl.getContext('2d').putImageData(ci,0,0);
+  return {day:day,night:night,water:water,topo:topo,cloud:cl};
+}
+
+/* ---------------- 5. 渲染器与场景 ---------------- */
+var renderer,scene,camera,cabinScene,cabinCam,earthGroup,clipPlane;
+var mats={},objs={},uni={};
+var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth<760;
+
+APP.init=function(){
+  try{
+    renderer=new THREE.WebGLRenderer({canvas:document.getElementById('gl'),antialias:!isMobile,alpha:false,powerPreference:'high-performance'});
+  }catch(e){ APP.failed=true; }
+  try{ if(!renderer||!renderer.getContext()) APP.failed=true; }catch(e2){ APP.failed=true; }
+  if(APP.failed) return false;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, isMobile?1.6:2));
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  renderer.setClearColor(0x03060c,1);
+  renderer.localClippingEnabled=true;
+  renderer.autoClear=true;
+
+  scene=new THREE.Scene();
+  camera=new THREE.PerspectiveCamera(42,window.innerWidth/window.innerHeight,0.05,3000);
+  camera.position.set(11,7.5,17);
+  cabinScene=new THREE.Scene();
+  cabinCam=new THREE.PerspectiveCamera(76,window.innerWidth/window.innerHeight,0.05,900);
+
+  earthGroup=new THREE.Group();
+  earthGroup.rotation.order='ZYX';     // 先自转再倾斜，保证地轴固定
+  earthGroup.rotation.z=-23.4*DEG;     // 黄赤交角
+  scene.add(earthGroup);
+
+  buildStars();
+  buildEarth();
+  buildInterior();
+  buildTunnel();
+  buildCapsule();
+  buildCabin();
+  // 默认机位：正对隧道所在剖面，可一眼看到漠河—地心—南极的完整通道
+  (function(){
+    earthGroup.updateMatrixWorld(true);
+    var d=APP.cutNormal.clone().applyQuaternion(earthGroup.quaternion).normalize().negate();
+    var th=Math.atan2(d.x,d.z)+0.42, ph=Math.acos(Math.max(-1,Math.min(1,d.y)));
+    ph=Math.max(0.42,Math.min(Math.PI-0.42,ph-0.18));
+    orbit.theta=orbit.tTheta=th; orbit.phi=orbit.tPhi=ph;
+    var fit=computeFit();
+    orbit.radius=orbit.tRadius=fit;
+    APP.homeView={th:th,ph:ph,r:fit};
+    // 太阳设在相机侧后方 38 度，形成清晰晨昏线
+    APP.homeSun={az:((th*180/Math.PI+38)%360+360)%360, el:18};
+  })();
+  APP.scene=scene;APP.camera=camera;APP.renderer=renderer;
+  APP.cabinScene=cabinScene;APP.cabinCam=cabinCam;APP.earthGroup=earthGroup;
+  APP.objs=objs;APP.mats=mats;APP.uni=uni;
+  return true;
+};
+
+/* ---- 星空 ---- */
+function buildStars(){
+  var N=isMobile?2200:4200, pos=new Float32Array(N*3), col=new Float32Array(N*3), siz=new Float32Array(N);
+  for(var i=0;i<N;i++){
+    var u=Math.random()*2-1, th=Math.random()*Math.PI*2, rr=Math.sqrt(1-u*u), R=520+Math.random()*140;
+    // 三成星星聚集成银河带
+    if(i%10<3){ var t=Math.random()*Math.PI*2, w=(Math.random()-0.5)*0.36;
+      var v=new THREE.Vector3(Math.cos(t),w*1.6,Math.sin(t)).normalize().applyAxisAngle(new THREE.Vector3(1,0,0.35).normalize(),1.1);
+      pos[i*3]=v.x*R;pos[i*3+1]=v.y*R;pos[i*3+2]=v.z*R;
+    } else { pos[i*3]=rr*Math.cos(th)*R;pos[i*3+1]=u*R;pos[i*3+2]=rr*Math.sin(th)*R; }
+    var w2=Math.random(), c=new THREE.Color().setHSL(0.55+0.12*(Math.random()-0.5),0.35,0.55+0.45*Math.pow(w2,3));
+    col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+    siz[i]=(0.6+Math.pow(Math.random(),6)*5.2);
+  }
+  var g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  g.setAttribute('asize',new THREE.BufferAttribute(siz,1));
+  var m=new THREE.ShaderMaterial({
+    uniforms:{uPix:{value:renderer.getPixelRatio()}},
+    vertexShader:[
+      'attribute float asize;varying vec3 vC;uniform float uPix;',
+      'void main(){vC=color;vec4 mv=modelViewMatrix*vec4(position,1.0);',
+      'gl_PointSize=asize*uPix*(300.0/-mv.z);gl_Position=projectionMatrix*mv;}'
+    ].join('\n'),
+    fragmentShader:[
+      'varying vec3 vC;',
+      'void main(){float d=length(gl_PointCoord-vec2(0.5));if(d>0.5)discard;',
+      'float a=smoothstep(0.5,0.02,d);gl_FragColor=vec4(vC,a);}'
+    ].join('\n'),
+    vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending
+  });
+  objs.stars=new THREE.Points(g,m); objs.stars.frustumCulled=false; scene.add(objs.stars);
+}
+
+/* ---- 地球表面 / 云 / 大气 ---- */
+var CLIP_VERT_PARS='#include <clipping_planes_pars_vertex>';
+var CLIP_VERT='#include <clipping_planes_vertex>';
+var CLIP_FRAG_PARS='#include <clipping_planes_pars_fragment>';
+var CLIP_FRAG='#include <clipping_planes_fragment>';
+
+function buildEarth(){
+  var tex=makeProceduralEarth();
+  function ct(c,rep){var t=new THREE.CanvasTexture(c);t.wrapS=THREE.RepeatWrapping;t.minFilter=THREE.LinearMipmapLinearFilter;t.anisotropy=renderer.capabilities.getMaxAnisotropy?Math.min(8,renderer.capabilities.getMaxAnisotropy()):1;return t;}
+  uni.day={value:ct(tex.day)}; uni.night={value:ct(tex.night)};
+  uni.water={value:ct(tex.water)}; uni.topo={value:ct(tex.topo)}; uni.cloud={value:ct(tex.cloud)};
+  uni.sun={value:new THREE.Vector3(0.6,0.25,0.75).normalize()};
+  uni.opacity={value:1.0}; uni.nightAmt={value:1.0}; uni.rim={value:1.0}; uni.flat={value:0};
+  uni.time={value:0}; uni.bump={value:1.0};
+
+  var vert=[
+    'varying vec2 vUv;varying vec3 vN;varying vec3 vW;',
+    CLIP_VERT_PARS,
+    'void main(){vUv=uv;vN=normalize(normalMatrix*normal);',
+    'vec4 wp=modelMatrix*vec4(position,1.0);vW=wp.xyz;',
+    'vec4 mvPosition=viewMatrix*wp;',
+    CLIP_VERT,
+    'gl_Position=projectionMatrix*mvPosition;}'
+  ].join('\n');
+  var frag=[
+    'uniform sampler2D uDay,uNight,uWater,uTopo;uniform vec3 uSun;',
+    'uniform float uOpacity,uNightAmt,uRim,uBump,uFlat;',
+    'varying vec2 vUv;varying vec3 vN;varying vec3 vW;',
+    CLIP_FRAG_PARS,
+    'void main(){',
+    CLIP_FRAG,
+    ' vec3 N=normalize(vN);',
+    ' float tx=1.0/1600.0;',
+    ' float h0=texture2D(uTopo,vUv).r,hx=texture2D(uTopo,vUv+vec2(tx,0.0)).r,hy=texture2D(uTopo,vUv+vec2(0.0,tx)).r;',
+    ' vec3 T=normalize(cross(vec3(0.0,1.0,0.0),N)),B=cross(N,T);',
+    ' N=normalize(N+((h0-hx)*T+(h0-hy)*B)*3.2*uBump);',
+    ' vec3 S=normalize(uSun);vec3 V=normalize(cameraPosition-vW);',
+    ' float lam=dot(N,S);float diff=max(lam,0.0);',
+    ' float dayAmt=smoothstep(-0.14,0.24,lam);',
+    ' vec3 dayC=texture2D(uDay,vUv).rgb;',
+    ' vec3 col=dayC*mix(0.055+1.08*diff,1.24,uFlat);',
+    ' vec3 H=normalize(S+V);',
+    ' float spec=pow(max(dot(N,H),0.0),58.0)*texture2D(uWater,vUv).r;',
+    ' col+=vec3(0.45,0.66,0.95)*spec*1.5*dayAmt;',
+    ' col+=texture2D(uNight,vUv).rgb*(1.0-dayAmt)*uNightAmt*1.45*(1.0-uFlat);',
+    ' float fres=pow(1.0-max(dot(N,V),0.0),3.0);',
+    ' col+=vec3(0.16,0.42,0.88)*fres*(0.30+0.95*dayAmt)*uRim;',
+    ' float a=uOpacity;',
+    ' if(uOpacity<0.98){a=uOpacity*(0.50+0.80*fres);col*=1.30;}',
+    ' gl_FragColor=vec4(col,a);}'
+  ].join('\n');
+  mats.earth=new THREE.ShaderMaterial({
+    uniforms:{uDay:uni.day,uNight:uni.night,uWater:uni.water,uTopo:uni.topo,uSun:uni.sun,
+      uOpacity:uni.opacity,uNightAmt:uni.nightAmt,uRim:uni.rim,uBump:uni.bump,uFlat:uni.flat},
+    vertexShader:vert,fragmentShader:frag,clipping:true,transparent:true,depthWrite:true
+  });
+  objs.earth=new THREE.Mesh(new THREE.SphereGeometry(R3,isMobile?72:120,isMobile?48:80),mats.earth);
+  objs.earth.renderOrder=0;
+  earthGroup.add(objs.earth);
+
+  // 云层
+  mats.cloud=new THREE.ShaderMaterial({
+    uniforms:{uCloud:uni.cloud,uSun:uni.sun,uOp:{value:0.85},uFlat:uni.flat},
+    vertexShader:[
+      'varying vec2 vUv;varying vec3 vN;varying vec3 vW;',CLIP_VERT_PARS,
+      'void main(){vUv=uv;vN=normalize(normalMatrix*normal);vec4 wp=modelMatrix*vec4(position,1.0);vW=wp.xyz;',
+      'vec4 mvPosition=viewMatrix*wp;',CLIP_VERT,'gl_Position=projectionMatrix*mvPosition;}'
+    ].join('\n'),
+    fragmentShader:[
+      'uniform sampler2D uCloud;uniform vec3 uSun;uniform float uOp,uFlat;',
+      'varying vec2 vUv;varying vec3 vN;varying vec3 vW;',CLIP_FRAG_PARS,
+      'void main(){',CLIP_FRAG,
+      ' vec4 c=texture2D(uCloud,vUv);vec3 N=normalize(vN);',
+      ' float d=mix(max(dot(N,normalize(uSun)),0.0),0.85,uFlat);',
+      ' float a=max(c.a,c.r*0.9)*uOp;',
+      ' vec3 col=vec3(1.0,1.0,1.0)*(0.10+1.05*d);',
+      ' gl_FragColor=vec4(col,a*(0.12+0.95*d));}'
+    ].join('\n'),
+    clipping:true,transparent:true,depthWrite:false,side:THREE.FrontSide
+  });
+  objs.clouds=new THREE.Mesh(new THREE.SphereGeometry(R3*1.008,isMobile?60:96,isMobile?40:64),mats.cloud);
+  earthGroup.add(objs.clouds);
+
+  // 大气辉光
+  mats.atmo=new THREE.ShaderMaterial({
+    uniforms:{uSun:uni.sun,uStr:{value:1.0}},
+    vertexShader:['varying vec3 vN;varying vec3 vW;',
+      'void main(){vN=normalize(normalMatrix*normal);vec4 wp=modelMatrix*vec4(position,1.0);vW=wp.xyz;',
+      'gl_Position=projectionMatrix*viewMatrix*wp;}'].join('\n'),
+    fragmentShader:['uniform vec3 uSun;uniform float uStr;varying vec3 vN;varying vec3 vW;',
+      'void main(){vec3 N=normalize(vN);vec3 V=normalize(cameraPosition-vW);',
+      ' float f=pow(clamp(1.0-abs(dot(N,V)),0.0,1.0),2.4);',
+      ' float s=clamp(dot(normalize(-N),normalize(uSun))*0.5+0.62,0.0,1.0);',
+      ' gl_FragColor=vec4(vec3(0.28,0.55,1.0)*f*s*1.5*uStr,f*s*0.85*uStr);}'].join('\n'),
+    side:THREE.BackSide,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending
+  });
+  objs.atmo=new THREE.Mesh(new THREE.SphereGeometry(R3*1.055,48,32),mats.atmo);
+  scene.add(objs.atmo);
+  objs.atmo.rotation.copy(earthGroup.rotation);
+}
+
+/* ---- 内部圈层与剖面 ---- */
+function buildInterior(){
+  var A=ll2v(MOHE.lat,MOHE.lon,1), B=ll2v(APEX.lat,APEX.lon,1);
+  var n=new THREE.Vector3().crossVectors(A,B).normalize();     // 剖面法线（局部坐标，固定）
+  APP.cutNormal=n;
+  clipPlane=new THREE.Plane(n.clone(),40);                      // constant=40 → 不裁切
+  APP.clipPlane=clipPlane;
+
+  var shellV=['varying vec3 vN;varying vec3 vW;',CLIP_VERT_PARS,
+    'void main(){vN=normalize(normalMatrix*normal);vec4 wp=modelMatrix*vec4(position,1.0);vW=wp.xyz;',
+    'vec4 mvPosition=viewMatrix*wp;',CLIP_VERT,'gl_Position=projectionMatrix*mvPosition;}'].join('\n');
+  var shellF=['uniform vec3 uColor;uniform float uOp,uMode;uniform vec3 uSun;varying vec3 vN;varying vec3 vW;',
+    CLIP_FRAG_PARS,
+    'void main(){',CLIP_FRAG,
+    ' vec3 N=normalize(vN);vec3 V=normalize(cameraPosition-vW);',
+    ' float f=pow(clamp(1.0-abs(dot(N,V)),0.0,1.0),2.0);',
+    ' float lam=max(dot(N,normalize(uSun)),0.0);',
+    ' vec3 col=uColor*(0.30+0.55*lam)+uColor*f*1.15;',
+    ' float a=mix(uOp*(0.14+0.58*f),uOp,uMode);',
+    ' gl_FragColor=vec4(col,a);}'].join('\n');
+
+  objs.shells=[];
+  var shells=[{r:LAYERS[4].r1,c:0xffcf85,o:0.95},{r:LAYERS[3].r1,c:0xff7a2f,o:0.55},
+              {r:LAYERS[2].r1,c:0x9c3f24,o:0.32},{r:LAYERS[1].r1,c:0x7a5a4a,o:0.20}];
+  for(var i=0;i<shells.length;i++){
+    var m=new THREE.ShaderMaterial({
+      uniforms:{uColor:{value:new THREE.Color(shells[i].c)},uOp:{value:shells[i].o},
+        uMode:{value:0},uSun:uni.sun},
+      vertexShader:shellV,fragmentShader:shellF,clipping:true,transparent:true,
+      depthWrite:false,side:THREE.DoubleSide,blending:THREE.NormalBlending
+    });
+    var mesh=new THREE.Mesh(new THREE.SphereGeometry(shells[i].r*SCALE,64,44),m);
+    mesh.visible=false; mesh.renderOrder=-4+i;
+    earthGroup.add(mesh); objs.shells.push(mesh);
+  }
+  // 剖面盖（同心环）
+  var capG=new THREE.Group();
+  capG.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),n);
+  capG.position.copy(n).multiplyScalar(0.004);
+  var ringDefs=[{r0:0,r1:1221,ci:0xfff0cc,co:0xffc061},{r0:1221,r1:3480,ci:0xff9a3c,co:0xd2521c},
+    {r0:3480,r1:5371,ci:0x8e3820,co:0x63281a},{r0:5371,r1:6336,ci:0x7a4030,co:0x4a3230},
+    {r0:6336,r1:6371,ci:0x9fb0c4,co:0xc3d2e2}];
+  objs.caps=[];
+  for(var k=0;k<ringDefs.length;k++){
+    var d=ringDefs[k];
+    var geo=d.r0===0?new THREE.CircleGeometry(d.r1*SCALE,128):new THREE.RingGeometry(d.r0*SCALE,d.r1*SCALE,128,1);
+    var mm=new THREE.ShaderMaterial({
+      uniforms:{cI:{value:new THREE.Color(d.ci)},cO:{value:new THREE.Color(d.co)},
+        r0:{value:d.r0*SCALE},r1:{value:d.r1*SCALE},uOp:{value:0}},
+      vertexShader:['varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}'].join('\n'),
+      fragmentShader:['uniform vec3 cI,cO;uniform float r0,r1,uOp;varying vec3 vP;',
+        'float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}',
+        'void main(){float r=length(vP.xy);float t=clamp((r-r0)/max(0.0001,(r1-r0)),0.0,1.0);',
+        ' vec3 c=mix(cI,cO,t);',
+        ' float ang=atan(vP.y,vP.x);',
+        ' c*=0.93+0.14*h(vec2(floor(ang*22.0),floor(r*26.0)));',
+        ' gl_FragColor=vec4(c,uOp);}'].join('\n'),
+      transparent:true,side:THREE.DoubleSide,depthWrite:true
+    });
+    var rm=new THREE.Mesh(geo,mm); rm.visible=false; rm.renderOrder=-1;
+    capG.add(rm); objs.caps.push(rm);
+  }
+  objs.capGroup=capG; capG.visible=false; earthGroup.add(capG);
+}
+
+/* ---- 隧道 ---- */
+function buildTunnel(){
+  var A3=ll2v(MOHE.lat,MOHE.lon,R3), B3=ll2v(APEX.lat,APEX.lon,R3), O=new THREE.Vector3(0,0,0);
+  // 三次贝塞尔，两个控制点均在地心 → 平滑穿过内核（最深点距地心仅约 145 km）
+  var curve=new THREE.CubicBezierCurve3(A3,O,O,B3);
+  APP.curve=curve;
+  APP.curvePts=curve.getSpacedPoints(600);
+  var g=new THREE.TubeGeometry(curve,isMobile?260:420,0.030,10,false);
+  uni.prog={value:0}; uni.cannonAmt={value:0};
+  mats.tunnel=new THREE.ShaderMaterial({
+    uniforms:{uTime:uni.time,uProg:uni.prog,uCan:uni.cannonAmt},
+    vertexShader:['varying float vU;varying vec3 vN;varying vec3 vW;',
+      'void main(){vU=uv.x;vN=normalize(normalMatrix*normal);vec4 wp=modelMatrix*vec4(position,1.0);vW=wp.xyz;',
+      'gl_Position=projectionMatrix*viewMatrix*wp;}'].join('\n'),
+    fragmentShader:['uniform float uTime,uProg,uCan;varying float vU;varying vec3 vN;varying vec3 vW;',
+      'void main(){',
+      ' float core=1.0-abs(vU-0.5)*2.0;',
+      ' vec3 blue=vec3(0.20,0.66,1.0),red=vec3(1.0,0.34,0.10);',
+      ' vec3 c=mix(blue,red,smoothstep(0.90,1.0,core)+uCan*smoothstep(0.5,1.0,vU)*0.85);',
+      ' float band=abs(sin(vU*640.0-uTime*1.2));',
+      ' float flow=pow(band,10.0)*0.8;',
+      ' float head=exp(-abs(vU-uProg)*140.0)*1.6;',
+      ' vec3 V=normalize(cameraPosition-vW);',
+      ' float f=pow(clamp(1.0-abs(dot(normalize(vN),V)),0.0,1.0),1.6);',
+      ' float a=(0.28+flow*1.3+head)*(0.42+0.95*f);',
+      ' gl_FragColor=vec4(c*(0.9+head*1.6+flow),a);}'].join('\n'),
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide
+  });
+  objs.tunnel=new THREE.Mesh(g,mats.tunnel); objs.tunnel.renderOrder=2; earthGroup.add(objs.tunnel);
+
+  // 环绕光圈（原著：井壁每隔一段距离就有一个环绕光圈）
+  var NR=isMobile?90:150;
+  var rg=new THREE.TorusGeometry(0.082,0.011,5,22);
+  var rm=new THREE.MeshBasicMaterial({transparent:true,opacity:1.0,blending:THREE.AdditiveBlending,depthWrite:false});
+  var inst=new THREE.InstancedMesh(rg,rm,NR);
+  var dummy=new THREE.Object3D(), col=new THREE.Color();
+  for(var i=0;i<NR;i++){
+    var t=(i+0.5)/NR, p=curve.getPointAt(t), tan=curve.getTangentAt(t);
+    dummy.position.copy(p);
+    dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),tan.clone().normalize());
+    var core=1-Math.abs(t-0.5)*2;
+    var sc=1+core*0.55; dummy.scale.set(sc,sc,1);
+    dummy.updateMatrix(); inst.setMatrixAt(i,dummy.matrix);
+    col.setHSL(lerp(0.56,0.045,Math.pow(core,7)),0.9,lerp(0.5,0.62,Math.pow(core,7)));
+    inst.setColorAt(i,col);
+  }
+  inst.instanceMatrix.needsUpdate=true; if(inst.instanceColor) inst.instanceColor.needsUpdate=true;
+  inst.renderOrder=3; objs.rings=inst; earthGroup.add(inst);
+
+  // 两端站点：地面环 + 竖井光柱
+  objs.stations=[];
+  [[MOHE,0x4ad4ff],[APEX,0x9ee8ff]].forEach(function(st){
+    var p=ll2v(st[0].lat,st[0].lon,R3), dir=p.clone().normalize();
+    var gg=new THREE.Group();
+    var ring=new THREE.Mesh(new THREE.RingGeometry(0.10,0.20,48),
+      new THREE.MeshBasicMaterial({color:st[1],transparent:true,opacity:0.75,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false}));
+    ring.position.copy(dir.clone().multiplyScalar(R3*1.001));
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),dir);
+    gg.add(ring);
+    var beam=new THREE.Mesh(new THREE.CylinderGeometry(0.020,0.075,1.5,12,1,true),
+      new THREE.MeshBasicMaterial({color:st[1],transparent:true,opacity:0.22,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+    beam.position.copy(dir.clone().multiplyScalar(R3+0.75));
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir);
+    gg.add(beam);
+    earthGroup.add(gg); objs.stations.push(gg);
+  });
+}
+
+/* ---- 舱体与尾迹 ---- */
+function buildCapsule(){
+  var g=new THREE.Group();
+  var body=new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.048,0.30,14),
+    new THREE.MeshBasicMaterial({color:0xeaf6ff}));
+  body.rotation.x=Math.PI/2; g.add(body);
+  var nose=new THREE.Mesh(new THREE.ConeGeometry(0.048,0.10,14),new THREE.MeshBasicMaterial({color:0xffffff}));
+  nose.rotation.x=Math.PI/2; nose.position.z=0.20; g.add(nose);
+  var tail=new THREE.Mesh(new THREE.ConeGeometry(0.048,0.09,14),new THREE.MeshBasicMaterial({color:0x9fd6ff}));
+  tail.rotation.x=-Math.PI/2; tail.position.z=-0.195; g.add(tail);
+  // 光晕
+  var cv=document.createElement('canvas');cv.width=cv.height=128;
+  var cx=cv.getContext('2d');
+  var gr=cx.createRadialGradient(64,64,0,64,64,64);
+  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.25,'rgba(160,220,255,0.55)');
+  gr.addColorStop(1,'rgba(80,180,255,0)');
+  cx.fillStyle=gr;cx.fillRect(0,0,128,128);
+  var spr=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),
+    blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:0.95}));
+  spr.scale.set(1.5,1.5,1); g.add(spr); objs.capGlow=spr;
+  g.renderOrder=4; objs.capsule=g; earthGroup.add(g);
+  // 尾迹
+  var N=140, pos=new Float32Array(N*3), cols=new Float32Array(N*3);
+  var tg=new THREE.BufferGeometry();
+  tg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  tg.setAttribute('color',new THREE.BufferAttribute(cols,3));
+  objs.trail=new THREE.Line(tg,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,
+    blending:THREE.AdditiveBlending,depthWrite:false}));
+  objs.trail.frustumCulled=false; objs.trail.renderOrder=4; earthGroup.add(objs.trail);
+  objs.trailPts=[];
+}
+
+/* ---- 舱内场景（独立坐标系，避免地球尺度下的精度问题） ---- */
+var RING_GAP=5.0;            // 舱内每两道光圈的场景距离
+var RING_GAP_KM=15;          // 对应的真实里程（每 15 km 一道环绕光圈）
+function buildCabin(){
+  cabinScene.fog=new THREE.FogExp2(0x000306,0.0085);
+  // 井壁
+  var wallGeo=new THREE.CylinderGeometry(1.0,1.0,420,44,1,true);
+  wallGeo.rotateX(Math.PI/2);
+  uni.cabColor={value:new THREE.Color(0x2b7fd4)};
+  uni.cabHeat={value:0}; uni.cabScroll={value:0}; uni.cabSpeed={value:0};
+  mats.wall=new THREE.ShaderMaterial({
+    uniforms:{uCol:uni.cabColor,uHeat:uni.cabHeat,uScroll:uni.cabScroll,uSpd:uni.cabSpeed},
+    vertexShader:['varying vec2 vUv;varying float vZ;',
+      'void main(){vUv=uv;vec4 mv=modelViewMatrix*vec4(position,1.0);vZ=-mv.z;gl_Position=projectionMatrix*mv;}'].join('\n'),
+    fragmentShader:['uniform vec3 uCol;uniform float uHeat,uScroll,uSpd;varying vec2 vUv;varying float vZ;',
+      'void main(){',
+      ' float seam=pow(abs(sin(vUv.x*3.14159*16.0)),22.0)*0.35;',
+      ' float rib=pow(abs(sin((vUv.y*84.0+uScroll)*3.14159)),16.0);',
+      ' float glow=rib*(0.55+uSpd*0.9)+seam;',
+      ' vec3 c=mix(uCol,vec3(1.0,0.36,0.12),uHeat);',
+      ' vec3 col=c*(0.05+glow*1.5)+c*uSpd*0.16;',
+      ' float fog=exp(-vZ*0.010);',
+      ' gl_FragColor=vec4(col*fog,1.0);}'].join('\n'),
+    side:THREE.BackSide,depthWrite:true
+  });
+  objs.wall=new THREE.Mesh(wallGeo,mats.wall);
+  objs.wall.position.z=-160; cabinScene.add(objs.wall);
+
+  // 环绕光圈
+  var NR=isMobile?40:56;
+  var rgeo=new THREE.TorusGeometry(0.985,0.016,6,44);
+  var rmat=new THREE.MeshBasicMaterial({transparent:true,opacity:1,blending:THREE.AdditiveBlending,depthWrite:false,fog:false});
+  objs.cabRings=new THREE.InstancedMesh(rgeo,rmat,NR);
+  objs.cabRings.frustumCulled=false;
+  cabinScene.add(objs.cabRings);
+  objs.cabRingN=NR;
+
+  // 前方地心辉光
+  var cv=document.createElement('canvas');cv.width=cv.height=256;
+  var cx=cv.getContext('2d');
+  var gr=cx.createRadialGradient(128,128,0,128,128,128);
+  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.18,'rgba(255,220,170,0.75)');
+  gr.addColorStop(0.5,'rgba(255,120,40,0.30)');gr.addColorStop(1,'rgba(255,60,10,0)');
+  cx.fillStyle=gr;cx.fillRect(0,0,256,256);
+  var glowTex=new THREE.CanvasTexture(cv);
+  objs.cabAhead=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,blending:THREE.AdditiveBlending,
+    depthWrite:false,transparent:true,opacity:0,fog:false}));
+  objs.cabAhead.position.set(0,0,-150); objs.cabAhead.scale.set(2.2,2.2,1); cabinScene.add(objs.cabAhead);
+  // 后方入口的光点
+  objs.cabBack=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,blending:THREE.AdditiveBlending,
+    depthWrite:false,transparent:true,opacity:0,color:0x9fd8ff,fog:false}));
+  objs.cabBack.position.set(0,0,60); objs.cabBack.scale.set(1.2,1.2,1); cabinScene.add(objs.cabBack);
+  // 速度粒子
+  var NP=isMobile?260:520, pp=new Float32Array(NP*3);
+  for(var i=0;i<NP;i++){
+    var a=Math.random()*Math.PI*2, r=0.35+Math.random()*0.58;
+    pp[i*3]=Math.cos(a)*r; pp[i*3+1]=Math.sin(a)*r; pp[i*3+2]=-Math.random()*320;
+  }
+  var pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+  objs.cabDust=new THREE.Points(pg,new THREE.PointsMaterial({color:0xbfe8ff,size:0.035,transparent:true,
+    opacity:0.55,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
+  objs.cabDust.frustumCulled=false; cabinScene.add(objs.cabDust);
+  // 高速时光圈连成一体的蓝光
+  var hz=new THREE.CylinderGeometry(0.97,0.97,420,36,1,true); hz.rotateX(Math.PI/2);
+  mats.haze=new THREE.MeshBasicMaterial({color:0x3ea0ff,transparent:true,opacity:0,
+    blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.BackSide,fog:false});
+  objs.haze=new THREE.Mesh(hz,mats.haze); objs.haze.position.z=-160; cabinScene.add(objs.haze);
+}
+
+/* ---------------- 6. 相机控制器 ---------------- */
+var orbit=APP.orbit={
+  theta:0.62, phi:1.12, radius:21, target:{x:0,y:0,z:0},
+  tTheta:0.62, tPhi:1.12, tRadius:21, enabled:true, auto:0.012,
+  dragging:false, lx:0, ly:0, pinch:0,
+  look:{yaw:0,pitch:0,tyaw:0,tpitch:0},
+  apply:function(cam){
+    this.theta+=(this.tTheta-this.theta)*0.12;
+    this.phi  +=(this.tPhi-this.phi)*0.12;
+    this.radius+=(this.tRadius-this.radius)*0.10;
+    var sp=Math.sin(this.phi);
+    cam.position.set(this.target.x+this.radius*sp*Math.sin(this.theta),
+                     this.target.y+this.radius*Math.cos(this.phi),
+                     this.target.z+this.radius*sp*Math.cos(this.theta));
+    cam.lookAt(this.target.x,this.target.y,this.target.z);
+  },
+  flyTo:function(th,ph,r){this.tTheta=th;this.tPhi=ph;this.tRadius=r;}
+};
+APP.bindControls=function(el,getView){
+  function down(x,y){orbit.dragging=true;orbit.lx=x;orbit.ly=y;}
+  function move(x,y){
+    if(!orbit.dragging) return;
+    var dx=x-orbit.lx, dy=y-orbit.ly; orbit.lx=x; orbit.ly=y;
+    if(getView()==='cabin'){
+      orbit.look.tyaw=clamp(orbit.look.tyaw-dx*0.005,-Math.PI*0.92,Math.PI*0.92);
+      orbit.look.tpitch=clamp(orbit.look.tpitch-dy*0.005,-1.1,1.1);
+    } else {
+      orbit.tTheta-=dx*0.006;
+      orbit.tPhi=clamp(orbit.tPhi-dy*0.006,0.08,Math.PI-0.08);
+    }
+  }
+  function up(){orbit.dragging=false;}
+  el.addEventListener('pointerdown',function(e){el.setPointerCapture&&el.setPointerCapture(e.pointerId);down(e.clientX,e.clientY);});
+  window.addEventListener('pointermove',function(e){move(e.clientX,e.clientY);});
+  window.addEventListener('pointerup',up); window.addEventListener('pointercancel',up);
+  el.addEventListener('wheel',function(e){
+    if(getView()==='cabin') return;
+    e.preventDefault();
+    orbit.userZoomed=true;
+    orbit.tRadius=clamp(orbit.tRadius*(1+(e.deltaY>0?0.11:-0.11)),7.2,120);
+  },{passive:false});
+  el.addEventListener('dblclick',function(){
+    if(getView()==='cabin'){orbit.look.tyaw=0;orbit.look.tpitch=0;}
+    else orbit.flyTo(APP.homeView.th,APP.homeView.ph,APP.homeView.r);
+  });
+  el.addEventListener('touchstart',function(e){
+    if(e.touches.length===2){
+      orbit.pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    }
+  },{passive:true});
+  el.addEventListener('touchmove',function(e){
+    if(e.touches.length===2&&orbit.pinch){
+      var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+      orbit.userZoomed=true;
+      orbit.tRadius=clamp(orbit.tRadius*(orbit.pinch/d),7.2,120); orbit.pinch=d;
+      e.preventDefault();
+    }
+  },{passive:false});
+};
+
+/* ---------------- 7. 高清纹理加载（带多 CDN 回退） ---------------- */
+var TEXSET=[
+ {key:'day',  u:['https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg',
+                 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+                 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_atmos_2048.jpg']},
+ {key:'night',u:['https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg',
+                 'https://unpkg.com/three-globe/example/img/earth-night.jpg',
+                 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_lights_2048.png']},
+ {key:'topo', u:['https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png',
+                 'https://cdn.jsdelivr.net/gh/turban/webgl-earth@master/images/elev_bump_4k.jpg']},
+ {key:'water',u:['https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-water.png',
+                 'https://cdn.jsdelivr.net/gh/turban/webgl-earth@master/images/water_4k.png']},
+ {key:'cloud',u:['https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_clouds_1024.png',
+                 'https://cdn.jsdelivr.net/gh/turban/webgl-earth@master/images/fair_clouds_4k.png']}
+];
+APP.loadHiRes=function(onProgress,onDone){
+  var loader=new THREE.TextureLoader();
+  loader.setCrossOrigin('anonymous');
+  var total=TEXSET.length, done=0, ok=0;
+  function finishOne(){ done++; onProgress&&onProgress(done/total); if(done===total) onDone&&onDone(ok); }
+  TEXSET.forEach(function(item){
+    var idx=0;
+    function tryNext(){
+      if(idx>=item.u.length){ finishOne(); return; }
+      var url=item.u[idx++];
+      loader.load(url,function(t){
+        t.wrapS=THREE.RepeatWrapping;
+        if(renderer.capabilities.getMaxAnisotropy) t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+        uni[item.key].value=t; ok++; finishOne();
+      },undefined,function(){ tryNext(); });
+    }
+    tryNext();
+  });
+  // 8 秒兜底：无论加载是否完成都不阻塞
+  setTimeout(function(){ if(done<total){ done=total; onDone&&onDone(ok); } },8000);
+};
+
+/* ---------------- 8. 每帧更新 ---------------- */
+var tmpV=null, tmpQ=null;
+APP.updateScene=function(dt,view,ui){
+  if(!tmpV){tmpV=new THREE.Vector3();tmpQ=new THREE.Quaternion();}
+  uni.time.value+=dt;
+  // 自转
+  if(ui.spin && view!=='cabin') earthGroup.rotation.y+=dt*0.018;
+  objs.atmo.quaternion.copy(earthGroup.quaternion);
+  if(objs.clouds) objs.clouds.rotation.y+=dt*0.004;
+
+  // 裁切平面跟随地球姿态
+  tmpV.copy(APP.cutNormal).applyQuaternion(earthGroup.getWorldQuaternion(tmpQ)).normalize();
+  clipPlane.normal.copy(tmpV);
+
+  // 舱体位置
+  var p=sim.progress();
+  uni.prog.value=p;
+  var pt=APP.curve.getPointAt(clamp(p,0,1));
+  var tan=APP.curve.getTangentAt(clamp(p,0.0001,0.9999));
+  if(sim.mode==='launched'){
+    var outDir=ll2v(APEX.lat,APEX.lon,1);
+    pt=outDir.clone().multiplyScalar(R3+sim.launchDist/1000*SCALE);
+    tan=outDir;
+  }
+  objs.capsule.position.copy(pt);
+  objs.capsule.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),tan.clone().normalize());
+  var vf=sim.v/VMAX;
+  objs.capGlow.scale.set(1.1+vf*1.8,1.1+vf*1.8,1);
+  // 尾迹
+  var tp=objs.trailPts;
+  tp.push(pt.clone());
+  if(tp.length>140) tp.shift();
+  var pos=objs.trail.geometry.attributes.position.array, cls=objs.trail.geometry.attributes.color.array;
+  for(var i=0;i<140;i++){
+    var src=tp[Math.min(i,tp.length-1)]||pt;
+    pos[i*3]=src.x;pos[i*3+1]=src.y;pos[i*3+2]=src.z;
+    var f=i/139, a=Math.pow(f,2.2);
+    var heat=sim.mode!=='shm'?1:smooth(0.86,1.0,1-Math.abs(p-0.5)*2);
+    cls[i*3]=a*(0.35+0.65*heat); cls[i*3+1]=a*(0.75-0.35*heat); cls[i*3+2]=a*(1.0-0.75*heat);
+  }
+  objs.trail.geometry.attributes.position.needsUpdate=true;
+  objs.trail.geometry.attributes.color.needsUpdate=true;
+  uni.cannonAmt.value=sim.cannon?1:0;
+
+  // 舱内场景
+  if(view==='cabin') updateCabin(dt);
+};
+
+function updateCabin(dt){
+  var depth=sim.depthKm(), core=1-Math.abs(depth-AMP)/AMP;      // 0 端点 → 1 地心
+  var heat=smooth(0.90,0.995,core);
+  var spd=clamp(sim.v/VMAX,0,1.6);
+  uni.cabHeat.value=heat;
+  uni.cabSpeed.value=spd;
+  uni.cabScroll.value-=dt*(0.4+spd*9.0)*sim.speed*(sim.playing?1:0);
+  uni.cabColor.value.setHex(sim.mode==='launched'?0xffd090:0x2b7fd4);
+  mats.haze.opacity=smooth(0.42,1.0,spd)*0.55;
+  mats.haze.color.setRGB(lerp(0.24,1.0,heat),lerp(0.63,0.36,heat),lerp(1.0,0.12,heat));
+  // 光圈流动
+  var travelled=depth;                                          // km
+  var base=Math.floor(travelled/RING_GAP_KM);
+  var off=(travelled/RING_GAP_KM)%1;
+  var dummy=new THREE.Object3D(), col=new THREE.Color(), N=objs.cabRingN;
+  for(var i=0;i<N;i++){
+    var z=6-(i*RING_GAP)+off*RING_GAP;
+    var mile=((base+i)%10===0);                                 // 每 150 km 一块里程标
+    dummy.position.set(0,0,z);
+    dummy.rotation.set(0,0,0);
+    var st=1+spd*0.06;
+    dummy.scale.set(mile?1.05:1,mile?1.05:1,mile?st*2.2:st); dummy.updateMatrix();
+    objs.cabRings.setMatrixAt(i,dummy.matrix);
+    var dist=Math.abs(z), fade=clamp(1-dist/300,0,1);
+    var b=(0.35+0.65*fade)*(mile?1.9:1);
+    if(mile) col.setRGB(lerp(0.9,1.0,heat)*b, lerp(0.78,0.5,heat)*b, lerp(0.45,0.16,heat)*b);
+    else col.setRGB(lerp(0.16,1.0,heat)*b, lerp(0.62,0.42,heat)*b, lerp(1.0,0.14,heat)*b);
+    objs.cabRings.setColorAt(i,col);
+  }
+  objs.cabRings.instanceMatrix.needsUpdate=true;
+  if(objs.cabRings.instanceColor) objs.cabRings.instanceColor.needsUpdate=true;
+  // 前方地心辉光 / 后方入口
+  objs.cabAhead.material.opacity=Math.max(smooth(0.55,1.0,core)*0.95, sim.mode==='launched'?0.9:0);
+  objs.cabAhead.scale.setScalar(2.0+smooth(0.6,1.0,core)*10.0);
+  objs.cabBack.material.opacity=clamp(1-depth/260,0,1)*0.8;
+  objs.cabBack.position.z=clamp(20+depth*0.9,20,300);
+  objs.cabBack.scale.setScalar(clamp(3.2-depth/90,0.25,3.2));
+  // 粒子流
+  var pa=objs.cabDust.geometry.attributes.position.array;
+  var vz=(0.5+spd*10.0)*sim.speed*(sim.playing?1:0)*dt*60;
+  for(var k=0;k<pa.length;k+=3){
+    pa[k+2]+=vz;
+    if(pa[k+2]>8){ pa[k+2]-=330; }
+  }
+  objs.cabDust.geometry.attributes.position.needsUpdate=true;
+  objs.cabDust.material.opacity=0.25+0.5*clamp(spd,0,1);
+  // 相机环视
+  var lk=orbit.look;
+  lk.yaw+=(lk.tyaw-lk.yaw)*0.1; lk.pitch+=(lk.tpitch-lk.pitch)*0.1;
+  cabinCam.position.set(Math.sin(lk.yaw)*0.02,Math.sin(lk.pitch)*0.02,0);
+  cabinCam.rotation.set(lk.pitch,Math.PI+lk.yaw,0,'YXZ');
+  // 轻微抖动增强速度感
+  var sh=spd*0.0016;
+  cabinCam.position.x+=(Math.random()-0.5)*sh;
+  cabinCam.position.y+=(Math.random()-0.5)*sh;
+}
+
+/* ---------------- 9. 地球显示模式 ---------------- */
+APP.setEarthMode=function(mode,ui){
+  var glass=(mode==='glass'), cut=(mode==='cut');
+  uni.opacity.value=glass?0.44:1.0;
+  mats.earth.depthWrite=!glass;
+  mats.earth.needsUpdate=true;
+  if(objs.clouds){
+    objs.clouds.visible=ui.clouds && !cut;
+    mats.cloud.uniforms.uOp.value=glass?0.30:0.85;
+  }
+  for(var i=0;i<objs.shells.length;i++){
+    objs.shells[i].visible=(glass||cut);
+    objs.shells[i].material.uniforms.uMode.value=cut?1:0;
+  }
+  for(var k=0;k<objs.caps.length;k++){
+    objs.caps[k].visible=cut;
+    objs.caps[k].material.uniforms.uOp.value=cut?1:0;
+  }
+  objs.capGroup.visible=cut;
+  // 裁切：constant 由 40（不裁切）→ 0（半剖）
+  APP.cutTarget=cut?0:40;
+  mats.atmo.uniforms.uStr.value=cut?0.35:1.0;
+};
+APP.tickClip=function(dt){
+  var c=clipPlane.constant, t=(APP.cutTarget===undefined?40:APP.cutTarget);
+  if(Math.abs(c-t)>0.001){
+    clipPlane.constant=c+(t-c)*Math.min(1,dt*5.0);
+    var arr=(clipPlane.constant<39.0)?[clipPlane]:[];
+    setClip(arr);
+  }
+};
+function setClip(arr){
+  mats.earth.clippingPlanes=arr;
+  mats.cloud.clippingPlanes=arr;
+  for(var i=0;i<objs.shells.length;i++) objs.shells[i].material.clippingPlanes=arr;
+}
+APP.setClip=setClip;
+
+function computeFit(){
+  var vf=camera.fov*DEG/2;
+  var hf=Math.atan(Math.tan(vf)*camera.aspect);
+  APP.fitRadius=R3/Math.sin(Math.min(vf,hf))*1.26;   // 保证整颗地球入镜并留白
+  return APP.fitRadius;
+}
+APP.computeFit=computeFit;
+APP.resize=function(){
+  if(APP.failed) return;
+  var w=window.innerWidth,h=window.innerHeight;
+  renderer.setSize(w,h);
+  camera.aspect=w/h;camera.updateProjectionMatrix();
+  cabinCam.aspect=w/h;cabinCam.updateProjectionMatrix();
+  var fit=computeFit();
+  if(APP.homeView) APP.homeView.r=fit;
+  if(!orbit.userZoomed){orbit.tRadius=fit;}
+};
+})();
+</script>
+<script>
+/* =========================================================================
+   界面层：控制台 / HUD / 标注 / 曲线图 / 2D 降级 / 主循环
+   ========================================================================= */
+(function(){
+'use strict';
+function $(id){return document.getElementById(id);}
+var APP=window.APP;
+var ui={view:'ext',earth:'glass',tunnel:true,labels:true,clouds:true,night:true,spin:true,stars:true,cannon:false};
+var els={},LBL=[],capLbl=null,ready=false,frame=0,lastT=0,scrubbing=false;
+var lastDepth=0,reportTimer=null,toastTimer=null,chartVisible=false,loadingHidden=false;
+var perfN=0,perfSum=0,perfDone=false;
+
+/* ---------- 小工具 ---------- */
+function mmss(s){s=Math.max(0,Math.round(s));var m=Math.floor(s/60),ss=s%60;return (m<10?'0':'')+m+':'+(ss<10?'0':'')+ss;}
+function toast(msg,ms){
+  var t=$('toast');if(!t)return;
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.classList.remove('show');},ms||2600);
+}
+function setLoading(p,txt){
+  var b=$('loadingBar'),t=$('loadingText');
+  if(b)b.style.width=Math.round(p*100)+'%';
+  if(t&&txt)t.textContent=txt;
+}
+function hideLoading(){
+  if(loadingHidden)return;loadingHidden=true;
+  var l=$('loading');if(!l)return;
+  l.classList.add('out');setTimeout(function(){l.style.display='none';},900);
+}
+
+/* ---------- three.js 回退加载 ---------- */
+function ensureThree(cb){
+  if(window.THREE)return cb(true);
+  var urls=['https://unpkg.com/three@0.128.0/build/three.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'];
+  var i=0;
+  (function next(){
+    if(i>=urls.length)return cb(false);
+    var s=document.createElement('script');s.src=urls[i++];
+    s.onload=function(){cb(!!window.THREE);};
+    s.onerror=next;document.head.appendChild(s);
+  })();
+}
+
+/* ---------- 三维标注 ---------- */
+function mkLabel(cls,text,sub){
+  var d=document.createElement('div');d.className='lbl '+cls;
+  var h='<span class="dot"></span><span class="txt">'+text+(sub?'<span class="sub">'+sub+'</span>':'')+'</span>';
+  d.innerHTML=h;$('labelLayer').appendChild(d);return d;
+}
+function buildLabels(){
+  var K=APP.K,curve=APP.curve,R3=K.R3;
+  function add(cls,text,sub,pos,vis){
+    var o={el:mkLabel(cls,text,sub),pos:pos,vis:vis};LBL.push(o);return o;
+  }
+  add('station','漠河站','MOHE · 起点 0 km',APP.ll2v(K.MOHE.lat,K.MOHE.lon,R3*1.06),'surface');
+  add('station','南极站','ANTARCTIC · 12,600 km',APP.ll2v(K.APEX.lat,K.APEX.lon,R3*1.06),'surface');
+  add('core','地心','6,300 km · 7.8 km/s · 0 G',curve.getPointAt(0.5),'inside');
+  add('layer','古登堡闸','2,891 km',curve.getPointAt(2891/12600),'inside');
+  add('layer','古登堡闸','9,709 km',curve.getPointAt(9709/12600),'inside');
+  // 圈层标注沿剖面呈扇形展开，避免在地心处堆叠
+  var n=APP.cutNormal,u=APP.ll2v(K.MOHE.lat,K.MOHE.lon,1);
+  var w=new THREE.Vector3().crossVectors(n,u).normalize();
+  var defs=[[6353,'地壳',36],[5800,'地幔 · 黏性物质区',54],[4400,'地幔 · 刚性物质区',72],
+            [2350,'外核 · 液态铁镍',92],[980,'内核 · 固态铁镍',124]];
+  for(var i=0;i<defs.length;i++){
+    var ang=defs[i][2]*Math.PI/180;
+    var pv=u.clone().multiplyScalar(Math.cos(ang)).add(w.clone().multiplyScalar(Math.sin(ang)))
+           .normalize().multiplyScalar(defs[i][0]*K.SCALE);
+    add('layer',defs[i][1],'',pv,'cut');
+  }
+  capLbl=add('station','地心列车','',new THREE.Vector3(),'capsule');
+}
+var _v=null,_n=null,_c=null;
+function updateLabels(){
+  if(!_v){_v=new THREE.Vector3();_n=new THREE.Vector3();_c=new THREE.Vector3();}
+  var cam=APP.camera,gm=APP.earthGroup.matrixWorld,W=window.innerWidth,H=window.innerHeight;
+  for(var i=0;i<LBL.length;i++){
+    var L=LBL[i],show=ui.labels;
+    if(L.vis==='capsule'){
+      L.pos.copy(APP.objs.capsule.position);
+      L.el.firstChild.nextSibling.firstChild.nodeValue='地心列车 '+Math.round(APP.sim.depthKm())+' km';
+    }
+    _v.copy(L.pos).applyMatrix4(gm);
+    if(L.vis==='inside'&&ui.earth==='solid')show=false;
+    if(L.vis==='cut'&&ui.earth!=='cut')show=false;
+    if(L.vis==='capsule'&&ui.earth==='solid')show=false;
+    if(L.vis==='surface'&&ui.earth==='solid'){
+      _n.copy(_v).normalize();_c.copy(cam.position).sub(_v).normalize();
+      if(_n.dot(_c)<0.03)show=false;
+    }
+    _v.project(cam);
+    if(_v.z>1)show=false;
+    L.el.style.transform='translate(-50%,-50%) translate('+((_v.x*0.5+0.5)*W).toFixed(1)+'px,'+((-_v.y*0.5+0.5)*H).toFixed(1)+'px)';
+    if(show)L.el.classList.remove('hide');else L.el.classList.add('hide');
+  }
+}
+
+/* ---------- 线路刻度 ---------- */
+var TICKS=[{d:0,t:'漠河站',m:1,k:1},{d:35,t:'莫霍闸'},{d:2891,t:'古登堡闸'},
+           {d:6300,t:'地心',m:1,k:1},{d:9709,t:'古登堡闸'},{d:12565,t:'莫霍闸'},{d:12600,t:'南极站',m:1,k:1}];
+function buildTrack(){
+  var tr=$('track');if(!tr)return;
+  for(var i=0;i<TICKS.length;i++){
+    var p=TICKS[i].d/12600*100;
+    var a=document.createElement('div');a.className='tick'+(TICKS[i].m?' major':'');a.style.left=p+'%';tr.appendChild(a);
+    var b=document.createElement('div');b.className='tk'+(TICKS[i].k?' keep':'');b.style.left=p+'%';b.textContent=TICKS[i].t;tr.appendChild(b);
+  }
+}
+
+/* ---------- 原著播报 ---------- */
+function showReport(r){
+  var el=$('hudReport');
+  if(el){
+    el.textContent=r.t;el.classList.add('show');
+    if(r.hot)el.classList.add('hot');else el.classList.remove('hot');
+    clearTimeout(reportTimer);reportTimer=setTimeout(function(){el.classList.remove('show');},5000);
+  }
+  if(ui.view!=='cabin')toast(r.t,3400);
+}
+function checkReports(depth){
+  var R=APP.K.REPORTS;
+  for(var i=0;i<R.length;i++){
+    var d=R[i].d;
+    if((lastDepth<d&&depth>=d)||(lastDepth>d&&depth<=d)){showReport(R[i]);break;}
+  }
+  lastDepth=depth;
+}
+
+/* ---------- 读数刷新 ---------- */
+function updateReadouts(){
+  var s=APP.sim,K=APP.K;
+  var depth=s.depthKm(),v=s.v/1000,g=s.gloc/9.8,felt=s.felt/9.8;
+  var launched=(s.mode==='launched');
+  var lay=K.layerAt(depth);
+  var shownDepth=launched?(s.launchDist/1000):depth;
+  els.stDepth.textContent=Math.round(shownDepth).toLocaleString('en-US');
+  els.stDepthK.textContent=launched?'ALTITUDE 出膛高度':'DEPTH 行程深度';
+  els.stSpeed.textContent=v.toFixed(2);
+  els.stG.textContent=g.toFixed(2);
+  els.stTime.textContent=mmss(s.elapsed());
+  els.stEta.textContent=launched?'--:--':mmss(s.eta());
+  els.stLayer.textContent=launched?'已出膛 · 飞离地球':(lay.n+(depth<40?' · 漠河站':(depth>12560?' · 南极站':'')));
+  var p=s.progress();
+  els.progFill.style.width=(p*100)+'%';
+  els.progDot.style.left=(p*100)+'%';
+  if(!scrubbing){els.scrub.value=Math.round(p*1000);els.scrubTxt.textContent=Math.round(p*100)+'%';}
+  // HUD
+  els.hudDepth.textContent=Math.round(shownDepth).toLocaleString('en-US');
+  els.hudSpeed.textContent=v.toFixed(2);
+  els.hudG.textContent=g.toFixed(2);
+  els.hudFelt.textContent=felt.toFixed(2);
+  els.hudTime.textContent=mmss(s.elapsed());
+  els.hudEta.textContent=launched?'--:--':mmss(s.eta());
+  els.hudTemp.textContent=launched?'-120':s.wallTemp();
+  els.hudCross.textContent=s.crossings;
+  els.hudLayer.textContent=launched?'太空':lay.n;
+  els.hudDepthDot.style.left=(p*100)+'%';
+  els.hudModeTxt.textContent=launched?'弹道飞行':(s.mode==='cannonUp'?'地球大炮加速中':'自由落体模式');
+  checkReports(depth);
+}
+
+/* ---------- 事件 ---------- */
+function handleEvent(ev){
+  if(ev==='core'){toast('通过地心 · 第 '+APP.sim.crossings+' 次穿越 · 速度 7.8 km/s',2600);}
+  else if(ev==='cannon'){
+    toast('线圈通电 · 通过地心后继续加速',3000);
+    var w=$('hudWarn');if(w){w.textContent='地球大炮 · 持续加速';w.classList.add('show');
+      setTimeout(function(){w.classList.remove('show');},2600);}
+  }
+  else if(ev==='launch'){
+    toast('出膛！速度 15 km/s · 超过第二宇宙速度',4200);
+    var w2=$('hudWarn');if(w2){w2.textContent='出 膛';w2.classList.add('show');
+      setTimeout(function(){w2.classList.remove('show');},2200);}
+    if(ui.view==='cabin')setTimeout(function(){setView('ext');APP.orbit.flyTo(APP.orbit.tTheta,APP.orbit.tPhi,34);},900);
+    else APP.orbit.flyTo(APP.orbit.tTheta,APP.orbit.tPhi,34);
+  }
+}
+
+/* ---------- 视图与模式 ---------- */
+function setView(v){
+  ui.view=v;
+  document.body.classList.toggle('cabin',v==='cabin');
+  $('hud').classList.toggle('on',v==='cabin');
+  var segs=$('segView').children;
+  for(var i=0;i<segs.length;i++)segs[i].classList.toggle('on',segs[i].getAttribute('data-view')===v);
+  if(v==='cabin'){
+    APP.orbit.look.tyaw=0;APP.orbit.look.tpitch=0;
+    if(!APP.sim.playing&&APP.sim.progress()>=0.999)APP.sim.reset();
+    APP.sim.playing=true;syncPlayBtn();
+    toast('舱内视角 · 拖动可环视 · 按 V 返回外部视角',3200);
+  }
+}
+function setEarth(m){
+  ui.earth=m;
+  var segs=$('segEarth').children;
+  for(var i=0;i<segs.length;i++)segs[i].classList.toggle('on',segs[i].getAttribute('data-earth')===m);
+  APP.setEarthMode(m,ui);
+  if(m==='cut'){
+    if(ui.spin){ui.spin=false;syncToggles();}
+    alignCut();
+    toast('纵剖面模式 · 已暂停自转以保持剖面朝向',3000);
+  }
+}
+function alignCut(){
+  var n=APP.clipPlane.normal.clone();
+  if(n.lengthSq()<0.1)return;
+  var d=n.negate();
+  var th=Math.atan2(d.x,d.z),ph=Math.acos(APP.clamp(d.y,-1,1));
+  APP.orbit.flyTo(th,ph,Math.max(17,APP.orbit.tRadius*0.92));
+}
+function syncPlayBtn(){$('btnPlay').textContent=APP.sim.playing?'暂停':'播放';}
+function syncToggles(){
+  var sws=document.querySelectorAll('[data-tg]');
+  for(var i=0;i<sws.length;i++){
+    var k=sws[i].getAttribute('data-tg');
+    sws[i].classList.toggle('on',!!ui[k]);
+  }
+  applyToggles();
+}
+function applyToggles(){
+  var o=APP.objs,u=APP.uni;
+  if(!o)return;
+  o.tunnel.visible=ui.tunnel;o.rings.visible=ui.tunnel;
+  o.capsule.visible=ui.tunnel;o.trail.visible=ui.tunnel;
+  for(var i=0;i<o.stations.length;i++)o.stations[i].visible=ui.tunnel;
+  o.clouds.visible=ui.clouds&&ui.earth!=='cut';
+  o.stars.visible=ui.stars;
+  u.nightAmt.value=ui.night?1:0;
+  u.flat.value=ui.night?0:1;
+  APP.sim.cannon=ui.cannon;
+  $('labelLayer').style.opacity=ui.labels?1:0;
+}
+
+/* ---------- 曲线图 ---------- */
+function drawChart(){
+  var c=$('chart');if(!c||!chartVisible)return;
+  var dpr=Math.min(2,window.devicePixelRatio||1);
+  var w=c.clientWidth,h=c.clientHeight;
+  if(c.width!==w*dpr||c.height!==h*dpr){c.width=w*dpr;c.height=h*dpr;}
+  var x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+  var pad={l:44,r:14,t:16,b:26},iw=w-pad.l-pad.r,ih=h-pad.t-pad.b;
+  var K=APP.K;
+  // 网格
+  x.strokeStyle='rgba(122,170,220,.12)';x.lineWidth=1;x.font='10px monospace';x.fillStyle='#61748c';
+  for(var i=0;i<=4;i++){
+    var yy=pad.t+ih*i/4;
+    x.beginPath();x.moveTo(pad.l,yy);x.lineTo(pad.l+iw,yy);x.stroke();
+    x.fillText(((4-i)*2).toFixed(0),8,yy+3);
+  }
+  var marks=[0,3150,6300,9450,12600];
+  for(var j=0;j<marks.length;j++){
+    var xx=pad.l+iw*marks[j]/12600;
+    x.beginPath();x.moveTo(xx,pad.t);x.lineTo(xx,pad.t+ih);x.stroke();
+    x.textAlign='center';x.fillText(marks[j]===0?'漠河':(marks[j]===6300?'地心':(marks[j]===12600?'南极':(marks[j]/1000)+'k')),xx,h-8);
+    x.textAlign='left';
+  }
+  // 速度曲线（km/s，满量程 8）
+  x.lineWidth=2;x.strokeStyle='#4ad4ff';x.beginPath();
+  for(var d=0;d<=12600;d+=50){
+    var s=(d-K.AMP)*1000,v=K.OMEGA*Math.sqrt(Math.max(0,K.AMP*K.AMP*1e6-s*s))/1000;
+    var px=pad.l+iw*d/12600,py=pad.t+ih*(1-v/8);
+    if(d===0)x.moveTo(px,py);else x.lineTo(px,py);
+  }
+  x.stroke();
+  // 引力曲线（G）
+  x.strokeStyle='#ffb648';x.beginPath();
+  for(var d2=0;d2<=12600;d2+=50){
+    var s2=Math.abs((d2-K.AMP)*1000),g=K.OMEGA*K.OMEGA*s2/9.8;
+    var px2=pad.l+iw*d2/12600,py2=pad.t+ih*(1-g*4/8);
+    if(d2===0)x.moveTo(px2,py2);else x.lineTo(px2,py2);
+  }
+  x.stroke();
+  // 当前位置
+  var dp=APP.sim.depthKm(),cx=pad.l+iw*APP.clamp(dp/12600,0,1);
+  x.strokeStyle='#ff5a3c';x.lineWidth=1.5;x.beginPath();x.moveTo(cx,pad.t);x.lineTo(cx,pad.t+ih);x.stroke();
+  var cv=APP.sim.v/1000,cy=pad.t+ih*(1-cv/8);
+  x.fillStyle='#fff';x.beginPath();x.arc(cx,cy,3.5,0,6.284);x.fill();
+  x.fillStyle='#93a8c0';x.font='10px monospace';
+  x.fillText('v = '+cv.toFixed(2)+' km/s',pad.l+6,pad.t+12);
+}
+
+/* ---------- 2D 降级（Canvas 剖面动画） ---------- */
+function boot2D(){
+  var gl=$('gl');if(gl)gl.style.display='none';
+  var c=$('fallback2d');c.style.display='block';
+  var x=c.getContext('2d');
+  var K=APP.K;
+  function resize(){
+    var dpr=Math.min(2,window.devicePixelRatio||1);
+    c.width=window.innerWidth*dpr;c.height=window.innerHeight*dpr;
+    c.style.width=window.innerWidth+'px';c.style.height=window.innerHeight+'px';
+    x.setTransform(dpr,0,0,dpr,0,0);
+  }
+  resize();window.addEventListener('resize',resize);
+  toast('WebGL 不可用，已切换到 2D 剖面模式',4000);
+  var t0=performance.now();
+  function frame2(now){
+    requestAnimationFrame(frame2);
+    var dt=Math.min(0.05,(now-t0)/1000);t0=now;
+    APP.sim.step(dt);
+    var W=window.innerWidth,H=window.innerHeight,cx=W/2,cy=H*0.44,R=Math.min(W,H)*0.34;
+    x.fillStyle='#03060c';x.fillRect(0,0,W,H);
+    // 星
+    x.fillStyle='rgba(255,255,255,.55)';
+    for(var i=0;i<90;i++){
+      var sx=(i*7919%W),sy=(i*104729%H);
+      x.fillRect(sx,sy,1.2,1.2);
+    }
+    var rings=[[K.R_KM,'#7d8ea3'],[6336,'#8a4a33'],[5371,'#8f3a22'],[3480,'#ff8a3c'],[1221,'#ffd08a']];
+    for(var k=0;k<rings.length;k++){
+      x.beginPath();x.arc(cx,cy,R*rings[k][0]/K.R_KM,0,6.284);
+      x.fillStyle=rings[k][1];x.globalAlpha=k===0?1:0.95;x.fill();
+    }
+    x.globalAlpha=1;
+    // 昼夜
+    var gd=x.createLinearGradient(cx-R,cy-R,cx+R,cy+R);
+    gd.addColorStop(0,'rgba(0,0,0,0)');gd.addColorStop(1,'rgba(0,0,0,.55)');
+    x.save();x.beginPath();x.arc(cx,cy,R,0,6.284);x.clip();x.fillStyle=gd;x.fillRect(cx-R,cy-R,R*2,R*2);x.restore();
+    // 隧道（近似直线，微弯）
+    var ang0=-Math.PI/2+0.18,ang1=Math.PI/2+0.36;
+    var ax=cx+R*Math.cos(ang0),ay=cy+R*Math.sin(ang0);
+    var bx=cx+R*Math.cos(ang1),by=cy+R*Math.sin(ang1);
+    x.strokeStyle='rgba(74,212,255,.85)';x.lineWidth=2.5;
+    x.beginPath();x.moveTo(ax,ay);x.quadraticCurveTo(cx,cy,bx,by);x.stroke();
+    var p=APP.sim.progress();
+    function bez(t){var mt=1-t;return[mt*mt*ax+2*mt*t*cx+t*t*bx,mt*mt*ay+2*mt*t*cy+t*t*by];}
+    var pt=bez(p);
+    x.fillStyle='#fff';x.beginPath();x.arc(pt[0],pt[1],5,0,6.284);x.fill();
+    x.strokeStyle='rgba(255,255,255,.6)';x.beginPath();x.arc(pt[0],pt[1],9+APP.sim.v/1000,0,6.284);x.stroke();
+    x.fillStyle='#cfe4f7';x.font='12px monospace';
+    x.fillText('漠河站',ax-20,ay-12);x.fillText('南极站',bx-20,by+20);
+    x.fillText('地心',cx+8,cy-6);
+    updateReadouts();
+  }
+  requestAnimationFrame(frame2);
+}
+
+/* ---------- 主循环 ---------- */
+function loop(now){
+  requestAnimationFrame(loop);
+  if(!lastT)lastT=now;
+  var dt=Math.min(0.05,(now-lastT)/1000);lastT=now;
+  if(!ready)return;
+  var ev=APP.sim.step(dt);
+  if(ev)handleEvent(ev);
+  APP.tickClip(dt);
+  APP.updateScene(dt,ui.view,ui);
+  APP.orbit.apply(APP.camera);
+  if(ui.view==='cabin')APP.renderer.render(APP.cabinScene,APP.cabinCam);
+  else{APP.renderer.render(APP.scene,APP.camera);updateLabels();}
+  frame++;
+  // 低端设备自动降画质，保证动画流畅
+  if(!perfDone&&frame>40){
+    perfSum+=dt;perfN++;
+    if(perfN>60){
+      perfDone=true;
+      if(perfSum/perfN>0.045){
+        APP.renderer.setPixelRatio(1);APP.resize();
+        ui.clouds=false;ui.stars=false;syncToggles();
+        var pl=$('perfLine');if(pl)pl.textContent='检测到性能受限，已自动降低画质';
+      }
+    }
+  }
+  if(frame%2===0)updateReadouts();
+  if(frame%3===0)drawChart();
+  if(frame%20===0&&APP._revealCheck)APP._revealCheck();   // 兜底：确保正文显现
+  if(frame===2)hideLoading();
+}
+
+/* ---------- 绑定 ---------- */
+function cacheEls(){
+  ['stDepth','stSpeed','stG','stTime','stEta','stLayer','progFill','progDot','scrub','scrubTxt',
+   'hudDepth','hudSpeed','hudG','hudFelt','hudTime','hudEta','hudTemp','hudCross','hudLayer',
+   'hudDepthDot','hudModeTxt','sunAz','sunEl','sunTxt','sunElTxt'].forEach(function(k){els[k]=$(k);});
+  els.stDepthK=$('stDepth').parentNode.parentNode.querySelector('.k');
+}
+function bindUI(){
+  // 视角
+  var sv=$('segView').children;
+  for(var i=0;i<sv.length;i++)(function(b){b.onclick=function(){setView(b.getAttribute('data-view'));};})(sv[i]);
+  // 播放
+  $('btnPlay').onclick=function(){
+    if(!APP.sim.playing&&APP.sim.progress()>=0.9995&&APP.sim.mode==='shm')APP.sim.setProgress(0);
+    APP.sim.playing=!APP.sim.playing;syncPlayBtn();
+  };
+  $('btnReset').onclick=function(){APP.sim.reset();lastDepth=0;syncPlayBtn();toast('已重置至漠河站');};
+  $('btnJump').onclick=function(){
+    APP.sim.setProgress(1);APP.sim.playing=false;syncPlayBtn();lastDepth=12600;
+    toast('已抵达南极站 · 用时 42 分 12 秒');
+  };
+  // 倍率
+  var ss=$('segSpeed').children;
+  for(var j=0;j<ss.length;j++)(function(b){
+    b.onclick=function(){
+      APP.sim.speed=parseFloat(b.getAttribute('data-speed'));
+      for(var m=0;m<ss.length;m++)ss[m].classList.remove('on');
+      b.classList.add('on');
+    };
+  })(ss[j]);
+  // 进度
+  els.scrub.addEventListener('input',function(){
+    scrubbing=true;
+    var v=parseInt(els.scrub.value,10)/1000;
+    APP.sim.setProgress(v);lastDepth=APP.sim.depthKm();
+    els.scrubTxt.textContent=Math.round(v*100)+'%';
+  });
+  ['change','pointerup','touchend'].forEach(function(e){
+    els.scrub.addEventListener(e,function(){scrubbing=false;});
+  });
+  // 地球模式
+  var se=$('segEarth').children;
+  for(var k=0;k<se.length;k++)(function(b){b.onclick=function(){setEarth(b.getAttribute('data-earth'));};})(se[k]);
+  $('btnAlign').onclick=function(){if(ui.earth!=='cut')setEarth('cut');else alignCut();};
+  // 开关
+  var sws=document.querySelectorAll('[data-tg]');
+  for(var n=0;n<sws.length;n++)(function(el){
+    el.onclick=function(){
+      var key=el.getAttribute('data-tg');
+      ui[key]=!ui[key];
+      if(key==='cannon'&&ui[key])toast('地球大炮模式：通过地心后线圈持续加速，将从南极炮口射出',4200);
+      syncToggles();
+      if(key==='clouds'||key==='labels')applyToggles();
+    };
+  })(sws[n]);
+  // 太阳
+  function sun(){
+    var azv=parseFloat(els.sunAz.value),elv=parseFloat(els.sunEl.value);
+    els.sunTxt.textContent=Math.round(azv)+'\u00b0';
+    els.sunElTxt.textContent=Math.round(elv)+'\u00b0';
+    if(!APP.uni||!APP.uni.sun)return;          // init 之前只更新文字
+    var az=azv*Math.PI/180,el2=elv*Math.PI/180;
+    APP.uni.sun.value.set(Math.cos(el2)*Math.sin(az),Math.sin(el2),Math.cos(el2)*Math.cos(az)).normalize();
+  }
+  APP._sun=sun;
+  els.sunAz.addEventListener('input',sun);els.sunEl.addEventListener('input',sun);sun();
+  // 面板折叠
+  $('panelToggle').onclick=function(){
+    var p=$('panel');
+    if(window.innerWidth<=720)p.classList.toggle('open');
+    else p.classList.toggle('folded');
+  };
+  // 英雄区按钮
+  $('btnStart').onclick=function(){
+    if(APP.sim.progress()>=0.9995&&APP.sim.mode==='shm')APP.sim.setProgress(0);
+    APP.sim.playing=true;syncPlayBtn();
+    window.scrollTo({top:0,behavior:'smooth'});
+    toast('坠落开始 · 全程失重 · 单程 42 分 12 秒（压缩为 2 分钟）',3600);
+  };
+  $('btnCabin').onclick=function(){setView('cabin');};
+  $('btnCut').onclick=function(){setEarth(ui.earth==='cut'?'solid':'cut');};
+  // 键盘
+  window.addEventListener('keydown',function(e){
+    if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
+    var k=e.key.toLowerCase();
+    if(k===' '||k==='spacebar'){e.preventDefault();$('btnPlay').click();}
+    else if(k==='v')setView(ui.view==='cabin'?'ext':'cabin');
+    else if(k==='r')$('btnReset').click();
+    else if(k==='x')setEarth(ui.earth==='cut'?'solid':(ui.earth==='glass'?'cut':'glass'));
+  });
+  // 滚动时淡出控制台
+  window.addEventListener('scroll',function(){
+    var far=window.scrollY>window.innerHeight*0.62;
+    $('panel').style.opacity=far?0:1;
+    $('panel').style.pointerEvents=far?'none':'auto';
+    $('statusbar').style.opacity=far?0:1;
+    $('statusbar').style.pointerEvents=far?'none':'auto';
+    $('labelLayer').style.opacity=(far||!ui.labels)?0:1;
+  },{passive:true});
+  window.addEventListener('resize',function(){APP.resize&&APP.resize();});
+}
+function initReveal(){
+  document.documentElement.style.scrollBehavior='smooth';
+  var rs=[].slice.call(document.querySelectorAll('.reveal'));
+  var chartBox=$('chart')?$('chart').parentNode:null;
+  // 用矩形检测代替 IntersectionObserver：任何环境下正文都不会永久隐藏
+  function check(){
+    var h=window.innerHeight||800;
+    for(var i=rs.length-1;i>=0;i--){
+      var r=rs[i].getBoundingClientRect();
+      if(r.top<h*0.90&&r.bottom>-40){rs[i].classList.add('in');rs.splice(i,1);}
+    }
+    if(chartBox){var c=chartBox.getBoundingClientRect();chartVisible=(c.top<h+60&&c.bottom>-60);}
+  }
+  APP._revealCheck=check;
+  var ticking=false;
+  function onScroll(){
+    if(ticking)return;ticking=true;
+    requestAnimationFrame(function(){ticking=false;check();});
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  window.addEventListener('resize',onScroll);
+  check();setTimeout(check,260);setTimeout(check,900);
+}
+
+/* ---------- 启动 ---------- */
+function boot(hasThree){
+  if(!APP){setLoading(1,'初始化失败');return;}
+  cacheEls();bindUI();buildTrack();initReveal();
+  updateReadouts();
+  if(!hasThree||!APP.init()){
+    APP.failed=true;boot2D();hideLoading();
+    $('segView').style.opacity=0.4;$('segEarth').style.opacity=0.4;
+    return;
+  }
+  buildLabels();
+  APP.bindControls($('gl'),function(){return ui.view;});
+  setEarth('glass');
+  if(APP.homeSun){els.sunAz.value=Math.round(APP.homeSun.az);els.sunEl.value=APP.homeSun.el;}
+  if(APP._sun)APP._sun();
+  applyToggles();
+  APP.sim.playing=true;                 // 打开即开始坠落
+  syncPlayBtn();
+  ready=true;
+  requestAnimationFrame(loop);
+  setLoading(0.4,'程序化地表已就绪，正在拉取高分辨率纹理…');
+  APP.loadHiRes(
+    function(p){setLoading(0.4+p*0.6,'高分辨率纹理 '+Math.round(p*100)+'%');},
+    function(ok){if(ok>0)toast('高分辨率地球纹理装载完成 ('+ok+'/5)',2200);}
+  );
+  setTimeout(function(){
+    hideLoading();
+    toast('提示：拖拽旋转 · 滚轮缩放 · 空格播放/暂停 · V 切换舱内视角 · X 切换剖面',5000);
+  },1200);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){ensureThree(boot);});
+else ensureThree(boot);
+})();
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d142737d52ef25',t:'MTc4OTc0NDAzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>

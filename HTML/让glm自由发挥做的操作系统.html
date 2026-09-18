@@ -1,0 +1,3917 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AuroraOS — Web Desktop Environment</title>
+<meta name="description" content="A complete desktop operating system environment running in a single HTML file: window manager, virtual filesystem, terminal shell, code editor, games, synthesizer, paint studio and a WebGL shader engine.">
+<style>
+/* ============================================================
+   AuroraOS 1.0 — single-file desktop environment
+   Sections: 0.reset / 1.tokens+themes / 2.boot / 3.desktop
+             4.taskbar+start / 5.windows / 6.ui-kit
+             7.apps (terminal, files, editor, games, music,
+             paint, calc, settings, taskmgr, welcome, viewer,
+             shader) / 8.keyframes
+   ============================================================ */
+
+/* ---------- 0. reset ---------- */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:"Segoe UI Variable","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px;color:var(--text);background:var(--bg);
+  -webkit-font-smoothing:antialiased;user-select:none;
+}
+img{display:block;max-width:100%}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font:inherit;color:inherit}
+::selection{background:var(--accent);color:#fff}
+
+/* scrollbars */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);border:2px solid transparent;background-clip:content-box}
+*{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+
+/* ---------- 1. tokens + themes ---------- */
+:root{
+  --tbh:48px;
+  --bg:#070b14; --surface:#10162a; --surface2:#182038; --surface3:#1f2947;
+  --border:#263156; --border2:#33406b;
+  --text:#e9edfb; --muted:#93a0c4;
+  --accent:#7c6cff; --accent2:#22d3ee;
+  --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+  --shadow:0 10px 40px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+  --shadow-soft:0 4px 18px rgba(0,0,0,.35);
+  --glass:rgba(16,22,42,.72);
+  --radius:10px;
+  --mono:ui-monospace,"Cascadia Code",Consolas,"JetBrains Mono",Menlo,monospace;
+}
+body[data-theme="midnight"]{
+  --bg:#04060d; --surface:#0d1320; --surface2:#141c2e; --surface3:#1b2540;
+  --border:#22304d; --border2:#31446e;
+  --text:#e6ecff; --muted:#7e8db0;
+  --accent:#3b82f6; --accent2:#8b5cf6;
+}
+body[data-theme="sunset"]{
+  --bg:#150a10; --surface:#231019; --surface2:#2e1521; --surface3:#3a1b2b;
+  --border:#4a2334; --border2:#6b3249;
+  --text:#ffeef2; --muted:#c793a5;
+  --accent:#ff5c8a; --accent2:#ffb86b;
+}
+body[data-theme="forest"]{
+  --bg:#071009; --surface:#0e1c12; --surface2:#142619; --surface3:#1b3222;
+  --border:#24402c; --border2:#356040;
+  --text:#e9fbee; --muted:#8fb79b;
+  --accent:#34d399; --accent2:#a3e635;
+}
+body[data-theme="daylight"]{
+  --bg:#e8edf9; --surface:#ffffff; --surface2:#f2f5fd; --surface3:#e9edfa;
+  --border:#d7deef; --border2:#b9c4e2;
+  --text:#18213a; --muted:#5c6a8c;
+  --accent:#6d5cff; --accent2:#0ea5b7;
+  --shadow:0 10px 34px rgba(40,60,120,.22),0 2px 8px rgba(40,60,120,.14);
+  --shadow-soft:0 4px 16px rgba(40,60,120,.16);
+  --glass:rgba(255,255,255,.78);
+}
+
+/* ---------- 2. boot ---------- */
+#boot{
+  position:fixed;inset:0;z-index:10000;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;
+  transition:opacity .5s ease;
+}
+#boot.hide{opacity:0;pointer-events:none}
+.boot-logo{
+  font-size:44px;font-weight:200;letter-spacing:.42em;text-indent:.42em;
+  background:linear-gradient(100deg,var(--accent),var(--accent2),var(--accent));
+  background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:shimmer 2.6s linear infinite;
+}
+.boot-sub{color:var(--muted);font-size:12px;letter-spacing:.3em;text-transform:uppercase}
+.boot-bar{width:280px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden}
+.boot-bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .18s ease;border-radius:2px}
+.boot-msg{height:16px;font-size:11px;color:var(--muted);font-family:var(--mono)}
+#shutdown{
+  position:fixed;inset:0;z-index:10001;background:#000;color:#9aa;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;
+}
+#shutdown.show{display:flex}
+#shutdown .power-btn{
+  width:74px;height:74px;border-radius:50%;border:2px solid #345;color:#8cf;font-size:30px;
+  display:flex;align-items:center;justify-content:center;transition:.25s;
+}
+#shutdown .power-btn:hover{border-color:#7cf;color:#bff;box-shadow:0 0 30px rgba(80,180,255,.35)}
+
+/* ---------- 3. desktop ---------- */
+#wallpaper{position:fixed;inset:0;z-index:0;width:100vw;height:100vh;display:block}
+#desktop{position:fixed;inset:0 0 var(--tbh) 0;z-index:1;overflow:hidden}
+#desk-icons{
+  position:absolute;inset:14px auto 14px 10px;display:flex;flex-direction:column;flex-wrap:wrap;
+  align-content:flex-start;gap:2px;max-height:calc(100% - 24px);
+}
+.desk-icon{
+  width:92px;height:92px;border-radius:8px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;cursor:default;border:1px solid transparent;transition:background .12s;
+}
+.desk-icon:hover{background:rgba(255,255,255,.07)}
+.desk-icon.selected{background:color-mix(in srgb,var(--accent) 26%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.desk-icon .di-ico{font-size:34px;filter:drop-shadow(0 3px 6px rgba(0,0,0,.5))}
+.desk-icon .di-label{
+  font-size:11.5px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);text-align:center;
+  max-width:86px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+}
+#snapGhost{
+  position:absolute;z-index:8888;display:none;border-radius:12px;pointer-events:none;
+  background:color-mix(in srgb,var(--accent) 20%,transparent);
+  border:2px solid color-mix(in srgb,var(--accent) 60%,transparent);
+  transition:all .12s ease;
+}
+
+/* ---------- 4. taskbar + start ---------- */
+#taskbar{
+  position:fixed;left:0;right:0;bottom:0;height:var(--tbh);z-index:9000;
+  background:var(--glass);backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);
+  border-top:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:6px;
+}
+.tb-btn{
+  height:36px;min-width:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:0 10px;color:var(--text);transition:background .12s;flex:none;
+}
+.tb-btn:hover{background:color-mix(in srgb,var(--text) 10%,transparent)}
+#startBtn{font-weight:600;font-size:15px;padding:0 14px}
+#startBtn .logo-dot{
+  width:20px;height:20px;border-radius:6px;flex:none;
+  background:conic-gradient(from 210deg,var(--accent),var(--accent2),var(--accent));
+  box-shadow:0 0 12px color-mix(in srgb,var(--accent) 60%,transparent);
+}
+#taskItems{display:flex;align-items:center;gap:4px;flex:1;overflow:hidden}
+.task-item{
+  height:38px;max-width:190px;border-radius:8px;display:flex;align-items:center;gap:8px;padding:0 12px;
+  position:relative;color:var(--text);transition:background .12s;flex:0 1 auto;min-width:0;
+}
+.task-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.task-item:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}
+.task-item.active{background:color-mix(in srgb,var(--text) 12%,transparent)}
+.task-item.active::after{
+  content:"";position:absolute;left:12px;right:12px;bottom:2px;height:2.5px;border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.task-item.min span{opacity:.55}
+.task-item .ti-ico{font-size:16px;flex:none}
+#tray{display:flex;align-items:center;gap:2px}
+#clockBtn{flex-direction:column;gap:0;line-height:1.25;padding:0 12px;align-items:flex-end;min-width:76px}
+#clockTime{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+#clockDate{font-size:10.5px;color:var(--muted)}
+
+#startMenu{
+  position:fixed;left:8px;bottom:calc(var(--tbh) + 8px);width:600px;max-width:calc(100vw - 16px);
+  max-height:calc(100vh - var(--tbh) - 24px);z-index:9500;
+  background:var(--glass);backdrop-filter:blur(26px) saturate(1.5);-webkit-backdrop-filter:blur(26px) saturate(1.5);
+  border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;padding:14px;gap:12px;
+  opacity:0;transform:translateY(14px) scale(.98);pointer-events:none;transition:.18s ease;
+}
+#startMenu.open{opacity:1;transform:none;pointer-events:auto}
+.sm-search{
+  height:38px;border-radius:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--text) 6%,transparent);
+  padding:0 12px 0 34px;outline:none;width:100%;
+}
+.sm-search:focus{border-color:var(--accent)}
+.sm-search-wrap{position:relative}
+.sm-search-wrap::before{content:"🔍";position:absolute;left:10px;top:9px;font-size:14px;opacity:.7}
+.sm-body{overflow-y:auto;flex:1;min-height:200px}
+.sm-section{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin:4px 2px 8px}
+.sm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.sm-app{
+  display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 6px 11px;border-radius:10px;
+  transition:background .12s;text-align:center;
+}
+.sm-app:hover{background:color-mix(in srgb,var(--text) 9%,transparent)}
+.sm-app .sa-ico{font-size:29px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
+.sm-app .sa-name{font-size:12px}
+.sm-empty{color:var(--muted);text-align:center;padding:40px 0;font-size:13px}
+.sm-footer{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border);padding-top:11px}
+.sm-user{display:flex;align-items:center;gap:9px;font-size:13px}
+.sm-avatar{
+  width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700;font-size:13px;
+}
+.sm-power{display:flex;gap:4px}
+.sm-power .tb-btn{font-size:15px}
+
+#calendarPop{
+  position:fixed;right:8px;bottom:calc(var(--tbh) + 8px);width:296px;z-index:9500;
+  background:var(--glass);backdrop-filter:blur(26px) saturate(1.5);-webkit-backdrop-filter:blur(26px) saturate(1.5);
+  border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px;
+  opacity:0;transform:translateY(14px);pointer-events:none;transition:.18s ease;
+}
+#calendarPop.open{opacity:1;transform:none;pointer-events:auto}
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-title{font-weight:600;font-size:13.5px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.cal-dow{font-size:10.5px;color:var(--muted);padding:4px 0;text-transform:uppercase}
+.cal-day{
+  aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;
+  font-size:12.5px;cursor:default;font-variant-numeric:tabular-nums;
+}
+.cal-day:hover{background:color-mix(in srgb,var(--text) 9%,transparent)}
+.cal-day.dim{color:var(--muted);opacity:.45}
+.cal-day.today{background:var(--accent);color:#fff;font-weight:700}
+.cal-big-time{text-align:center;font-size:30px;font-weight:200;letter-spacing:.04em;font-variant-numeric:tabular-nums;margin-bottom:2px}
+.cal-big-date{text-align:center;color:var(--muted);font-size:12px;margin-bottom:12px}
+
+/* ---------- 5. windows ---------- */
+.window{
+  position:absolute;min-width:320px;min-height:200px;border-radius:var(--radius);
+  background:var(--surface);border:1px solid var(--border2);box-shadow:var(--shadow);
+  display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;transform:scale(.92);animation:winIn .16s ease forwards;
+}
+.window.closing{animation:winOut .14s ease forwards}
+.window.min-anim{transition:transform .2s ease,opacity .2s ease;transform:scale(.3) translateY(46vh);opacity:0}
+.window:not(.active){box-shadow:var(--shadow-soft);border-color:var(--border)}
+.window.maximized{border-radius:0;border:none}
+.win-head{
+  height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 6px 0 12px;
+  background:var(--surface2);border-bottom:1px solid var(--border);cursor:default;touch-action:none;
+}
+.window:not(.active) .win-head{opacity:.72}
+.win-icon{font-size:15px;flex:none}
+.win-title{
+  flex:1;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--text);
+}
+.win-btns{display:flex;gap:2px;flex:none}
+.win-btns button{
+  width:34px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:12px;color:var(--muted);transition:.12s;
+}
+.win-btns button:hover{background:color-mix(in srgb,var(--text) 10%,transparent);color:var(--text)}
+.win-btns .wb-close:hover{background:#e5484d;color:#fff}
+.win-body{flex:1;position:relative;overflow:hidden;display:flex;flex-direction:column;background:var(--surface)}
+.rz{position:absolute;z-index:50;touch-action:none}
+.rz-e{right:-3px;top:12px;bottom:12px;width:7px;cursor:ew-resize}
+.rz-s{bottom:-3px;left:12px;right:12px;height:7px;cursor:ns-resize}
+.rz-se{right:-3px;bottom:-3px;width:16px;height:16px;cursor:nwse-resize}
+.rz-w{left:-3px;top:12px;bottom:12px;width:7px;cursor:ew-resize}
+.rz-n{top:-3px;left:12px;right:12px;height:7px;cursor:ns-resize}
+
+/* ---------- 6. ui kit ---------- */
+.btn{
+  height:32px;padding:0 14px;border-radius:8px;border:1px solid var(--border2);
+  background:var(--surface2);color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:7px;
+  transition:.12s;white-space:nowrap;
+}
+.btn:hover{background:var(--surface3);border-color:var(--muted)}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:color-mix(in srgb,var(--accent) 84%,#fff);border-color:transparent}
+.btn-danger{background:color-mix(in srgb,#e5484d 16%,transparent);border-color:color-mix(in srgb,#e5484d 45%,transparent);color:#ff8a8e}
+.btn-danger:hover{background:#e5484d;color:#fff;border-color:#e5484d}
+.btn-ghost{border-color:transparent;background:transparent}
+.btn-ghost:hover{background:color-mix(in srgb,var(--text) 8%,transparent);border-color:transparent}
+.icon-btn{width:30px;height:30px;padding:0;justify-content:center;border-radius:7px}
+input[type=text],input[type=number],select{
+  height:32px;border-radius:8px;border:1px solid var(--border2);background:color-mix(in srgb,var(--text) 6%,transparent);
+  padding:0 10px;outline:none;font-size:13px;
+}
+input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--accent)}
+input[type=color]{width:34px;height:30px;border:1px solid var(--border2);border-radius:7px;background:none;padding:2px;cursor:pointer}
+input[type=range]{accent-color:var(--accent);cursor:pointer}
+.switch{width:40px;height:22px;border-radius:12px;background:var(--surface3);border:1px solid var(--border2);position:relative;cursor:pointer;transition:.15s;flex:none}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:.15s}
+.switch.on{background:var(--accent);border-color:var(--accent)}
+.switch.on::after{left:20px;background:#fff}
+.h1{font-size:20px;font-weight:700}.h2{font-size:15px;font-weight:700}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono)}
+.chip{
+  display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;font-size:11px;
+  background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 34%,transparent);
+}
+.hr{height:1px;background:var(--border);border:none;margin:10px 0}
+
+/* context menu */
+.ctx-menu{
+  position:fixed;z-index:9600;min-width:186px;padding:5px;border-radius:10px;
+  background:var(--glass);backdrop-filter:blur(24px) saturate(1.5);-webkit-backdrop-filter:blur(24px) saturate(1.5);
+  border:1px solid var(--border2);box-shadow:var(--shadow);animation:menuIn .1s ease;
+}
+.ctx-item{
+  display:flex;align-items:center;gap:9px;height:31px;padding:0 10px;border-radius:7px;font-size:13px;
+  cursor:default;color:var(--text);white-space:nowrap;
+}
+.ctx-item:hover{background:var(--accent);color:#fff}
+.ctx-item.disabled{opacity:.4;pointer-events:none}
+.ctx-item .ci-ico{width:17px;text-align:center;font-size:13px;flex:none}
+.ctx-item .ci-hint{margin-left:auto;font-size:11px;color:var(--muted)}
+.ctx-item:hover .ci-hint{color:rgba(255,255,255,.75)}
+.ctx-sep{height:1px;background:var(--border);margin:4px 8px}
+
+/* toasts */
+#toastStack{position:fixed;right:12px;bottom:calc(var(--tbh) + 12px);z-index:9900;display:flex;flex-direction:column;gap:9px;width:330px;max-width:calc(100vw - 24px)}
+.toast{
+  background:var(--glass);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  border:1px solid var(--border2);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px;
+  display:flex;gap:11px;align-items:flex-start;animation:toastIn .22s ease;cursor:pointer;
+}
+.toast.out{animation:toastOut .2s ease forwards}
+.toast .t-ico{font-size:19px;flex:none;margin-top:1px}
+.toast .t-title{font-weight:700;font-size:13px;margin-bottom:2px}
+.toast .t-body{font-size:12px;color:var(--muted);word-break:break-word}
+
+/* modal dialog */
+#modalLayer{position:fixed;inset:0;z-index:9800;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+#modalLayer.show{display:flex}
+.modal{
+  width:400px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border2);
+  border-radius:14px;box-shadow:var(--shadow);padding:20px;animation:winIn .15s ease;
+}
+.modal-title{font-weight:700;font-size:15px;margin-bottom:9px;display:flex;gap:9px;align-items:center}
+.modal-body{font-size:13px;color:var(--muted);line-height:1.55;user-select:text;word-break:break-word}
+.modal-input{
+  width:100%;margin-top:13px;height:36px;border-radius:8px;border:1px solid var(--border2);
+  background:var(--surface2);padding:0 11px;outline:none;font-size:13.5px;
+}
+.modal-input:focus{border-color:var(--accent)}
+.modal-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:19px}
+
+/* ---------- 7a. terminal ---------- */
+.term{display:flex;flex-direction:column;height:100%;background:#0a0e1a;font-family:var(--mono);font-size:13px;color:#c9d4f2;cursor:text}
+body[data-theme=daylight] .term{background:#0a0e1a}
+.term-out{flex:1;overflow-y:auto;padding:12px 14px 4px;user-select:text;line-height:1.5}
+.term-line{white-space:pre-wrap;word-break:break-all;min-height:1.3em}
+.term-input-row{display:flex;align-items:center;padding:4px 14px 12px;flex:none}
+.term-prompt{white-space:pre;flex:none}
+.term-input{
+  flex:1;background:none;border:none;outline:none;color:#e8eeff;font-family:var(--mono);
+  font-size:13px;caret-color:var(--accent2);min-width:40px;
+}
+.t-dim{color:#5d6b93}.t-accent{color:#8f7dff}.t-cyan{color:#39d3e8}.t-ok{color:#4ade80}
+.t-err{color:#ff7b81}.t-warn{color:#fbbf24}.t-pink{color:#f472b6}.t-white{color:#eef2ff}
+.term-line b{color:#eef2ff;font-weight:600}
+
+/* ---------- 7b. file explorer ---------- */
+.fx{display:flex;height:100%}
+.fx-side{
+  width:172px;flex:none;border-right:1px solid var(--border);padding:10px 8px;overflow-y:auto;
+  background:color-mix(in srgb,var(--surface2) 55%,transparent);
+}
+.fx-side-item{
+  display:flex;align-items:center;gap:9px;height:32px;padding:0 10px;border-radius:8px;font-size:13px;
+  color:var(--text);cursor:default;margin-bottom:1px;
+}
+.fx-side-item:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}
+.fx-side-item.active{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--text)}
+.fx-side-title{font-size:10.5px;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin:12px 10px 6px}
+.fx-main{flex:1;display:flex;flex-direction:column;min-width:0}
+.fx-bar{
+  height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;
+  border-bottom:1px solid var(--border);
+}
+.fx-crumbs{
+  flex:1;height:30px;border-radius:8px;border:1px solid var(--border);background:color-mix(in srgb,var(--text) 5%,transparent);
+  display:flex;align-items:center;padding:0 6px;overflow:hidden;min-width:60px;
+}
+.fx-crumb{padding:3px 7px;border-radius:6px;font-size:12.5px;white-space:nowrap;cursor:default;color:var(--muted)}
+.fx-crumb:hover{background:color-mix(in srgb,var(--text) 9%,transparent);color:var(--text)}
+.fx-crumb.last{color:var(--text);font-weight:600}
+.fx-crumb-sep{color:var(--muted);opacity:.5;font-size:11px}
+.fx-grid{flex:1;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:4px;align-content:start}
+.fx-item{
+  display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 5px 10px;border-radius:9px;
+  cursor:default;border:1px solid transparent;min-width:0;
+}
+.fx-item:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}
+.fx-item.sel{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.fx-item .fi-ico{font-size:33px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+.fx-item .fi-name{
+  font-size:11.5px;text-align:center;max-width:100%;overflow:hidden;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all;
+}
+.fx-status{
+  height:26px;flex:none;border-top:1px solid var(--border);display:flex;align-items:center;
+  padding:0 12px;font-size:11.5px;color:var(--muted);gap:14px;
+}
+.fx-empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:60px 0;font-size:13px}
+
+/* ---------- 7c. code editor ---------- */
+.ed{display:flex;flex-direction:column;height:100%}
+.ed-bar{
+  height:40px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;
+  border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 60%,transparent);
+}
+.ed-lang{font-size:11px;padding:2px 8px;border-radius:6px;background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);font-family:var(--mono)}
+.ed-dirty{width:8px;height:8px;border-radius:50%;background:var(--warn);flex:none;display:none}
+.ed-dirty.show{display:block}
+.ed-main{flex:1;display:flex;min-height:0}
+.ed-gutter{
+  width:46px;flex:none;background:color-mix(in srgb,var(--surface2) 70%,transparent);border-right:1px solid var(--border);
+  overflow:hidden;text-align:right;padding:10px 8px 10px 0;color:var(--muted);font-family:var(--mono);
+  font-size:12.5px;line-height:1.55;opacity:.7;user-select:none;
+}
+.ed-wrap{flex:1;position:relative;overflow:hidden;background:color-mix(in srgb,var(--surface) 92%,#000)}
+.ed-pre,.ed-ta{
+  position:absolute;inset:0;margin:0;padding:10px 14px;font-family:var(--mono);font-size:12.5px;
+  line-height:1.55;white-space:pre;tab-size:2;
+}
+.ed-pre{pointer-events:none;overflow:hidden;color:var(--text);user-select:none;z-index:1;will-change:transform}
+.ed-pre code{font:inherit}
+.ed-ta{
+  z-index:2;background:transparent;color:transparent;caret-color:var(--accent2);border:none;outline:none;
+  resize:none;overflow:auto;user-select:text;
+}
+.ed-out{
+  height:150px;flex:none;border-top:1px solid var(--border);display:none;flex-direction:column;
+  font-family:var(--mono);font-size:12px;background:#0a0e1a;color:#c9d4f2;
+}
+.ed-out.show{display:flex}
+.ed-out-head{height:30px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid #1c2440;color:#7c89b3}
+.ed-out-body{flex:1;overflow-y:auto;padding:8px 12px;user-select:text;white-space:pre-wrap;word-break:break-all;line-height:1.5}
+.ed-preview{flex:1;display:none;border:none;background:#fff;width:100%}
+.ed-preview.show{display:block}
+.tok-kw{color:#c792ea}.tok-str{color:#a5e884}.tok-num{color:#f8a55b}.tok-com{color:#5f6c95;font-style:italic}
+.tok-fn{color:#61d0f0}.tok-tag{color:#ff7b9c}.tok-attr{color:#ffcb6b}.tok-punc{color:#8b98c0}.tok-prop{color:#82aaff}
+body[data-theme=daylight] .ed-wrap{background:#fbfcff}
+
+/* ---------- 7d. games shared ---------- */
+.game-shell{display:flex;flex-direction:column;height:100%;align-items:center;background:radial-gradient(ellipse at 50% -10%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 55%),var(--surface)}
+.g-hud{
+  width:100%;flex:none;display:flex;align-items:center;justify-content:center;gap:18px;padding:11px;
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+}
+.g-stat{display:flex;flex-direction:column;align-items:center;min-width:74px}
+.g-stat b{font-size:17px;font-variant-numeric:tabular-nums}
+.g-stat span{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+.g-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;padding:14px;width:100%}
+.g-overlay{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;
+  background:color-mix(in srgb,var(--bg) 62%,transparent);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:5;
+}
+.g-overlay h2{font-size:26px;font-weight:800}
+.g-canvas-frame{border-radius:12px;overflow:hidden;border:1px solid var(--border2);box-shadow:var(--shadow-soft);position:relative}
+canvas{display:block}
+
+/* snake */
+.snake-cv{background:#0b1120}
+/* 2048 */
+.g2048-board{
+  background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:min(400px,72vw);aspect-ratio:1;
+  touch-action:none;box-shadow:var(--shadow-soft);
+}
+.t2-cell{border-radius:9px;background:color-mix(in srgb,var(--text) 5%,transparent);position:relative}
+.t2-tile{
+  position:absolute;inset:0;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:clamp(15px,4.2vw,27px);animation:tilePop .16s ease;color:#fff;
+}
+.t2-tile.merged{animation:tileMerge .18s ease}
+.t2-v2{background:#3b4a75}.t2-v4{background:#4a5ea8}.t2-v8{background:#4f7df0}
+.t2-v16{background:#6a5cff}.t2-v32{background:#8f5cff}.t2-v64{background:#b44dff}
+.t2-v128{background:#d84dff;box-shadow:0 0 18px color-mix(in srgb,#d84dff 55%,transparent)}
+.t2-v256{background:#ff4dc4;box-shadow:0 0 20px color-mix(in srgb,#ff4dc4 55%,transparent)}
+.t2-v512{background:#ff4d88;box-shadow:0 0 22px color-mix(in srgb,#ff4d88 60%,transparent)}
+.t2-v1024{background:#ff5c5c;box-shadow:0 0 24px color-mix(in srgb,#ff5c5c 60%,transparent)}
+.t2-v2048{background:linear-gradient(135deg,#fbbf24,#ff5c8a);box-shadow:0 0 28px rgba(251,191,36,.6)}
+.t2-vbig{background:linear-gradient(135deg,#22d3ee,#7c6cff)}
+/* minesweeper */
+.ms-top{display:flex;align-items:center;gap:12px}
+.ms-face{width:42px;height:42px;border-radius:10px;background:var(--surface2);border:1px solid var(--border2);font-size:22px;display:flex;align-items:center;justify-content:center;transition:.12s}
+.ms-face:hover{background:var(--surface3)}
+.ms-led{
+  font-family:var(--mono);font-size:19px;font-weight:700;color:#ff5c5c;background:#16090c;
+  border:1px solid #3a1420;border-radius:8px;padding:5px 11px;min-width:74px;text-align:center;
+  letter-spacing:.1em;font-variant-numeric:tabular-nums;text-shadow:0 0 8px rgba(255,70,70,.6);
+}
+body[data-theme=daylight] .ms-led{background:#16090c;color:#ff5c5c}
+.ms-board{display:grid;gap:2px;background:var(--border);padding:6px;border-radius:10px;border:1px solid var(--border2);touch-action:manipulation}
+.ms-cell{
+  width:var(--cs,30px);height:var(--cs,30px);border-radius:4px;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:calc(var(--cs,30px) * .48);cursor:default;user-select:none;
+  background:var(--surface3);border:1px solid var(--border2);transition:background .08s;
+  font-family:var(--mono);
+}
+.ms-cell:hover{background:color-mix(in srgb,var(--accent) 22%,var(--surface3))}
+.ms-cell.revealed{background:color-mix(in srgb,var(--surface) 88%,#000);border-color:var(--border);cursor:default}
+.ms-cell.flag{background:color-mix(in srgb,var(--warn) 24%,var(--surface3))}
+.ms-cell.boom{background:#e5484d}
+.ms-n1{color:#7fb2ff}.ms-n2{color:#5ee0a0}.ms-n3{color:#ff8a7a}.ms-n4{color:#c792ea}
+.ms-n5{color:#fbbf24}.ms-n6{color:#39d3e8}.ms-n7{color:#ff7b9c}.ms-n8{color:#e8ecf8}
+body[data-theme=daylight] .ms-n1{color:#2563eb}.ms-cell.revealed{color:var(--text)}
+
+/* breakout */
+.brk-cv{background:linear-gradient(180deg,#0b1024,#0d1230)}
+/* ---------- 7e. calculator ---------- */
+.calc{display:flex;flex-direction:column;height:100%;background:var(--surface)}
+.calc-screen{
+  padding:16px 18px 10px;text-align:right;flex:none;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--surface2) 55%,transparent);
+}
+.calc-expr{font-size:13px;color:var(--muted);font-family:var(--mono);min-height:18px;word-break:break-all}
+.calc-val{
+  font-size:37px;font-weight:250;font-variant-numeric:tabular-nums;letter-spacing:.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text;
+}
+.calc-hist{height:74px;overflow-y:auto;flex:none;border-bottom:1px solid var(--border);padding:5px 14px;font-family:var(--mono);font-size:11.5px;color:var(--muted);user-select:text}
+.calc-hist div{padding:2px 0;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+.calc-hist div:hover{color:var(--text)}
+.calc-grid{
+  flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:11px;
+  grid-auto-rows:1fr;min-height:0;
+}
+.calc-grid button{
+  border-radius:10px;background:var(--surface2);border:1px solid var(--border);font-size:17px;
+  transition:.1s;font-variant-numeric:tabular-nums;min-height:0;
+}
+.calc-grid button:hover{background:var(--surface3)}
+.calc-grid button:active{transform:scale(.96)}
+.calc-grid .c-op{color:var(--accent2);font-weight:700}
+.calc-grid .c-fn{color:var(--muted);font-size:14px}
+.calc-grid .c-eq{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+.calc-grid .c-eq:hover{background:color-mix(in srgb,var(--accent) 85%,#fff)}
+.calc-grid .c-zero{grid-column:span 2}
+
+/* ---------- 7f. music studio ---------- */
+.mus{display:flex;flex-direction:column;height:100%;background:var(--surface);overflow-y:auto}
+.mus-sec{border-bottom:1px solid var(--border);padding:12px 14px;flex:none}
+.mus-sec-title{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin-bottom:9px;display:flex;justify-content:space-between;align-items:center}
+.mus-viz{width:100%;height:64px;background:#0a0e1a;border-radius:9px;border:1px solid var(--border)}
+.mus-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}
+.mus-controls label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.mus-keys{display:flex;position:relative;height:148px;user-select:none;margin-top:4px}
+.mkey{
+  flex:1;background:linear-gradient(180deg,#fff,#dfe4f2);border:1px solid #9aa3c0;border-radius:0 0 7px 7px;
+  position:relative;cursor:pointer;transition:background .06s;
+}
+.mkey.on{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 55%,#fff),var(--accent))}
+.mkey .mk-label{position:absolute;bottom:7px;left:0;right:0;text-align:center;font-size:10px;color:#5a6488;font-weight:700}
+.mkey.black{
+  position:absolute;width:6.6%;height:60%;background:linear-gradient(180deg,#2a3150,#12172b);
+  border-radius:0 0 5px 5px;z-index:2;border:1px solid #000;transform:translateX(-50%);
+}
+.mkey.black.on{background:linear-gradient(180deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#000))}
+.mkey.black .mk-label{color:#8f9ac0}
+.mus-seq{display:flex;flex-direction:column;gap:3px}
+.seq-track{display:flex;align-items:center;gap:8px}
+.seq-track-label{width:52px;flex:none;font-size:11px;color:var(--muted);text-align:right;font-weight:700}
+.seq-steps{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;flex:1}
+.seq-step{
+  aspect-ratio:1.35;border-radius:5px;background:var(--surface2);border:1px solid var(--border);
+  cursor:pointer;transition:background .08s;min-width:0;
+}
+.seq-step.on{background:var(--accent);border-color:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 50%,transparent)}
+.seq-step.playhead{outline:2px solid var(--accent2);outline-offset:1px}
+.seq-step.beat{opacity:.85}
+.mus-btn-play{width:40px}
+
+/* ---------- 7g. paint ---------- */
+.paint{display:flex;flex-direction:column;height:100%;background:var(--surface2)}
+.pt-bar{
+  height:46px;flex:none;display:flex;align-items:center;gap:7px;padding:0 11px;flex-wrap:nowrap;
+  border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;background:var(--surface);
+}
+.pt-tool{
+  width:34px;height:34px;border-radius:8px;border:1px solid transparent;display:flex;align-items:center;
+  justify-content:center;font-size:16px;flex:none;color:var(--text);
+}
+.pt-tool:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}
+.pt-tool.active{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:color-mix(in srgb,var(--accent) 50%,transparent)}
+.pt-sep{width:1px;height:24px;background:var(--border);flex:none}
+.pt-pal{display:flex;gap:3px;flex:none}
+.pt-sw{width:21px;height:21px;border-radius:6px;border:2px solid transparent;cursor:pointer;flex:none}
+.pt-sw.active{border-color:var(--text);box-shadow:0 0 0 2px var(--surface)}
+.pt-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:12px;overflow:hidden}
+.pt-canvas-wrap{position:relative;box-shadow:var(--shadow-soft);border-radius:6px;overflow:hidden;border:1px solid var(--border2);max-width:100%;max-height:100%}
+.pt-canvas-wrap canvas{position:absolute;inset:0}
+.pt-canvas-wrap canvas:first-child{position:relative}
+
+/* ---------- 7h. settings ---------- */
+.set{height:100%;overflow-y:auto;padding:22px 26px;user-select:text}
+.set-wrap{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:24px}
+.set-section h3{font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.set-section .set-desc{font-size:12.5px;color:var(--muted);margin-bottom:13px}
+.set-card{
+  background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:15px;margin-bottom:9px;
+  display:flex;align-items:center;gap:13px;
+}
+.set-card .sc-main{flex:1;min-width:0}
+.set-card .sc-title{font-size:13.5px;font-weight:600}
+.set-card .sc-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.theme-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:9px}
+.theme-card{
+  border-radius:11px;border:2px solid var(--border);overflow:hidden;cursor:pointer;background:var(--surface2);
+  transition:.13s;
+}
+.theme-card:hover{transform:translateY(-2px)}
+.theme-card.active{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.theme-prev{height:52px;position:relative}
+.theme-prev .tp-bar{position:absolute;left:8px;right:8px;bottom:0;height:14px;border-radius:5px 5px 0 0;background:rgba(255,255,255,.14)}
+.theme-name{padding:7px 10px;font-size:12px;font-weight:600}
+.acc-row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.acc-swatch{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.12s}
+.acc-swatch:hover{transform:scale(1.12)}
+.acc-swatch.active{border-color:var(--text);box-shadow:0 0 0 3px var(--surface)}
+.wp-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}
+.wp-card{
+  height:76px;border-radius:11px;border:2px solid var(--border);cursor:pointer;position:relative;overflow:hidden;transition:.13s;
+}
+.wp-card:hover{transform:translateY(-2px)}
+.wp-card.active{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.wp-card span{position:absolute;left:9px;bottom:6px;font-size:11px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.8);color:#fff}
+.set-btn-row{display:flex;gap:9px;flex-wrap:wrap}
+.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px}
+.kv:last-child{border:none}
+.kv b{font-variant-numeric:tabular-nums}
+
+/* ---------- 7i. task manager ---------- */
+.tm{display:flex;flex-direction:column;height:100%}
+.tm-viz{height:92px;flex:none;border-bottom:1px solid var(--border);position:relative;background:color-mix(in srgb,var(--surface2) 60%,transparent)}
+.tm-viz canvas{width:100%;height:100%}
+.tm-viz-label{position:absolute;top:8px;left:12px;font-size:11px;color:var(--muted);letter-spacing:.08em}
+.tm-viz-val{position:absolute;top:6px;right:14px;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.tm-head{display:flex;padding:8px 16px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);gap:10px}
+.tm-list{flex:1;overflow-y:auto;padding:0 8px 8px}
+.tm-row{
+  display:flex;align-items:center;gap:10px;padding:8px;border-radius:9px;font-size:13px;cursor:default;
+}
+.tm-row:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+.tm-cpu{width:120px;flex:none;display:flex;align-items:center;gap:8px}
+.tm-meter{flex:1;height:5px;border-radius:3px;background:var(--surface3);overflow:hidden}
+.tm-meter i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s ease}
+.tm-mem{width:76px;flex:none;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}
+.tm-pid{width:56px;flex:none;color:var(--muted);font-family:var(--mono);font-size:11.5px}
+.tm-name{flex:1;display:flex;align-items:center;gap:9px;min-width:0}
+.tm-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm-status{padding:6px 16px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted);display:flex;gap:18px}
+
+/* ---------- 7j. welcome ---------- */
+.welcome{height:100%;overflow-y:auto;background:radial-gradient(ellipse at 70% -20%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 55%),var(--surface);user-select:text}
+.welcome-inner{max-width:660px;margin:0 auto;padding:30px 28px;display:flex;flex-direction:column;gap:20px}
+.wf-logo{font-family:var(--mono);font-size:11.5px;line-height:1.35;color:var(--accent);white-space:pre;overflow-x:auto;text-shadow:0 0 14px color-mix(in srgb,var(--accent) 45%,transparent)}
+.wf-title{font-size:26px;font-weight:800;letter-spacing:-.01em}
+.wf-sub{color:var(--muted);font-size:13px;margin-top:5px;line-height:1.6}
+.wf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:9px}
+.wf-app{
+  display:flex;align-items:center;gap:11px;padding:12px;border-radius:11px;background:var(--surface2);
+  border:1px solid var(--border);cursor:pointer;transition:.13s;
+}
+.wf-app:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-soft)}
+.wf-app .wa-ico{font-size:23px}
+.wf-app .wa-name{font-size:13px;font-weight:600}
+.wf-app .wa-desc{font-size:11px;color:var(--muted)}
+.wf-tips{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:15px 17px;font-size:12.5px;line-height:1.9;color:var(--muted)}
+.wf-tips b{color:var(--text)}
+.wf-tips code{font-family:var(--mono);background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);padding:1px 6px;border-radius:5px;font-size:11.5px}
+
+/* ---------- 7k. image viewer ---------- */
+.viewer{height:100%;display:flex;flex-direction:column;background:#0a0d18}
+body[data-theme=daylight] .viewer{background:#e5e9f4}
+.viewer-bar{height:40px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--border);background:var(--surface)}
+.viewer-stage{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px}
+.viewer-stage img{transition:transform .15s ease;box-shadow:var(--shadow);max-width:none;user-select:none}
+
+/* ---------- 7l. shader studio ---------- */
+.shd{position:relative;height:100%;background:#000;overflow:hidden}
+.shd canvas{position:absolute;inset:0;width:100%;height:100%}
+.shd-bar{
+  position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;gap:7px;align-items:center;
+  flex-wrap:wrap;pointer-events:none;
+}
+.shd-bar>*{pointer-events:auto}
+.shd-fps{
+  position:absolute;bottom:10px;left:12px;z-index:3;font-family:var(--mono);font-size:11px;color:#9fe8ff;
+  background:rgba(0,0,0,.4);padding:3px 9px;border-radius:6px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+}
+.shd-err{
+  position:absolute;inset:14px;z-index:4;background:rgba(10,0,5,.88);color:#ff9aa5;font-family:var(--mono);
+  font-size:11.5px;padding:16px;border-radius:10px;overflow:auto;white-space:pre-wrap;display:none;user-select:text;
+}
+
+/* ---------- 8. keyframes ---------- */
+@keyframes winIn{from{opacity:0;transform:scale(.92) translateY(8px)}to{opacity:1;transform:none}}
+@keyframes winOut{to{opacity:0;transform:scale(.9) translateY(6px)}}
+@keyframes menuIn{from{opacity:0;transform:scale(.96) translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes toastIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:none}}
+@keyframes toastOut{to{opacity:0;transform:translateX(30px)}}
+@keyframes tilePop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes tileMerge{0%{transform:scale(1)}50%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes shimmer{to{background-position:220% 0}}
+@keyframes bootPulse{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+</style>
+</head>
+<body data-theme="aurora">
+<canvas id="wallpaper"></canvas>
+<div id="desktop">
+  <div id="desk-icons"></div>
+  <div id="snapGhost"></div>
+</div>
+<div id="taskbar">
+  <button id="startBtn" class="tb-btn"><span class="logo-dot"></span><span>开始</span></button>
+  <div id="taskItems"></div>
+  <div id="tray">
+    <button id="notifBtn" class="tb-btn" title="通知">🔔</button>
+    <button id="clockBtn" class="tb-btn"><span id="clockTime">--:--</span><span id="clockDate"></span></button>
+  </div>
+</div>
+<div id="startMenu"></div>
+<div id="calendarPop"></div>
+<div id="toastStack"></div>
+<div id="modalLayer"></div>
+<div id="boot">
+  <div class="boot-logo">AURORA</div>
+  <div class="boot-sub">Web Desktop Environment</div>
+  <div class="boot-bar"><i id="bootFill"></i></div>
+  <div class="boot-msg" id="bootMsg"></div>
+</div>
+<div id="shutdown">
+  <div style="font-size:44px">🌙</div>
+  <div style="font-size:17px;font-weight:600">AuroraOS 已关机</div>
+  <div style="font-size:12.5px;opacity:.6">现在可以安全地关闭这个标签页了。</div>
+  <button class="power-btn" id="powerOnBtn" title="重新开机">⏻</button>
+</div>
+
+<script>
+"use strict";
+/* ================================================================
+   AuroraOS 1.0 "Nebula" — a desktop environment in one file.
+   Kernel: utils -> settings -> vfs -> window manager -> ui -> shell
+   ================================================================ */
+
+/* ---------------- 01 · utilities ---------------- */
+const $  = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const rand  = (a,b) => a + Math.random()*(b-a);
+const randi = (a,b) => Math.floor(rand(a,b+1));
+const pad2  = n => String(n).padStart(2,"0");
+let __uid = 1000;
+const uid = () => ++__uid;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtBytes = n => {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n/1024).toFixed(1) + " KB";
+  return (n/1048576).toFixed(2) + " MB";
+};
+const fmtUptime = ms => {
+  const s = Math.floor(ms/1000);
+  const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60), ss = s%60;
+  return (d? d+"d ":"") + pad2(h)+":"+pad2(m)+":"+pad2(ss);
+};
+const el = (tag, attrs={}, ...children) => {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs||{})) {
+    if (v == null) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k === "style" && typeof v === "object") Object.assign(e.style, v);
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
+    else if (k === "dataset") Object.assign(e.dataset, v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    e.append(c.nodeType ? c : document.createTextNode(c));
+  }
+  return e;
+};
+/* tiny event bus */
+const Bus = {
+  map: {},
+  on(ev, fn) { (this.map[ev] ||= []).push(fn); return () => this.off(ev, fn); },
+  off(ev, fn) { this.map[ev] = (this.map[ev]||[]).filter(f => f !== fn); },
+  emit(ev, ...a) { (this.map[ev]||[]).slice().forEach(fn => { try { fn(...a); } catch(e){ console.error(e); } }); }
+};
+
+/* ---------------- 02 · settings ---------------- */
+const Settings = {
+  KEY: "aurora.settings",
+  data: { theme:"aurora", accent:"#7c6cff", wallpaper:"aurora", animations:true, sfx:true },
+  load() {
+    try { Object.assign(this.data, JSON.parse(localStorage.getItem(this.KEY) || "{}")); } catch(e){}
+  },
+  save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); } catch(e){} },
+  set(k, v) { this.data[k] = v; this.save(); this.apply(); Bus.emit("settings", k, v); },
+  apply() {
+    document.body.dataset.theme = this.data.theme;
+    document.documentElement.style.setProperty("--accent", this.data.accent);
+    document.documentElement.style.setProperty("--accent2", this.data.accent2 || "");
+    if (typeof Wallpaper !== "undefined") Wallpaper.set(this.data.wallpaper, this.data.animations);
+  }
+};
+
+/* ---------------- 03 · virtual file system ---------------- */
+const FS = {
+  KEY: "aurora.fs.v1",
+  root: null,
+  _t: null,
+
+  init() {
+    let loaded = null;
+    try { loaded = JSON.parse(localStorage.getItem(this.KEY)); } catch(e){}
+    this.root = (loaded && loaded.t === "d") ? loaded : this.defaultTree();
+    this.save();
+  },
+  save() {
+    clearTimeout(this._t);
+    this._t = setTimeout(() => {
+      try { localStorage.setItem(this.KEY, JSON.stringify(this.root)); } catch(e){ console.warn("FS save failed", e); }
+    }, 250);
+  },
+  factoryReset() {
+    this.root = this.defaultTree();
+    this.save();
+    Bus.emit("fs.reset");
+  },
+
+  defaultTree() {
+    const welcomeMd =
+`# 欢迎使用 AuroraOS
+
+这是一台完全运行在你浏览器里的桌面电脑 —— 单个 HTML 文件，
+没有服务器、没有构建工具，一切都在本地。
+
+## 试试这些
+- 双击桌面图标打开应用
+- 打开「终端」输入 help 查看全部命令
+- 在「编辑器」里打开 hello.js 然后点 ▶ 运行
+- 「星云」是一个实时的 WebGL 着色器引擎
+- 「音乐工作室」可以弹琴 + 编排鼓机音序
+
+## 提示
+- 终端里 Ctrl+L 清屏，Tab 补全路径
+- 全局快捷键 Ctrl+Alt+T 快速召唤终端
+- 所有文件保存在浏览器 localStorage 中
+- 设置中心可以恢复出厂（一切数据会被清空）
+
+玩得开心。
+— Aurora Kernel`;
+    const helloJs =
+`// 在编辑器里点击 ▶ 运行我！
+const name = "Aurora";
+const stars = 42 * 1024;
+
+console.log("Hello from", name + "!");
+console.log("渲染了", stars.toLocaleString(), "颗虚拟星星");
+
+for (let i = 1; i <= 5; i++) {
+  console.log("  ✓ 启动子系统", i, "…", i % 2 ? "ok" : "ready");
+}
+
+const fib = n => n < 2 ? n : fib(n-1) + fib(n-2);
+console.log("fib(20) =", fib(20));
+console.warn("这是一个 warning 示例");
+console.log("完成 ✓");`;
+    const notesTxt =
+`待办清单
+========
+[x] 制造一台浏览器里的电脑
+[x] 给它写一个终端
+[x] 再写一堆应用
+[ ] 让用户发现右键菜单里藏着东西
+[ ] 用星云着色器摸鱼一下午`;
+    const readmeTxt =
+"AuroraOS /bin\n\n这里假装是二进制目录。其实所有可执行文件\n都是 JS 函数，正在内存里盯着你。\n\n试试在终端里运行: neofetch";
+    const d = children => ({ t:"d", c:children });
+    const f = content => ({ t:"f", c:content });
+    return d({
+      home: d({
+        user: d({
+          Desktop: d({}),
+          Documents: d({
+            "welcome.md": f(welcomeMd),
+            "todo.txt": f(notesTxt),
+            "hello.js": f(helloJs),
+          }),
+          Pictures: d({}),
+          Music: d({}),
+          Downloads: d({}),
+        })
+      }),
+      etc: d({ "os.json": f(JSON.stringify({name:"AuroraOS",version:"1.0",codename:"Nebula",kernel:"aurora-js",shell:"ash 1.0"},null,2)) }),
+      bin: d({ "readme.txt": f(readmeTxt) }),
+      var: d({ log: d({ "boot.log": f("[ok] aurora kernel 1.0\n[ok] vfs mounted\n[ok] compositor online\n[ok] audio daemon ready") }) })
+    });
+  },
+
+  normalize(p, cwd="/") {
+    if (!p || p === ".") p = cwd;
+    if (p === "~") p = "/home/user";
+    if (p.startsWith("~/")) p = "/home/user/" + p.slice(2);
+    if (!p.startsWith("/")) p = (cwd === "/" ? "" : cwd.replace(/\/$/,"")) + "/" + p;
+    const parts = [];
+    for (const seg of p.split("/")) {
+      if (!seg || seg === ".") continue;
+      if (seg === "..") parts.pop();
+      else parts.push(seg);
+    }
+    return "/" + parts.join("/");
+  },
+  get(p) {
+    let node = this.root;
+    for (const seg of p.split("/").filter(Boolean)) {
+      if (!node || node.t !== "d" || !node.c[seg]) return null;
+      node = node.c[seg];
+    }
+    return node;
+  },
+  exists(p)  { return !!this.get(p); },
+  isDir(p)   { const n = this.get(p); return !!n && n.t === "d"; },
+  parentOf(p) {
+    p = this.normalize(p);
+    const i = p.lastIndexOf("/");
+    const dirPath = i <= 0 ? "/" : p.slice(0, i);
+    const name = p.slice(i + 1);
+    return { dirPath, name, dir: this.get(dirPath) };
+  },
+  ls(p) {
+    const n = this.get(this.normalize(p));
+    if (!n || n.t !== "d") return null;
+    return Object.entries(n.c)
+      .map(([name, node]) => ({ name, node }))
+      .sort((a,b) => (a.node.t === b.node.t) ? a.name.localeCompare(b.name, "zh") : (a.node.t === "d" ? -1 : 1));
+  },
+  mkdir(p) {
+    p = this.normalize(p);
+    const { dirPath, name, dir } = this.parentOf(p);
+    if (!dir || dir.t !== "d") return "no such directory: " + dirPath;
+    if (dir.c[name]) return "already exists: " + p;
+    dir.c[name] = { t:"d", c:{} };
+    this.save(); return null;
+  },
+  writeFile(p, content) {
+    p = this.normalize(p);
+    const { dirPath, name, dir } = this.parentOf(p);
+    if (!dir || dir.t !== "d") return "no such directory: " + dirPath;
+    const existing = dir.c[name];
+    if (existing && existing.t === "d") return "is a directory: " + p;
+    dir.c[name] = { t:"f", c:String(content) };
+    this.save(); return null;
+  },
+  read(p) {
+    const n = this.get(this.normalize(p));
+    if (!n) return null;
+    if (n.t === "d") return undefined;
+    return n.c;
+  },
+  rm(p) {
+    p = this.normalize(p);
+    if (p === "/") return "cannot remove root";
+    const { dir, name } = this.parentOf(p);
+    if (!dir || !dir.c[name]) return "no such file or directory: " + p;
+    delete dir.c[name];
+    this.save(); return null;
+  },
+  mv(from, to) {
+    from = this.normalize(from); to = this.normalize(to);
+    const node = this.get(from);
+    if (!node) return "no such file or directory: " + from;
+    // rename in place
+    const fp = this.parentOf(from), tp = this.parentOf(to);
+    if (tp.dir && tp.dir.c[to.split("/").pop()] === undefined && to.indexOf(from) === 0) {
+      // moving into own subdir guard below
+    }
+    if (node.t === "d" && (to + "/").startsWith(from + "/")) return "cannot move into itself";
+    if (!tp.dir || tp.dir.t !== "d") return "no such directory: " + tp.dirPath;
+    let targetName = tp.name;
+    if (this.isDir(to)) targetName = from.split("/").pop();
+    if (tp.dir.c[targetName] && tp.dir.c[targetName].t === "d" && node.t !== "d") return "target is a directory";
+    delete fp.dir.c[fp.name];
+    tp.dir.c[targetName] = node;
+    this.save(); return null;
+  },
+  cp(from, to) {
+    from = this.normalize(from); to = this.normalize(to);
+    const node = this.get(from);
+    if (!node) return "no such file or directory: " + from;
+    if (node.t === "d" && (to + "/").startsWith(from + "/")) return "cannot copy into itself";
+    const clone = JSON.parse(JSON.stringify(node));
+    const tp = this.parentOf(to);
+    if (!tp.dir || tp.dir.t !== "d") return "no such directory: " + tp.dirPath;
+    let targetName = tp.name;
+    if (this.isDir(to)) targetName = from.split("/").pop();
+    if (tp.dir.c[targetName] && tp.dir.c[targetName].t === "d" && node.t !== "d") return "target is a directory";
+    tp.dir.c[targetName] = clone;
+    this.save(); return null;
+  },
+  uniqueName(dirPath, base) {
+    const dir = this.get(dirPath);
+    if (!dir || !dir.c[base]) return base;
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext  = dot > 0 ? base.slice(dot) : "";
+    let i = 2;
+    while (dir.c[`${stem} (${i})${ext}`]) i++;
+    return `${stem} (${i})${ext}`;
+  },
+  size(node = this.root) {
+    if (node.t === "f") return node.c.length;
+    return Object.values(node.c).reduce((s,n) => s + this.size(n), 0);
+  }
+};
+
+/* ---------------- 04 · window manager ---------------- */
+const OS = {
+  apps: {},
+  windows: [],
+  zTop: 100,
+  seq: 0,
+  bootTime: Date.now(),
+  focused: null,
+
+  registerApp(def) { this.apps[def.id] = def; },
+
+  launch(appId, args) {
+    const app = this.apps[appId];
+    if (!app) { UI.notify("AuroraOS", "未找到应用: " + appId, "⚠️"); return null; }
+    if (app.single) {
+      const existing = this.windows.find(w => w.appId === appId);
+      if (existing) { this.restore(existing); this.focus(existing); return existing; }
+    }
+    return this.createWindow(app, args);
+  },
+
+  createWindow(app, args={}) {
+    const desktop = $("#desktop");
+    const dw = desktop.clientWidth, dh = desktop.clientHeight;
+    const w = Math.min(app.w || 640, dw - 20);
+    const h = Math.min(app.h || 460, dh - 20);
+    const off = (this.windows.length % 8) * 26;
+    let x = app.x != null ? app.x : clamp(Math.round((dw - w)/2) + off - 90, 8, Math.max(8, dw - w - 8));
+    let y = app.y != null ? app.y : clamp(Math.round((dh - h)/2.6) + off - 40, 8, Math.max(8, dh - h - 8));
+
+    const win = {
+      id: ++this.seq, appId: app.id, app, args,
+      minimized: false, maximized: false, _preMax: null,
+      onCloseFns: [], _cleanup: [],
+      setTitle(t) { this.titleEl.textContent = t; if (this.taskEl) this.taskEl.querySelector(".ti-label").textContent = t; },
+      onClose(fn) { this.onCloseFns.push(fn); },
+      listen(target, type, fn, opt) {
+        target.addEventListener(type, fn, opt);
+        this._cleanup.push(() => target.removeEventListener(type, fn, opt));
+      },
+      every(ms, fn) { const iv = setInterval(fn, ms); this._cleanup.push(() => clearInterval(iv)); return iv; },
+      after(ms, fn) { const to = setTimeout(fn, ms); this._cleanup.push(() => clearTimeout(to)); return to; },
+    };
+    win.$ = s => win.el.querySelector(s);
+
+    const head = el("div", { class:"win-head" },
+      el("div", { class:"win-icon", text: app.icon || "🗔" }),
+      el("div", { class:"win-title", text: app.name || "Window" }),
+      el("div", { class:"win-btns" },
+        el("button", { class:"wb-min",  text:"—" , title:"最小化", onclick:e => { e.stopPropagation(); this.minimize(win); }}),
+        el("button", { class:"wb-max",  text:"▢", title:"最大化", onclick:e => { e.stopPropagation(); this.toggleMax(win); }}),
+        el("button", { class:"wb-close",text:"✕", title:"关闭",   onclick:e => { e.stopPropagation(); this.close(win); }}),
+      ));
+    win.titleEl = head.querySelector(".win-title");
+    win.iconEl = head.querySelector(".win-icon");
+
+    const body = el("div", { class:"win-body" });
+    win.body = body;
+
+    const wEl = el("div", { class:"window", style:{ left:x+"px", top:y+"px", width:w+"px", height:h+"px", zIndex: ++this.zTop } },
+      head, body,
+      el("div", { class:"rz rz-e" }), el("div", { class:"rz rz-s" }), el("div", { class:"rz rz-se" }),
+      el("div", { class:"rz rz-w" }), el("div", { class:"rz rz-n" }),
+    );
+    win.el = wEl;
+
+    /* --- dragging --- */
+    let drag = null;
+    head.addEventListener("pointerdown", e => {
+      if (e.target.closest(".win-btns")) return;
+      if (e.button !== 0) return;
+      this.focus(win);
+      if (win.maximized) {
+        // drag off maximized: restore under cursor
+        const rw = win._preMax ? win._preMax.w : Math.min(app.w||640, dw-40);
+        const ratio = (e.clientX - desktop.getBoundingClientRect().left) / dw;
+        this.toggleMax(win);
+        win.el.style.width = rw + "px";
+        win.el.style.left = clamp(e.clientX - desktop.getBoundingClientRect().left - rw*ratio, 0, dw - rw) + "px";
+        win.el.style.top = Math.max(0, e.clientY - 19) + "px";
+      }
+      drag = { sx:e.clientX, sy:e.clientY, ox: win.el.offsetLeft, oy: win.el.offsetTop };
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener("pointermove", e => {
+      if (!drag) return;
+      const nx = clamp(drag.ox + e.clientX - drag.sx, -w + 90, dw - 90);
+      const ny = clamp(drag.oy + e.clientY - drag.sy, 0, dh - 30);
+      win.el.style.left = nx + "px";
+      win.el.style.top  = ny + "px";
+      this._showSnap(win, e.clientX, e.clientY);
+    });
+    head.addEventListener("pointerup", e => {
+      if (!drag) return;
+      drag = null;
+      this._applySnap(win, e.clientX, e.clientY);
+    });
+    head.addEventListener("dblclick", e => { if (!e.target.closest(".win-btns")) this.toggleMax(win); });
+
+    /* --- resizing --- */
+    $$(".rz", wEl).forEach(h2 => {
+      let rs = null;
+      h2.addEventListener("pointerdown", e => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        this.focus(win);
+        rs = { sx:e.clientX, sy:e.clientY, ow: wEl.offsetWidth, oh: wEl.offsetHeight, ox: wEl.offsetLeft, oy: wEl.offsetTop, dir: h2.dataset.dir };
+        h2.setPointerCapture(e.pointerId);
+      });
+      h2.addEventListener("pointermove", e => {
+        if (!rs) return;
+        const dx = e.clientX - rs.sx, dy = e.clientY - rs.sy;
+        const d = rs.dir;
+        if (d.includes("e")) wEl.style.width  = Math.max(320, rs.ow + dx) + "px";
+        if (d.includes("s")) wEl.style.height = Math.max(200, rs.oh + dy) + "px";
+        if (d.includes("w")) { const nw = Math.max(320, rs.ow - dx); wEl.style.width = nw + "px"; wEl.style.left = rs.ox + (rs.ow - nw) + "px"; }
+        if (d.includes("n")) { const nh = Math.max(200, rs.oh - dy); wEl.style.height = nh + "px"; wEl.style.top = rs.oy + (rs.oh - nh) + "px"; }
+      });
+      h2.addEventListener("pointerup", () => rs = null);
+    });
+
+    wEl.addEventListener("pointerdown", () => this.focus(win));
+
+    desktop.append(wEl);
+    this.windows.push(win);
+    if (app.mount) {
+      try { app.mount(body, win, args); }
+      catch(err) {
+        console.error(err);
+        body.append(el("div", { style:{ padding:"20px", color:"var(--err)", fontFamily:"var(--mono)", fontSize:"12px", userSelect:"text" } },
+          "应用崩溃: " + (err && err.stack || err)));
+      }
+    }
+    this.focus(win);
+    Bus.emit("windows");
+    return win;
+  },
+
+  _showSnap(win, cx, cy) {
+    const g = $("#snapGhost"), d = $("#desktop").getBoundingClientRect();
+    let zone = null;
+    if (cy <= d.top + 4) zone = { l:0, t:0, w:d.width, h:d.height };
+    else if (cx <= d.left + 4) zone = { l:0, t:0, w:d.width/2, h:d.height };
+    else if (cx >= d.right - 5) zone = { l:d.width/2, t:0, w:d.width/2, h:d.height };
+    if (!zone) { g.style.display = "none"; this._snapZone = null; return; }
+    this._snapZone = zone;
+    Object.assign(g.style, { display:"block", left:zone.l+"px", top:zone.t+"px", width:zone.w+"px", height:zone.h+"px" });
+  },
+  _applySnap(win, cx, cy) {
+    $("#snapGhost").style.display = "none";
+    const zone = this._snapZone; this._snapZone = null;
+    if (!zone) return;
+    if (zone.w >= $("#desktop").clientWidth - 5) { this.toggleMax(win, true); return; }
+    if (!win.maximized) { win._preMax = { w:win.el.offsetWidth, h:win.el.offsetHeight }; }
+    win.maximized = false;
+    Object.assign(win.el.style, {
+      left: zone.l+"px", top: zone.t+"px", width: zone.w+"px", height: zone.h+"px",
+      borderRadius:"12px",
+    });
+    Bus.emit("windows");
+  },
+
+  focus(win) {
+    if (this.focused === win && !win.minimized) { win.el.style.zIndex = ++this.zTop; return; }
+    if (win.minimized) this.restore(win);
+    this.focused = win;
+    win.el.style.zIndex = ++this.zTop;
+    this.windows.forEach(w => w.el.classList.toggle("active", w === win));
+    Bus.emit("windows");
+  },
+
+  minimize(win) {
+    win.minimized = true;
+    win.el.classList.add("min-anim");
+    if (this.focused === win) {
+      const next = this.windows.filter(w => !w.minimized && w !== win).pop();
+      this.focused = null;
+      if (next) this.focus(next);
+    }
+    setTimeout(() => { if (win.minimized) win.el.style.display = "none"; }, 200);
+    Bus.emit("windows");
+  },
+  restore(win) {
+    win.minimized = false;
+    win.el.style.display = "";
+    requestAnimationFrame(() => win.el.classList.remove("min-anim"));
+    Bus.emit("windows");
+  },
+  toggleMax(win, force) {
+    const d = $("#desktop");
+    if (!win.maximized) {
+      if (!force) win._preMax = { l:win.el.offsetLeft, t:win.el.offsetTop, w:win.el.offsetWidth, h:win.el.offsetHeight };
+      win.maximized = true;
+      win.el.classList.add("maximized");
+      Object.assign(win.el.style, { left:"0px", top:"0px", width:"100%", height:"100%", borderRadius:"0" });
+      win.el.querySelector(".wb-max").textContent = "❐";
+    } else {
+      win.maximized = false;
+      win.el.classList.remove("maximized");
+      const p = win._preMax || { l:40, t:30, w:640, h:460 };
+      Object.assign(win.el.style, { left:p.l+"px", top:p.t+"px", width:p.w+"px", height:p.h+"px" });
+      win.el.querySelector(".wb-max").textContent = "▢";
+    }
+    Bus.emit("windows");
+  },
+
+  close(win) {
+    if (!win || win._closed) return;
+    win._closed = true;
+    win.onCloseFns.forEach(fn => { try { fn(); } catch(e){} });
+    win._cleanup.forEach(fn => { try { fn(); } catch(e){} });
+    win.el.classList.add("closing");
+    setTimeout(() => win.el.remove(), 140);
+    this.windows = this.windows.filter(w => w !== win);
+    if (this.focused === win) {
+      this.focused = null;
+      const next = this.windows.filter(w => !w.minimized).pop();
+      if (next) this.focus(next);
+    }
+    Bus.emit("windows");
+  },
+
+  closeAll() { [...this.windows].forEach(w => this.close(w)); }
+};
+
+/* ---------------- 05 · ui kit (toast / menu / dialog) ---------------- */
+const UI = {
+  notify(title, body, icon="🔔", ms=4200) {
+    const t = el("div", { class:"toast" },
+      el("div", { class:"t-ico", text: icon }),
+      el("div", {},
+        el("div", { class:"t-title", text: title }),
+        body ? el("div", { class:"t-body", text: body }) : null));
+    const kill = () => { t.classList.add("out"); setTimeout(() => t.remove(), 200); };
+    t.onclick = kill;
+    $("#toastStack").append(t);
+    setTimeout(kill, ms);
+    return t;
+  },
+
+  _openMenu: null,
+  menu(x, y, items) {
+    this.closeMenu();
+    const m = el("div", { class:"ctx-menu" });
+    for (const it of items) {
+      if (it === "-" || it.sep) { m.append(el("div", { class:"ctx-sep" })); continue; }
+      if (!it) continue;
+      m.append(el("div", {
+        class:"ctx-item" + (it.disabled ? " disabled" : ""),
+        onclick: e => { e.stopPropagation(); this.closeMenu(); it.action && it.action(); },
+      },
+        el("span", { class:"ci-ico", text: it.icon || "" }),
+        el("span", { text: it.label }),
+        it.hint ? el("span", { class:"ci-hint", text: it.hint }) : null,
+      ));
+    }
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = clamp(x, 4, innerWidth - r.width - 4) + "px";
+    m.style.top  = clamp(y, 4, innerHeight - r.height - 4) + "px";
+    this._openMenu = m;
+    setTimeout(() => {
+      this._closeHandlers.forEach(h => h());
+      const off1 = e => { if (!m.contains(e.target)) this.closeMenu(); };
+      document.addEventListener("pointerdown", off1, true);
+      const off2 = e => { if (e.key === "Escape") this.closeMenu(); };
+      document.addEventListener("keydown", off2, true);
+      this._closeHandlers = [
+        () => document.removeEventListener("pointerdown", off1, true),
+        () => document.removeEventListener("keydown", off2, true),
+      ];
+    });
+    return m;
+  },
+  _closeHandlers: [],
+  closeMenu() {
+    if (this._openMenu) { this._openMenu.remove(); this._openMenu = null; }
+    this._closeHandlers.forEach(h => h()); this._closeHandlers = [];
+  },
+
+  modal(opts) {
+    return new Promise(resolve => {
+      const layer = $("#modalLayer");
+      layer.innerHTML = "";
+      const done = val => { layer.classList.remove("show"); layer.innerHTML = ""; resolve(val); };
+      const input = opts.input !== false && opts.prompt !== undefined || opts.prompt
+        ? el("input", { class:"modal-input", type:"text", value: opts.value || "", placeholder: opts.placeholder || "" }) : null;
+      const box = el("div", { class:"modal" },
+        el("div", { class:"modal-title" },
+          opts.icon ? el("span", { text: opts.icon }) : null,
+          el("span", { text: opts.title || "AuroraOS" })),
+        el("div", { class:"modal-body", html: opts.html || esc(opts.body || "") }),
+        input,
+        el("div", { class:"modal-btns" },
+          el("button", { class:"btn", text: opts.cancelText || "取消", onclick: () => done(null) }),
+          el("button", { class:"btn btn-primary", text: opts.okText || "确定", onclick: () => done(input ? input.value : true) }),
+        ));
+      layer.append(box);
+      layer.classList.add("show");
+      layer.onpointerdown = e => { if (e.target === layer) done(null); };
+      layer.onkeydown = e => {
+        if (e.key === "Escape") done(null);
+        if (e.key === "Enter") done(input ? input.value : true);
+      };
+      if (input) { input.focus(); input.select(); }
+      else layer.focus();
+      layer.tabIndex = -1;
+    });
+  },
+  confirm(title, body, icon="❔") { return this.modal({ title, body, icon, okText:"确定" }).then(v => v !== null); },
+  prompt(title, value="", placeholder="", icon="✏️") { return this.modal({ title, prompt:true, value, placeholder, icon }); },
+  alert(title, body, icon="ℹ️") { return this.modal({ title, body, icon, cancelText:"关闭", okText:"好" }); },
+};
+
+/* ---------------- 06 · wallpaper engine ---------------- */
+const Wallpaper = {
+  cv: null, ctx: null, mode: "aurora", animate: true, raf: 0, t: 0,
+  _colors: { accent: "#7c6cff", accent2: "#22d3ee" },
+  stars: [], blobs: [],
+
+  init() {
+    this.cv = $("#wallpaper");
+    this.ctx = this.cv.getContext("2d");
+    this.readColors();
+    addEventListener("resize", () => { this.resize(); this.drawStatic(); });
+    Bus.on("settings", () => { this.readColors(); this.build(); this.drawStatic(); });
+    this.resize(); this.build();
+    const loop = ts => {
+      this.raf = requestAnimationFrame(loop);
+      if (document.hidden) return;
+      this.t = ts / 1000;
+      if (this.animate) this.drawStatic();
+    };
+    this.raf = requestAnimationFrame(loop);
+  },
+  readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    this._colors.accent  = cs.getPropertyValue("--accent").trim()  || "#7c6cff";
+    this._colors.accent2 = cs.getPropertyValue("--accent2").trim() || "#22d3ee";
+  },
+  set(mode, animate) {
+    this.mode = mode || "aurora";
+    this.animate = animate !== false;
+    this.build();
+    this.drawStatic();
+  },
+  resize() {
+    this.cv.width = innerWidth * (devicePixelRatio > 1.5 ? 1 : devicePixelRatio);
+    this.cv.height = innerHeight * (devicePixelRatio > 1.5 ? 1 : devicePixelRatio);
+    this.cv.style.width = innerWidth + "px";
+    this.cv.style.height = innerHeight + "px";
+    this.build();
+  },
+  build() {
+    const W = this.cv.width, H = this.cv.height;
+    this.stars = Array.from({ length: Math.round(W*H/9000) }, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: rand(.4,1.7), tw: rand(0,6.28), sp: rand(.4,1.6)
+    }));
+    this.blobs = Array.from({ length: 5 }, (_, i) => ({
+      x: rand(0,W), y: rand(0,H), r: rand(W*.18, W*.32), sp: rand(.05,.16), ph: rand(0,6.28), i
+    }));
+  },
+  hex2rgb(h) {
+    h = h.replace("#","");
+    if (h.length === 3) h = h.split("").map(c=>c+c).join("");
+    const n = parseInt(h,16);
+    return [n>>16 & 255, n>>8 & 255, n & 255];
+  },
+  drawStatic() {
+    const c = this.ctx, W = this.cv.width, H = this.cv.height, t = this.t;
+    const [ar,ag,ab] = this.hex2rgb(this._colors.accent);
+    const [br,bg2,bb] = this.hex2rgb(this._colors.accent2);
+    const dark = document.body.dataset.theme !== "daylight";
+    // base
+    const g = c.createLinearGradient(0,0,0,H);
+    if (dark) { g.addColorStop(0, "#05070f"); g.addColorStop(1, "#0a1024"); }
+    else { g.addColorStop(0, "#dfe7fb"); g.addColorStop(1, "#c4d2f2"); }
+    c.fillStyle = g; c.fillRect(0,0,W,H);
+
+    if (this.mode === "aurora") {
+      c.globalCompositeOperation = "lighter";
+      for (const b of this.blobs) {
+        const x = b.x + Math.sin(t*b.sp + b.ph) * W*.16;
+        const y = b.y + Math.cos(t*b.sp*.8 + b.ph*1.7) * H*.14;
+        const mixT = (Math.sin(t*.1 + b.ph) + 1)/2;
+        const rr = ar+(br-ar)*mixT, gg = ag+(bg2-ag)*mixT, rb = ab+(bb-ab)*mixT;
+        const rg = c.createRadialGradient(x,y,0, x,y,b.r);
+        rg.addColorStop(0, `rgba(${rr|0},${gg|0},${rb|0},${dark?0.16:0.20})`);
+        rg.addColorStop(1, "rgba(0,0,0,0)");
+        c.fillStyle = rg;
+        c.beginPath(); c.arc(x,y,b.r,0,6.29); c.fill();
+      }
+      c.globalCompositeOperation = "source-over";
+    }
+    else if (this.mode === "starfield") {
+      if (dark) {
+        c.globalCompositeOperation = "lighter";
+        for (const s of this.stars) {
+          const a = .25 + .75*Math.abs(Math.sin(t*s.sp + s.tw));
+          c.fillStyle = `rgba(230,240,255,${a*.8})`;
+          c.beginPath(); c.arc(s.x, s.y, s.r, 0, 6.29); c.fill();
+        }
+        for (const b of this.blobs.slice(0,3)) {
+          const x = b.x + Math.sin(t*b.sp*.5 + b.ph)*W*.1;
+          const rg = c.createRadialGradient(x,b.y,0, x,b.y,b.r*.9);
+          rg.addColorStop(0, `rgba(${ar},${ag},${ab},0.08)`);
+          rg.addColorStop(1, "rgba(0,0,0,0)");
+          c.fillStyle = rg; c.beginPath(); c.arc(x,b.y,b.r*.9,0,6.29); c.fill();
+        }
+        c.globalCompositeOperation = "source-over";
+      }
+    }
+    else if (this.mode === "waves") {
+      c.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 5; i++) {
+        c.beginPath();
+        const yBase = H*(.3 + i*.14);
+        c.moveTo(0, yBase);
+        for (let x = 0; x <= W; x += 14) {
+          const y = yBase + Math.sin(x*.004 + t*(.5+i*.13) + i*1.7)*36 + Math.sin(x*.0013 - t*.3)*22;
+          c.lineTo(x,y);
+        }
+        c.lineTo(W,H); c.lineTo(0,H); c.closePath();
+        c.fillStyle = `rgba(${i%2?br:ar},${i%2?bg2:ag},${i%2?bb:ab},${dark?0.05:0.06})`;
+        c.fill();
+      }
+      c.globalCompositeOperation = "source-over";
+    }
+    else if (this.mode === "grid") {
+      const hz = H*.42;
+      c.strokeStyle = dark ? `rgba(${ar},${ag},${ab},0.22)` : `rgba(${ar},${ag},${ab},0.3)`;
+      c.lineWidth = 1;
+      for (let i = 0; i < 26; i++) {
+        const p = ((i/26 + (t*.06)%(1/26)) % 1);
+        const y = hz + Math.pow(p, 2.2)*(H-hz);
+        c.globalAlpha = p*.9;
+        c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke();
+      }
+      for (let i = -14; i <= 14; i++) {
+        c.globalAlpha = .5;
+        c.beginPath(); c.moveTo(W/2 + i*W*.06, hz); c.lineTo(W/2 + i*W*.55, H); c.stroke();
+      }
+      c.globalAlpha = 1;
+    }
+    // vignette
+    const vg = c.createRadialGradient(W/2,H/2,Math.min(W,H)*.35, W/2,H/2, Math.max(W,H)*.75);
+    vg.addColorStop(0,"rgba(0,0,0,0)"); vg.addColorStop(1, dark ? "rgba(0,0,0,.5)" : "rgba(30,50,110,.18)");
+    c.fillStyle = vg; c.fillRect(0,0,W,H);
+  }
+};
+
+/* ---------------- 07 · boot / power ---------------- */
+const Boot = {
+  msgs: [
+    "aurora kernel 1.0 (nebula) …",
+    "mounting virtual file system …",
+    "starting window compositor …",
+    "loading audio daemon …",
+    "waking gpu shader engine …",
+    "calibrating flux capacitor …",
+    "preparing desktop …",
+  ],
+  run(done) {
+    const boot = $("#boot"), fill = $("#bootFill"), msg = $("#bootMsg");
+    boot.classList.remove("hide");
+    boot.style.display = "flex";
+    let p = 0, i = 0;
+    msg.textContent = this.msgs[0];
+    const iv = setInterval(() => {
+      p += rand(9, 22);
+      if (p >= 100) {
+        p = 100; clearInterval(iv);
+        fill.style.width = "100%";
+        setTimeout(() => {
+          boot.classList.add("hide");
+          setTimeout(() => boot.style.display = "none", 550);
+          done && done();
+        }, 260);
+      }
+      fill.style.width = p + "%";
+      const ni = Math.min(this.msgs.length-1, Math.floor(p/100*this.msgs.length));
+      if (ni !== i) { i = ni; msg.textContent = this.msgs[i]; }
+    }, 150);
+  }
+};
+
+function rebootOS() {
+  OS.closeAll();
+  Boot.run(() => UI.notify("AuroraOS", "系统已重新启动 ✓", "⚡"));
+}
+function shutdownOS() {
+  OS.closeAll();
+  $("#shutdown").classList.add("show");
+}
+</script>
+<script>
+"use strict";
+/* ================================================================
+   SHELL — desktop, taskbar, start menu, clock, shortcuts
+   ================================================================ */
+
+/* ---------------- 08 · shell ---------------- */
+const Shell = {
+  init() {
+    this.buildIcons();
+    this.buildStart();
+    this.buildCalendar();
+    this.buildTaskbarBindings();
+    Bus.on("windows", () => this.renderTaskItems());
+    Bus.on("fs.reset", () => this.buildIcons());
+
+    // clock
+    const tick = () => {
+      const d = new Date();
+      $("#clockTime").textContent = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+      $("#clockDate").textContent = (d.getMonth()+1) + "/" + d.getDate();
+      const bt = $("#calBigTime");
+      if (bt) {
+        bt.textContent = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+        $("#calBigDate").textContent = d.getFullYear() + " 年 " + (d.getMonth()+1) + " 月 " + d.getDate() + " 日 · " + ["周日","周一","周二","周三","周四","周五","周六"][d.getDay()];
+      }
+    };
+    tick(); setInterval(tick, 1000);
+
+    // desktop context menu
+    $("#desktop").addEventListener("contextmenu", e => {
+      if (e.target.closest(".window")) return;
+      e.preventDefault();
+      UI.menu(e.clientX, e.clientY, [
+        { label:"新建文件夹", icon:"📁", action: () => this.newOnDesktop("dir") },
+        { label:"新建文本文件", icon:"📄", action: () => this.newOnDesktop("file") },
+        "-",
+        { label:"在此打开终端", icon:"⌨️", hint:"Ctrl+Alt+T", action: () => OS.launch("terminal") },
+        { label:"更换壁纸", icon:"🖼️", action: () => {
+          const order = ["aurora","starfield","waves","grid"];
+          Settings.set("wallpaper", order[(order.indexOf(Settings.data.wallpaper)+1) % order.length]);
+        }},
+        { label:"个性化设置", icon:"⚙️", action: () => OS.launch("settings") },
+        "-",
+        { label:"刷新", icon:"🔄", action: () => this.buildIcons() },
+      ]);
+    });
+    // icon context menu handled at buildIcons
+
+    // global shortcuts
+    document.addEventListener("keydown", e => {
+      if (e.ctrlKey && e.altKey && (e.key === "t" || e.key === "T")) { e.preventDefault(); OS.launch("terminal"); }
+      if (e.key === "Escape") {
+        if ($("#startMenu").classList.contains("open")) this.toggleStart(false);
+        else if ($("#calendarPop").classList.contains("open")) $("#calendarPop").classList.remove("open");
+        else UI.closeMenu();
+      }
+    });
+
+    // wallpaper click clears icon selection
+    $("#desktop").addEventListener("pointerdown", e => {
+      if (e.target === $("#desktop") || e.target === $("#wallpaper")) {
+        $$(".desk-icon.selected").forEach(i => i.classList.remove("selected"));
+      }
+    });
+  },
+
+  newOnDesktop(kind) {
+    const dir = "/home/user/Desktop";
+    const name = kind === "dir" ? "新建文件夹" : "新建文本.txt";
+    const finalName = FS.uniqueName(dir, name);
+    if (kind === "dir") FS.mkdir(dir + "/" + finalName);
+    else FS.writeFile(dir + "/" + finalName, "");
+    this.buildIcons();
+  },
+
+  buildIcons() {
+    const box = $("#desk-icons");
+    box.innerHTML = "";
+    const apps = Object.values(OS.apps).filter(a => a.desktop);
+    for (const app of apps) {
+      const ic = el("div", { class:"desk-icon", tabindex:0 },
+        el("div", { class:"di-ico", text: app.icon }),
+        el("div", { class:"di-label", text: app.name }));
+      ic.addEventListener("pointerdown", e => {
+        $$(".desk-icon.selected").forEach(i => i.classList.remove("selected"));
+        ic.classList.add("selected");
+        e.stopPropagation();
+      });
+      ic.addEventListener("dblclick", () => OS.launch(app.id));
+      ic.addEventListener("keydown", e => { if (e.key === "Enter") OS.launch(app.id); });
+      ic.addEventListener("contextmenu", e => {
+        e.preventDefault(); e.stopPropagation();
+        UI.menu(e.clientX, e.clientY, [
+          { label:"打开", icon:"🚀", action: () => OS.launch(app.id) },
+          "-",
+          { label:"应用信息", icon:"ℹ️", action: () => UI.alert(app.name, app.desc || "", app.icon) },
+        ]);
+      });
+      box.append(ic);
+    }
+  },
+
+  buildTaskbarBindings() {
+    $("#startBtn").addEventListener("click", e => { e.stopPropagation(); this.toggleStart(); });
+    document.addEventListener("pointerdown", e => {
+      if (!e.target.closest("#startMenu") && !e.target.closest("#startBtn")) this.toggleStart(false);
+      if (!e.target.closest("#calendarPop") && !e.target.closest("#clockBtn")) $("#calendarPop").classList.remove("open");
+    });
+    $("#clockBtn").addEventListener("click", e => { e.stopPropagation(); $("#calendarPop").classList.toggle("open"); });
+    $("#notifBtn").addEventListener("click", () => OS.launch("welcome"));
+    $("#powerOnBtn").addEventListener("click", () => {
+      $("#shutdown").classList.remove("show");
+      Boot.run(() => {});
+    });
+  },
+
+  toggleStart(force) {
+    const sm = $("#startMenu");
+    const open = force != null ? force : !sm.classList.contains("open");
+    sm.classList.toggle("open", open);
+    if (open) { const inp = $("#smSearch"); inp.value = ""; this.filterStart(""); setTimeout(() => inp.focus(), 60); }
+  },
+
+  buildStart() {
+    const sm = $("#startMenu");
+    sm.innerHTML = "";
+    sm.append(
+      el("div", { class:"sm-search-wrap" },
+        el("input", { id:"smSearch", class:"sm-search", type:"text", placeholder:"搜索应用…" })),
+      el("div", { class:"sm-body" },
+        el("div", { class:"sm-section", text:"全部应用" }),
+        el("div", { class:"sm-grid", id:"smGrid" }),
+        el("div", { class:"sm-empty", id:"smEmpty", text:"没有匹配的应用", style:{ display:"none" } })),
+      el("div", { class:"sm-footer" },
+        el("div", { class:"sm-user" },
+          el("div", { class:"sm-avatar", text:"U" }),
+          el("div", {}, el("div", { text:"user" }), el("div", { class:"muted", text:"本地账户", style:{ fontSize:"10.5px" } }))),
+        el("div", { class:"sm-power" },
+          el("button", { class:"tb-btn", title:"重启", text:"🔄", onclick: rebootOS }),
+          el("button", { class:"tb-btn", title:"关机", text:"⏻", onclick: shutdownOS }),
+        )));
+    const grid = $("#smGrid");
+    for (const app of Object.values(OS.apps)) {
+      if (app.hidden) continue;
+      const b = el("button", { class:"sm-app", dataset:{ name: app.name.toLowerCase() },
+        onclick: () => { this.toggleStart(false); OS.launch(app.id); } },
+        el("span", { class:"sa-ico", text: app.icon }),
+        el("span", { class:"sa-name", text: app.name }));
+      grid.append(b);
+    }
+    $("#smSearch").addEventListener("input", e => this.filterStart(e.target.value));
+    $("#smSearch").addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        const first = $("#smGrid .sm-app");
+        if (first && first.style.display !== "none") { this.toggleStart(false); OS.launch(Object.values(OS.apps).filter(a=>!a.hidden)[0]?.id); }
+      }
+    });
+  },
+  filterStart(q) {
+    q = q.trim().toLowerCase();
+    let any = false;
+    $$("#smGrid .sm-app").forEach(b => {
+      const show = !q || b.dataset.name.includes(q);
+      b.style.display = show ? "" : "none";
+      if (show) any = true;
+    });
+    $("#smEmpty").style.display = any ? "none" : "";
+  },
+
+  buildCalendar() {
+    const pop = $("#calendarPop");
+    let view = new Date();
+    const render = () => {
+      pop.innerHTML = "";
+      const y = view.getFullYear(), m = view.getMonth();
+      const first = new Date(y, m, 1);
+      const startDow = first.getDay();
+      const daysIn = new Date(y, m+1, 0).getDate();
+      const prevDays = new Date(y, m, 0).getDate();
+      const today = new Date();
+      const grid = el("div", { class:"cal-grid" });
+      for (const d of ["日","一","二","三","四","五","六"]) grid.append(el("div", { class:"cal-dow", text:d }));
+      for (let i = 0; i < 42; i++) {
+        const dayN = i - startDow + 1;
+        let cls = "cal-day", label, dim = false;
+        if (dayN < 1) { label = prevDays + dayN; dim = true; }
+        else if (dayN > daysIn) { label = dayN - daysIn; dim = true; }
+        else {
+          label = dayN;
+          if (dayN === today.getDate() && m === today.getMonth() && y === today.getFullYear()) cls += " today";
+        }
+        grid.append(el("div", { class: cls + (dim ? " dim" : ""), text: String(label) }));
+      }
+      pop.append(
+        el("div", { class:"cal-big-time", id:"calBigTime" }),
+        el("div", { class:"cal-big-date", id:"calBigDate" }),
+        el("div", { class:"cal-head" },
+          el("button", { class:"btn btn-ghost icon-btn", text:"‹", onclick: () => { view = new Date(y, m-1, 1); render(); }}),
+          el("div", { class:"cal-title", text: y + " 年 " + (m+1) + " 月" }),
+          el("button", { class:"btn btn-ghost icon-btn", text:"›", onclick: () => { view = new Date(y, m+1, 1); render(); }})),
+        grid);
+    };
+    render();
+    Bus.on("settings", render);
+  },
+
+  renderTaskItems() {
+    const box = $("#taskItems");
+    box.innerHTML = "";
+    for (const win of OS.windows) {
+      const t = el("button", { class: "task-item" + (OS.focused === win && !win.minimized ? " active" : "") + (win.minimized ? " min" : "") },
+        el("span", { class:"ti-ico", text: win.app.icon }),
+        el("span", { class:"ti-label", text: win.titleEl.textContent }));
+      t.onclick = () => {
+        if (win.minimized) { OS.restore(win); OS.focus(win); }
+        else if (OS.focused === win) OS.minimize(win);
+        else OS.focus(win);
+      };
+      t.oncontextmenu = e => {
+        e.preventDefault();
+        UI.menu(e.clientX, e.clientY, [
+          { label: win.minimized ? "还原" : "最小化", icon:"▼", action: () => win.minimized ? (OS.restore(win), OS.focus(win)) : OS.minimize(win) },
+          { label: win.maximized ? "向下还原" : "最大化", icon:"▢", action: () => OS.toggleMax(win) },
+          "-",
+          { label:"关闭窗口", icon:"✕", action: () => OS.close(win) },
+        ]);
+      };
+      win.taskEl = t;
+      box.append(t);
+    }
+  }
+};
+
+/* ================================================================
+   APP: 终端 (Terminal / ash shell)
+   ================================================================ */
+const FORTUNES = [
+  " любое достаточно сложное приложение содержит一个自制的、充满 bug 的操作系统。— 用浏览器的方式说",
+  "Real programmers count from 0.",
+  "世界上只有两种人：懂二进制的，和不懂的。",
+  "代码不会说谎，注释会。",
+  "640K 对任何人来说都应该足够了。—— 某个 1981 年的家伙",
+  "There are only 10 types of people in the world.",
+  "调试代码的时间是写代码的两倍。所以如果你写代码用尽了全部脑力，那么按定义，你不够聪明去调试它。",
+  "任何足够先进的技术都与魔法无异 —— 除非你读过它的源码。",
+  "sudo make me a sandwich.",
+  "你的下一个 Quote 是……这个 Quote。",
+  "在互联网上，没人知道你是一段 setTimeout。",
+  "Bug 是特性还没被文档化之前的样子。",
+  "先让它跑起来，再让它跑得对，最后——算了，能跑就行。",
+  "今天是你余生的第一行 console.log()。",
+  "_rm -rf / 是唯一真正的禅意时刻。但请不要在这里尝试，这个终端会照做的（对虚拟文件系统）。",
+  "墨菲定律：任何可能出 bug 的地方，一定会有人在演示时触发它。",
+  "程序员最讨厌的四件事：写文档、写注释、别人不写文档、别人不写注释。",
+  "MooresLaw：晶体管数量每两年翻一番，你的待办事项也是。",
+  "Hello, world! 然后世界再也没有回复过。",
+  "咖啡因驱动的开发（CDD）是经过同行评审的方法论。",
+];
+const NEOFETCH_ART =
+`      /\\        \x1b
+     /  \\
+    /    \\     A U R O R A
+   /______\\
+  /\\      /\\   ─────────────────
+ /  \\    /  \\
+/____\\  /____\\`;
+
+OS.registerApp({
+  id:"terminal", name:"终端", icon:"⌨️", desc:"Aurora Shell — 一个真正的命令行",
+  w:720, h:460, desktop:true,
+
+  mount(body, win) {
+    const out = el("div", { class:"term-out" });
+    const input = el("input", { class:"term-input", spellcheck:"false", autocomplete:"off" });
+    const promptEl = el("span", { class:"term-prompt" });
+    const row = el("div", { class:"term-input-row" }, promptEl, input);
+    body.append(el("div", { class:"term" }, out, row));
+
+    const state = { cwd: "/home/user", hist: JSON.parse(sessionStorage.getItem("aurora.termhist") || "[]"), hi: -1 };
+    const short = p => p.replace(/^\/home\/user/, "~");
+    const renderPrompt = () => {
+      promptEl.innerHTML = "";
+      promptEl.append(
+        el("span", { class:"t-accent", text:"user@aurora" }),
+        el("span", { class:"t-white", text:":" }),
+        el("span", { class:"t-cyan", text: short(state.cwd) }),
+        el("span", { class:"t-white", text:"$ " }));
+    };
+    renderPrompt();
+
+    const print = (text, cls) => {
+      const line = el("div", { class:"term-line" + (cls ? " " + cls : "") });
+      if (cls === "_raw") line.innerHTML = text; else line.textContent = text;
+      out.append(line);
+      out.scrollTop = out.scrollHeight;
+      return line;
+    };
+    const printHTML = html => print(html, "_raw");
+
+    body.addEventListener("click", () => { if (!getSelection().toString()) input.focus(); });
+    win.after(50, () => input.focus());
+
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        const cmd = input.value;
+        input.value = "";
+        printHTML(promptHTML() + esc(cmd));
+        if (cmd.trim()) {
+          state.hist.push(cmd);
+          if (state.hist.length > 100) state.hist.shift();
+          try { sessionStorage.setItem("aurora.termhist", JSON.stringify(state.hist)); } catch(e){}
+          exec(cmd);
+        }
+        state.hi = -1;
+        renderPrompt();
+        out.scrollTop = out.scrollHeight;
+      }
+      else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!state.hist.length) return;
+        state.hi = state.hi < 0 ? state.hist.length-1 : Math.max(0, state.hi-1);
+        input.value = state.hist[state.hi];
+      }
+      else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (state.hi < 0) return;
+        state.hi++;
+        if (state.hi >= state.hist.length) { state.hi = -1; input.value = ""; }
+        else input.value = state.hist[state.hi];
+      }
+      else if (e.key === "Tab") {
+        e.preventDefault();
+        const parts = input.value.split(/\s+/);
+        const last = parts[parts.length-1] || "";
+        if (!last) return;
+        const slash = last.lastIndexOf("/");
+        const dirPart = slash >= 0 ? last.slice(0, slash+1) : "";
+        const stub = slash >= 0 ? last.slice(slash+1) : last;
+        const dirAbs = FS.normalize(dirPart || ".", state.cwd);
+        const entries = FS.ls(dirAbs) || [];
+        const hits = entries.filter(en => en.name.startsWith(stub));
+        if (hits.length === 1) {
+          parts[parts.length-1] = dirPart + hits[0].name + (hits[0].node.t === "d" ? "/" : "");
+          input.value = parts.join(" ");
+        } else if (hits.length > 1) {
+          printHTML(promptHTML() + " " + esc(input.value));
+          print(hits.map(h => h.name + (h.node.t === "d" ? "/" : "")).join("  "), "t-dim");
+        }
+      }
+      else if (e.ctrlKey && (e.key === "l" || e.key === "L")) { e.preventDefault(); out.innerHTML = ""; }
+      else if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+        printHTML(promptHTML() + esc(input.value) + "^C");
+        input.value = "";
+      }
+    });
+
+    const promptHTML = () =>
+      `<span class="t-accent">user@aurora</span><span class="t-white">:</span><span class="t-cyan">${esc(short(state.cwd))}</span><span class="t-white">$</span> `;
+
+    /* ---- command registry ---- */
+    const cmds = {};
+    const def = (name, desc, usage, run) => cmds[name] = { desc, usage, run };
+
+    def("help", "显示帮助", "help [命令]", a => {
+      if (a[0] && cmds[a[0]]) {
+        const c = cmds[a[0]];
+        print(`${a[0]} — ${c.desc}\n用法: ${c.usage}`);
+        return;
+      }
+      print("Aurora Shell (ash) 1.0 — 可用命令：", "t-white");
+      const names = Object.keys(cmds).sort();
+      for (let i = 0; i < names.length; i += 4)
+        print("  " + names.slice(i, i+4).map(n => n.padEnd(10)).join(""));
+      print("\n试一下: neofetch · tree / · fortune · open editor · matrix", "t-dim");
+    });
+
+    def("clear", "清屏", "clear", () => { out.innerHTML = ""; });
+    def("pwd", "当前目录", "pwd", () => state.cwd);
+    def("echo", "输出文本", "echo [文本]", a => a.join(" "));
+    def("date", "日期时间", "date", () => new Date().toLocaleString("zh-CN", { dateStyle:"full", timeStyle:"medium" }));
+    def("whoami", "我是谁", "whoami", () => "user (uid=1000, aurora)");
+    def("history", "历史命令", "history", () => state.hist.map((h,i) => `${String(i+1).padStart(4)}  ${h}`).join("\n"));
+    def("fortune", "随机格言", "fortune", () => FORTUNES[randi(0, FORTUNES.length-1)]);
+
+    def("cowsay", "牛说", "cowsay [文本]", a => {
+      const msg = a.join(" ") || "moo~";
+      const bar = "-".repeat(msg.length + 2);
+      return ` ${bar}\n< ${msg} >\n ${bar}\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\\n                ||----w |\n                ||     ||`;
+    });
+
+    def("ls", "列出目录", "ls [路径]", a => {
+      const p = FS.normalize(a[0] || ".", state.cwd);
+      const items = FS.ls(p);
+      if (!items) throw new Error("ls: 无法访问 " + p);
+      if (!items.length) return "(空)";
+      return items.map(it => it.node.t === "d" ? it.name + "/" : it.name).join("   ");
+    });
+    def("cd", "切换目录", "cd [路径]", a => {
+      const p = FS.normalize(a[0] || "~", state.cwd);
+      if (!FS.exists(p)) throw new Error("cd: 没有那个目录: " + a[0]);
+      if (!FS.isDir(p)) throw new Error("cd: 不是目录: " + a[0]);
+      state.cwd = p;
+    });
+    def("cat", "查看文件", "cat <文件>", a => {
+      if (!a[0]) throw new Error("用法: cat <文件>");
+      const c = FS.read(FS.normalize(a[0], state.cwd));
+      if (c === null) throw new Error("cat: 没有那个文件: " + a[0]);
+      if (c === undefined) throw new Error("cat: 是一个目录: " + a[0]);
+      return c;
+    });
+    def("mkdir", "创建目录", "mkdir <目录>", a => {
+      if (!a[0]) throw new Error("用法: mkdir <目录>");
+      const err = FS.mkdir(FS.normalize(a[0], state.cwd));
+      if (err) throw new Error("mkdir: " + err);
+    });
+    def("touch", "创建空文件", "touch <文件>", a => {
+      if (!a[0]) throw new Error("用法: touch <文件>");
+      const p = FS.normalize(a[0], state.cwd);
+      if (!FS.exists(p)) { const err = FS.writeFile(p, ""); if (err) throw new Error("touch: " + err); }
+    });
+    def("rm", "删除文件/目录", "rm [-r] <路径>", a => {
+      const rec = a[0] === "-r" || a[0] === "-rf";
+      const target = rec ? a[1] : a[0];
+      if (!target) throw new Error("用法: rm [-r] <路径>");
+      const p = FS.normalize(target, state.cwd);
+      if (FS.isDir(p) && !rec) throw new Error("rm: 是目录（用 -r）: " + target);
+      const err = FS.rm(p);
+      if (err) throw new Error("rm: " + err);
+      Bus.emit("fs.reset");
+    });
+    def("mv", "移动/重命名", "mv <源> <目标>", a => {
+      if (a.length < 2) throw new Error("用法: mv <源> <目标>");
+      const err = FS.mv(FS.normalize(a[0], state.cwd), FS.normalize(a[1], state.cwd));
+      if (err) throw new Error("mv: " + err);
+      Bus.emit("fs.reset");
+    });
+    def("cp", "复制", "cp <源> <目标>", a => {
+      if (a.length < 2) throw new Error("用法: cp <源> <目标>");
+      const err = FS.cp(FS.normalize(a[0], state.cwd), FS.normalize(a[1], state.cwd));
+      if (err) throw new Error("cp: " + err);
+    });
+    def("tree", "目录树", "tree [路径]", a => {
+      const p = FS.normalize(a[0] || ".", state.cwd);
+      if (!FS.isDir(p)) throw new Error("tree: 不是目录");
+      const lines = [short(p)];
+      const walk = (path, prefix, depth) => {
+        if (depth > 4) return;
+        const items = FS.ls(path) || [];
+        items.forEach((it, i) => {
+          const last = i === items.length-1;
+          lines.push(prefix + (last ? "└─ " : "├─ ") + it.name + (it.node.t === "d" ? "/" : ""));
+          if (it.node.t === "d") walk(path + "/" + it.name, prefix + (last ? "   " : "│  "), depth+1);
+        });
+      };
+      walk(p, "", 0);
+      return lines.join("\n") + `\n\n${(function count(n){let d=0,f=0;(function w(n){if(n.t==='d'){for(const k in n.c){n.c[k].t==='d'?w(n.c[k]):f++}d++}})(n);return d+" 个目录, "+f+" 个文件"})(FS.get(p))}`;
+    });
+    def("open", "打开文件或应用", "open <路径|应用ID>", a => {
+      if (!a[0]) throw new Error("用法: open <路径|应用ID>");
+      if (OS.apps[a[0]]) { OS.launch(a[0]); return "启动 " + OS.apps[a[0]].name + " …"; }
+      const p = FS.normalize(a[0], state.cwd);
+      const node = FS.get(p);
+      if (!node) throw new Error("open: 没有那个文件: " + a[0]);
+      if (node.t === "d") { OS.launch("files", { path: p }); return "在文件管理器中打开 " + short(p); }
+      Apps.openFile(p, node.c);
+      return "打开 " + short(p) + " …";
+    });
+    def("apps", "列出应用", "apps", () => Object.values(OS.apps).filter(x=>!x.hidden).map(x => `${x.icon} ${x.id.padEnd(10)} ${x.name}`).join("\n"));
+    def("ps", "进程列表", "ps", () => {
+      const rows = OS.windows.map(w => `${String(w.id).padStart(4)}  ${w.app.name}  ${w.minimized ? "(minimized)" : ""}`);
+      return " PID  APP\n" + (rows.join("\n") || " (no processes)");
+    });
+    def("kill", "关闭窗口", "kill <PID>", a => {
+      const id = parseInt(a[0]);
+      const win = OS.windows.find(w => w.id === id);
+      if (!win) throw new Error("kill: 没有那个进程: " + a[0]);
+      OS.close(win);
+      return `已终止 ${win.app.name} (${id})`;
+    });
+    def("theme", "切换主题", "theme [aurora|midnight|sunset|forest|daylight]", a => {
+      if (!a[0]) return "当前主题: " + Settings.data.theme + " · 可选: aurora midnight sunset forest daylight";
+      if (!["aurora","midnight","sunset","forest","daylight"].includes(a[0])) throw new Error("theme: 未知主题 " + a[0]);
+      Settings.set("theme", a[0]);
+      return "主题 → " + a[0] + " ✓";
+    });
+    def("accent", "设置强调色", "accent <#hex>", a => {
+      if (!/^#[0-9a-f]{6}$/i.test(a[0]||"")) throw new Error("用法: accent #7c6cff");
+      Settings.set("accent", a[0]);
+      return "强调色 → " + a[0] + " ✓";
+    });
+    def("wallpaper", "切换壁纸", "wallpaper [aurora|starfield|waves|grid]", a => {
+      if (!a[0]) return "当前壁纸: " + Settings.data.wallpaper;
+      if (!["aurora","starfield","waves","grid"].includes(a[0])) throw new Error("wallpaper: 未知壁纸");
+      Settings.set("wallpaper", a[0]);
+      return "壁纸 → " + a[0] + " ✓";
+    });
+    def("calc", "计算器", "calc <表达式>", a => {
+      const expr = a.join(" ").replace(/×/g,"*").replace(/÷/g,"/");
+      if (!/^[\d+\-*/().,%\s]+$/.test(expr)) throw new Error("calc: 只支持四则运算");
+      try {
+        // eslint-disable-next-line no-new-func
+        const v = Function(`"use strict";return (${expr})`)();
+        if (typeof v !== "number" || !isFinite(v)) throw 0;
+        return String(Math.round(v * 1e10) / 1e10);
+      } catch(e) { throw new Error("calc: 无效表达式"); }
+    });
+    def("neofetch", "系统信息", "neofetch", () => {
+      const info = [
+        ["OS", "AuroraOS 1.0 Nebula (x86_64-browser)"],
+        ["Kernel", "aurora-js " + (navigator.hardwareConcurrency||"?") + "-core"],
+        ["Shell", "ash 1.0"],
+        ["WM", "Aurora Compositor"],
+        ["Theme", `${Settings.data.theme} · ${Settings.data.accent}`],
+        ["Terminal", "aurora-term"],
+        ["CPU", (navigator.hardwareConcurrency||"?") + " vCPU"],
+        ["Screen", screen.width + "x" + screen.height],
+        ["Uptime", fmtUptime(Date.now() - OS.bootTime)],
+        ["Disk", fmtBytes(FS.size()) + " / ~5MB (localStorage)"],
+      ];
+      const art = [
+        "      /\\        ",
+        "     /  \\       ",
+        "    /    \\      ",
+        "   /______\\     ",
+        "  /\\      /\\    ",
+        " /  \\    /  \\   ",
+        "/____\\  /____\\  ",
+        "                ",
+      ];
+      const gap = 3;
+      const rows = Math.max(art.length, info.length);
+      const lines = [];
+      for (let i = 0; i < rows; i++) {
+        const a2 = (art[i] || " ".repeat(16));
+        const inf = info[i];
+        let right = "";
+        if (inf) right = `<span class="t-accent">${esc(inf[0])}</span><span class="t-white">: </span><span class="t-dim">${esc(inf[1])}</span>`;
+        lines.push(`<span class="t-cyan">${esc(a2)}</span>` + " ".repeat(gap) + right);
+      }
+      lines.push("");
+      lines.push(`<span class="t-cyan">■</span><span class="t-accent">■</span><span class="t-pink">■</span><span class="t-ok">■</span><span class="t-warn">■</span><span class="t-err">■</span>`);
+      printHTML(lines.join("\n"));
+      return undefined;
+    });
+    def("reboot", "重启系统", "reboot", () => { print("Rebooting…", "t-warn"); setTimeout(rebootOS, 400); });
+    def("matrix", "跟随白兔🐇", "matrix", () => {
+      print("Wake up, user…", "t-ok");
+      print("跟随白兔。这个终端即将进入数字雨。按任意键返回。", "t-dim");
+      const ov = el("canvas", { style:{ position:"absolute", inset:"0", zIndex:"9", background:"#000" } });
+      body.style.position = "relative";
+      body.append(ov);
+      const cx = ov.getContext("2d");
+      ov.width = body.clientWidth; ov.height = body.clientHeight;
+      const cols = Math.floor(ov.width/14);
+      const drops = Array(cols).fill(1);
+      const stop = win.every(50, () => {
+        cx.fillStyle = "rgba(0,0,0,.09)"; cx.fillRect(0,0,ov.width,ov.height);
+        cx.font = "13px " + getComputedStyle(document.body).getPropertyValue("--mono");
+        for (let i = 0; i < cols; i++) {
+          const ch = String.fromCharCode(0x30A0 + Math.random()*96 | 0);
+          cx.fillStyle = Math.random() < .02 ? "#d4ffe8" : "#37ff8b";
+          cx.fillText(ch, i*14, drops[i]*15);
+          if (drops[i]*15 > ov.height && Math.random() > .972) drops[i] = 0;
+          drops[i]++;
+        }
+      });
+      const quit = e => { e.stopPropagation(); clearInterval(stop); ov.remove(); ov.removeEventListener("keydown", quit); body.removeEventListener("keydown", quit); };
+      body.tabIndex = -1; body.focus();
+      body.addEventListener("keydown", quit);
+      ov.addEventListener("pointerdown", quit);
+      return undefined;
+    });
+    def("about", "关于本机", "about", () => OS.launch("welcome"));
+
+    const exec = raw => {
+      // handle redirections > and >>
+      let text = raw.trim();
+      let redir = null, append = false;
+      const rm = text.match(/\s(>>|>)\s*([^\s>]+)\s*$/) || text.match(/^(>>|>)\s*([^\s>]+)\s*$/);
+      if (rm) {
+        append = rm[1] === ">>";
+        redir = rm[2];
+        text = text.slice(0, rm.index) + " " + text.slice(rm.index + rm[0].length);
+      }
+      const parts = text.trim().split(/\s+/).filter(Boolean);
+      if (!parts.length) return;
+      const name = parts[0];
+      const args = parts.slice(1);
+      const cmd = cmds[name];
+      try {
+        if (!cmd) throw new Error(`ash: 未找到命令: ${name}。输入 help 查看帮助。`);
+        const result = cmd.run(args);
+        if (result === undefined || result === null) return;
+        if (redir) {
+          const p = FS.normalize(redir, state.cwd);
+          const prev = append && FS.exists(p) ? (FS.read(p) || "") : "";
+          const err = FS.writeFile(p, prev + String(result) + "\n");
+          if (err) throw new Error("重定向失败: " + err);
+          Bus.emit("fs.reset");
+        } else {
+          print(String(result));
+        }
+      } catch(err) {
+        print(String(err.message || err), "t-err");
+      }
+    };
+
+    // banner
+    printHTML(
+`<span class="t-cyan">  A U R O R A   S H E L L</span>  <span class="t-dim">ash 1.0 — aurora kernel 1.0 (nebula)</span>
+<span class="t-dim">输入</span> <span class="t-ok">help</span> <span class="t-dim">查看命令 ·</span> <span class="t-ok">neofetch</span> <span class="t-dim">看系统信息 · Tab 补全路径</span>
+`);
+    renderPrompt();
+  }
+});
+
+/* ================================================================
+   APP: 文件管理器
+   ================================================================ */
+OS.registerApp({
+  id:"files", name:"文件", icon:"📁", desc:"浏览虚拟文件系统",
+  w:760, h:500, desktop:true,
+
+  mount(body, win, args) {
+    const state = {
+      cwd: args.path || "/home/user",
+      hist: [], hi: -1,
+      sel: null,
+    };
+    const fileIcon = (name, node) => {
+      if (node.t === "d") return "📁";
+      if (name.startsWith("data:image") || /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name)) return "🖼️";
+      if (/\.md$/i.test(name)) return "📘";
+      if (/\.(js|json)$/i.test(name)) return "📜";
+      if (/\.(html|css)$/i.test(name)) return "🎨";
+      if (/\.(txt|log)$/i.test(name)) return "📄";
+      if (/\.(mp3|wav|ogg)$/i.test(name)) return "🎵";
+      return "📄";
+    };
+    const sidebarItems = [
+      ["🏠", "主目录", "/home/user"],
+      ["🖥️", "桌面", "/home/user/Desktop"],
+      ["📘", "文档", "/home/user/Documents"],
+      ["🖼️", "图片", "/home/user/Pictures"],
+      ["🎵", "音乐", "/home/user/Music"],
+      ["📥", "下载", "/home/user/Downloads"],
+      ["⚙️", "系统 · /etc", "/etc"],
+      ["📦", "系统 · /bin", "/bin"],
+    ];
+
+    const side = el("div", { class:"fx-side" },
+      el("div", { class:"fx-side-title", text:"位置" }),
+      ...sidebarItems.map(([ico, label, path]) =>
+        el("div", { class:"fx-side-item", dataset:{ path },
+          onclick: () => nav(path),
+          html: `<span>${ico}</span><span>${label}</span>` })));
+
+    const crumbs = el("div", { class:"fx-crumbs" });
+    const grid = el("div", { class:"fx-grid" });
+    const status = el("div", { class:"fx-status" });
+    const backB = el("button", { class:"btn btn-ghost icon-btn", text:"←", title:"后退", onclick: () => { if (state.hi > 0) { state.hi--; state.cwd = state.hist[state.hi]; render(); } } });
+    const fwdB  = el("button", { class:"btn btn-ghost icon-btn", text:"→", title:"前进", onclick: () => { if (state.hi < state.hist.length-1) { state.hi++; state.cwd = state.hist[state.hi]; render(); } } });
+    const upB   = el("button", { class:"btn btn-ghost icon-btn", text:"↑", title:"上一级", onclick: () => nav(FS.normalize("..", state.cwd)) });
+    const main = el("div", { class:"fx-main" },
+      el("div", { class:"fx-bar" },
+        backB, fwdB, upB, crumbs,
+        el("button", { class:"btn", text:"＋ 文件夹", onclick: () => newItem("dir") }),
+        el("button", { class:"btn", text:"＋ 文件", onclick: () => newItem("file") })),
+      grid, status);
+    body.append(el("div", { class:"fx" }, side, main));
+
+    function nav(path) {
+      state.hist = state.hist.slice(0, state.hi+1);
+      state.hist.push(path);
+      state.hi = state.hist.length - 1;
+      state.cwd = path;
+      render();
+    }
+    function newItem(kind) {
+      UI.prompt(kind === "dir" ? "新建文件夹" : "新建文件", kind === "dir" ? "新建文件夹" : "新建文本.txt").then(name => {
+        if (!name) return;
+        const finalName = FS.uniqueName(state.cwd, name);
+        const err = kind === "dir" ? FS.mkdir(state.cwd + "/" + finalName) : FS.writeFile(state.cwd + "/" + finalName, "");
+        if (err) UI.notify("文件", err, "⚠️");
+        render();
+      });
+    }
+
+    function render() {
+      win.setTitle("文件 — " + (state.cwd.replace("/home/user","~") || "/"));
+      backB.disabled = state.hi <= 0; fwdB.disabled = state.hi >= state.hist.length-1;
+      // crumbs
+      crumbs.innerHTML = "";
+      const segs = state.cwd.split("/").filter(Boolean);
+      crumbs.append(el("span", { class:"fx-crumb", text:"/ ", onclick: () => nav("/") }));
+      let acc = "";
+      segs.forEach((s, i) => {
+        acc += "/" + s;
+        const path = acc;
+        crumbs.append(el("span", { class:"fx-crumb" + (i === segs.length-1 ? " last" : ""), text: s.replace(/^user$/, "~").replace(/^home$/, "home"),
+          onclick: () => nav(path) }));
+        if (i < segs.length-1) crumbs.append(el("span", { class:"fx-crumb-sep", text:"›" }));
+      });
+      // side highlight
+      $$(".fx-side-item", side).forEach(s => s.classList.toggle("active", s.dataset.path === state.cwd));
+      // grid
+      grid.innerHTML = "";
+      const items = FS.ls(state.cwd);
+      if (!items) { nav("/"); return; }
+      if (!items.length) grid.append(el("div", { class:"fx-empty", text:"这个文件夹是空的" }));
+      for (const it of items) {
+        const node = it.node;
+        const g = el("div", { class:"fx-item" },
+          el("span", { class:"fi-ico", text: fileIcon(it.name, node) }),
+          el("span", { class:"fi-name", text: it.name }));
+        g.addEventListener("click", () => {
+          $$(".fx-item.sel", grid).forEach(x => x.classList.remove("sel"));
+          g.classList.add("sel");
+          state.sel = it.name;
+          status.textContent = it.name + " · " + (node.t === "d" ? Object.keys(node.c).length + " 项" : fmtBytes(node.c.length));
+        });
+        g.addEventListener("dblclick", () => {
+          const p = state.cwd + "/" + it.name;
+          if (node.t === "d") nav(p);
+          else Apps.openFile(p, node.c);
+        });
+        g.addEventListener("contextmenu", e => {
+          e.preventDefault(); e.stopPropagation();
+          const p = state.cwd + "/" + it.name;
+          UI.menu(e.clientX, e.clientY, [
+            { label:"打开", icon:"📂", action: () => node.t === "d" ? nav(p) : Apps.openFile(p, node.c) },
+            "-",
+            { label:"重命名", icon:"✏️", action: () => UI.prompt("重命名", it.name).then(n2 => {
+              if (!n2 || n2 === it.name) return;
+              FS.mv(p, state.cwd + "/" + n2);
+              render();
+            })},
+            { label:"复制到当前", icon:"⧉", action: () => { FS.cp(p, state.cwd + "/" + FS.uniqueName(state.cwd, "副本 " + it.name)); render(); } },
+            { label:"删除", icon:"🗑️", action: () => UI.confirm("删除", `确定删除「${it.name}」吗？此操作不可撤销。`, "🗑️").then(ok => {
+              if (!ok) return;
+              FS.rm(p); render();
+              UI.notify("文件", "已删除 " + it.name, "🗑️");
+            })},
+          ]);
+        });
+        grid.append(g);
+      }
+      status.textContent = items.length + " 个项目";
+    }
+
+    grid.addEventListener("contextmenu", e => {
+      if (e.target.closest(".fx-item")) return;
+      e.preventDefault();
+      UI.menu(e.clientX, e.clientY, [
+        { label:"新建文件夹", icon:"📁", action: () => newItem("dir") },
+        { label:"新建文本文件", icon:"📄", action: () => newItem("file") },
+        "-",
+        { label:"刷新", icon:"🔄", action: render },
+        { label:"在终端中打开", icon:"⌨️", action: () => OS.launch("terminal") },
+      ]);
+    });
+
+    nav(state.cwd);
+    win.listen(win.el, "fsrefresh", render);
+    Bus.on("fs.reset", () => { if (!win._closed) render(); });
+  }
+});
+
+/* ================================================================
+   APP: 代码编辑器
+   ================================================================ */
+const KEYWORDS = /\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|super|this|typeof|instanceof|in|of|try|catch|finally|throw|async|await|yield|import|export|from|default|delete|void|null|undefined|true|false|static|get|set)\b/g;
+
+function highlightCode(code, lang) {
+  let s = esc(code);
+  if (lang === "js") {
+    s = s.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|`[^`]*`)/g, '<span class="tok-str">$1</span>');
+    s = s.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, '<span class="tok-com">$1</span>');
+    s = s.replace(KEYWORDS, '<span class="tok-kw">$1</span>');
+    s = s.replace(/\b(\d+\.?\d*)\b/g, '<span class="tok-num">$1</span>');
+    s = s.replace(/([A-Za-z_$][\w$]*)(\s*\()/g, '<span class="tok-fn">$1</span>$2');
+  } else if (lang === "html") {
+    s = s.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="tok-com">$1</span>');
+    s = s.replace(/(&lt;\/?)([a-zA-Z][\w-]*)/g, '$1<span class="tok-tag">$2</span>');
+    s = s.replace(/([\w-]+)=(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="tok-attr">$1</span>=<span class="tok-str">$2</span>');
+  } else if (lang === "css") {
+    s = s.replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="tok-com">$1</span>');
+    s = s.replace(/([.#]?[\w-]+)(\s*\{)/g, '<span class="tok-tag">$1</span>$2');
+    s = s.replace(/([\w-]+)(\s*:)/g, '<span class="tok-prop">$1</span>$2');
+  } else if (lang === "md") {
+    s = s.replace(/^(#{1,6} .*)$/gm, '<span class="tok-tag">$1</span>');
+    s = s.replace(/(\*\*.*?\*\*)/g, '<span class="tok-kw">$1</span>');
+    s = s.replace(/(`[^`]*`)/g, '<span class="tok-str">$1</span>');
+  }
+  return s;
+}
+
+OS.registerApp({
+  id:"editor", name:"编辑器", icon:"📝", desc:"带语法高亮的代码编辑器，可以运行 JS / 预览 HTML",
+  w:780, h:540, desktop:true,
+
+  mount(body, win, args) {
+    let path = args.path || null;
+    let dirty = false;
+    const langOf = p => !p ? "js" : /\.js$/i.test(p) ? "js" : /\.html?$/i.test(p) ? "html" : /\.css$/i.test(p) ? "css" : /\.md$/i.test(p) ? "md" : "plain";
+
+    const langChip = el("span", { class:"ed-lang", text: langOf(path).toUpperCase() });
+    const dirtyDot = el("span", { class:"ed-dirty" });
+    const ta = el("textarea", { class:"ed-ta", spellcheck:"false", wrap:"off" });
+    const pre = el("pre", { class:"ed-pre" }, el("code"));
+    const gutter = el("div", { class:"ed-gutter" });
+    const outBody = el("div", { class:"ed-out-body" });
+    const outHead = el("div", { class:"ed-out-head" },
+      el("span", { text:"控制台输出" }),
+      el("button", { class:"btn btn-ghost icon-btn", text:"✕", onclick: () => { out.classList.remove("show"); iframe.classList.remove("show"); } }));
+    const out = el("div", { class:"ed-out" }, outHead, outBody);
+    const iframe = el("iframe", { class:"ed-preview", sandbox:"allow-scripts" });
+    const statusL = el("span", { class:"muted", text:"" });
+
+    const saveB = el("button", { class:"btn btn-primary", text:"💾 保存", onclick: save });
+    const runB  = el("button", { class:"btn", text:"▶ 运行", onclick: run });
+
+    const bar = el("div", { class:"ed-bar" },
+      el("button", { class:"btn btn-ghost icon-btn", text:"📂", title:"打开文件", onclick: () => UI.prompt("打开文件", "/home/user/Documents/hello.js").then(p => {
+        if (!p) return;
+        const c = FS.read(p);
+        if (c === null || c === undefined) return UI.notify("编辑器", "找不到文件: " + p, "⚠️");
+        load(p, c);
+      })}),
+      saveB, runB,
+      el("span", { class:"pt-sep" }),
+      dirtyDot, langChip, statusL);
+
+    const main = el("div", { class:"ed-main" }, gutter, el("div", { class:"ed-wrap" }, pre, ta));
+    body.append(el("div", { class:"ed" }, bar, main, out, iframe));
+
+    const codeEl = pre.firstChild;
+    function refresh() {
+      const code = ta.value;
+      codeEl.innerHTML = highlightCode(code, langOf(path)) + "\n";
+      const lines = code.split("\n").length;
+      gutter.innerHTML = Array.from({length: lines}, (_,i) => i+1).join("<br>");
+      syncScroll();
+    }
+    function syncScroll() {
+      pre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+      gutter.style.transform = `translateY(${-ta.scrollTop}px)`;
+    }
+    ta.addEventListener("scroll", syncScroll);
+    ta.addEventListener("input", () => { dirty = true; dirtyDot.classList.add("show"); refresh(); });
+    ta.addEventListener("keydown", e => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const s = ta.selectionStart;
+        ta.setRangeText("  ", s, ta.selectionEnd, "end");
+        ta.dispatchEvent(new Event("input"));
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+    });
+    ta.addEventListener("keyup", updateStatus);
+    ta.addEventListener("click", updateStatus);
+    function updateStatus() {
+      const upto = ta.value.slice(0, ta.selectionStart);
+      const line = upto.split("\n").length;
+      const col = upto.length - upto.lastIndexOf("\n");
+      statusL.textContent = `行 ${line}, 列 ${col} · ${ta.value.length} 字符`;
+    }
+
+    function load(p, content) {
+      path = p; dirty = false; dirtyDot.classList.remove("show");
+      langChip.textContent = langOf(p).toUpperCase();
+      ta.value = content;
+      win.setTitle((p.split("/").pop() || "未命名") + " — 编辑器");
+      refresh(); updateStatus();
+    }
+    function save() {
+      if (!path) {
+        UI.prompt("保存为", "/home/user/Documents/untitled.js").then(p => { if (p) { path = p; save(); } });
+        return;
+      }
+      const err = FS.writeFile(path, ta.value);
+      if (err) return UI.notify("编辑器", err, "⚠️");
+      dirty = false; dirtyDot.classList.remove("show");
+      UI.notify("编辑器", "已保存 " + path.split("/").pop(), "💾");
+      langChip.textContent = langOf(path).toUpperCase();
+    }
+    function run() {
+      const lang = langOf(path);
+      outBody.innerHTML = "";
+      if (lang === "js") {
+        iframe.classList.remove("show"); out.classList.add("show");
+        const t0 = performance.now();
+        const logs = [];
+        const fmt = v => {
+          if (typeof v === "string") return v;
+          try { return JSON.stringify(v, null, 1); } catch(e) { return String(v); }
+        };
+        const fakeConsole = {
+          log: (...a) => logs.push(["log", a.map(fmt).join(" ")]),
+          warn:(...a) => logs.push(["warn", a.map(fmt).join(" ")]),
+          error:(...a) => logs.push(["error", a.map(fmt).join(" ")]),
+          info:(...a) => logs.push(["log", a.map(fmt).join(" ")]),
+        };
+        try {
+          const fn = new Function("console", `"use strict";\n${ta.value}`);
+          fn(fakeConsole);
+          logs.push(["dim", `— 运行完成，耗时 ${(performance.now()-t0).toFixed(1)}ms —`]);
+        } catch(err) {
+          logs.push(["error", "✖ " + (err.stack || err.message)]);
+        }
+        for (const [cls, text] of logs) {
+          outBody.append(el("div", { class: cls === "warn" ? "t-warn" : cls === "error" ? "t-err" : cls === "dim" ? "t-dim" : "", style:{ whiteSpace:"pre-wrap" }, text }));
+        }
+      } else if (lang === "html") {
+        out.classList.remove("show");
+        iframe.srcdoc = ta.value;
+        iframe.classList.add("show");
+        UI.notify("编辑器", "HTML 预览已打开", "🌐");
+      } else {
+        out.classList.add("show");
+        outBody.append(el("div", { class:"t-dim", text: "这个文件类型 (" + lang + ") 不支持直接运行。支持运行 .js，预览 .html。" }));
+      }
+    }
+
+    if (path) {
+      const c = FS.read(path);
+      if (c !== null && c !== undefined) load(path, c);
+      else { path = null; refresh(); }
+    } else {
+      ta.value = `// 新建脚本 — 按 Ctrl+S 保存，Ctrl+Enter 或 ▶ 运行\nconsole.log("Hello, Aurora!");\n`;
+      refresh(); updateStatus();
+    }
+    win.after(80, () => ta.focus());
+  }
+});
+</script>
+<script>
+"use strict";
+/* ================================================================
+   GAMES
+   ================================================================ */
+const gameOverlay = (stage, title, sub, btnText, onBtn) => {
+  stage.querySelector(".g-overlay")?.remove();
+  const ov = el("div", { class:"g-overlay", style:{ display:"none" } },
+    el("h2", { text: title }),
+    el("div", { class:"muted", text: sub }),
+    el("button", { class:"btn btn-primary", text: btnText, onclick: () => { ov.style.display = "none"; onBtn(); } }));
+  ov.show = (t, s) => {
+    ov.querySelector("h2").textContent = t;
+    ov.querySelector(".muted").textContent = s;
+    ov.style.display = "flex";
+  };
+  stage.append(ov);
+  return ov;
+};
+
+/* ---------------- Snake ---------------- */
+OS.registerApp({
+  id:"snake", name:"贪吃蛇", icon:"🐍", desc:"经典街机 · 方向键或 WASD · 空格暂停",
+  w:520, h:600, desktop:true,
+
+  mount(body, win) {
+    const N = 20, CELL = 20;
+    const scoreEl = el("b", { text:"0" }), bestEl = el("b", { text: localStorage.getItem("aurora.snake.best") || "0" });
+    const speedEl = el("b", { text:"1.0x" });
+    const cv = el("canvas", { class:"snake-cv", width:N*CELL, height:N*CELL });
+    const stage = el("div", { class:"g-stage" }, el("div", { class:"g-canvas-frame" }, cv));
+    body.append(el("div", { class:"game-shell" },
+      el("div", { class:"g-hud" },
+        el("div", { class:"g-stat" }, scoreEl, el("span", { text:"得分" })),
+        el("div", { class:"g-stat" }, bestEl, el("span", { text:"最高分" })),
+        el("div", { class:"g-stat" }, speedEl, el("span", { text:"速度" })),
+        el("span", { class:"muted", style:{ fontSize:"11px" }, text:"方向键/WASD 移动 · 空格暂停" })),
+      stage));
+
+    const cx = cv.getContext("2d");
+    let snake, dir, nextDir, food, score, dead, paused, timer, speedLv;
+
+    const overlay = gameOverlay(stage, "🐍 贪吃蛇", "吃到发光的食物，别撞到自己", "开始游戏", () => start());
+
+    function reset() {
+      snake = [{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+      dir = {x:1,y:0}; nextDir = dir;
+      score = 0; speedLv = 1; dead = false; paused = false;
+      scoreEl.textContent = "0"; speedEl.textContent = "1.0x";
+      placeFood();
+    }
+    function placeFood() {
+      do { food = { x: randi(0,N-1), y: randi(0,N-1) }; }
+      while (snake.some(s => s.x === food.x && s.y === food.y));
+    }
+    function start() {
+      reset();
+      overlay.style.display = "none";
+      clearInterval(timer);
+      schedule();
+    }
+    function schedule() {
+      clearInterval(timer);
+      const ms = Math.max(60, 150 - (speedLv-1)*10);
+      timer = setInterval(tick, ms);
+      win._cleanup.push(() => clearInterval(timer));
+    }
+    function tick() {
+      if (paused || dead) return;
+      dir = nextDir;
+      const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+      if (head.x < 0 || head.y < 0 || head.x >= N || head.y >= N ||
+          snake.some(s => s.x === head.x && s.y === head.y)) {
+        dead = true;
+        const best = Math.max(score, parseInt(localStorage.getItem("aurora.snake.best")||"0"));
+        localStorage.setItem("aurora.snake.best", best);
+        bestEl.textContent = best;
+        overlay.show("💀 游戏结束", `得分 ${score} · 最高 ${best}`, "再来一局");
+        draw();
+        return;
+      }
+      snake.unshift(head);
+      if (head.x === food.x && head.y === food.y) {
+        score += 10;
+        scoreEl.textContent = score;
+        const nl = 1 + Math.floor(score/50);
+        if (nl !== speedLv) { speedLv = nl; speedEl.textContent = speedLv + ".0x"; schedule(); }
+        placeFood();
+      } else snake.pop();
+      draw();
+    }
+    function draw() {
+      const acc = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+      // bg
+      cx.fillStyle = "#0b1120"; cx.fillRect(0,0,cv.width,cv.height);
+      cx.strokeStyle = "rgba(255,255,255,.035)";
+      for (let i = 0; i <= N; i++) {
+        cx.beginPath(); cx.moveTo(i*CELL,0); cx.lineTo(i*CELL,cv.height); cx.stroke();
+        cx.beginPath(); cx.moveTo(0,i*CELL); cx.lineTo(cv.width,i*CELL); cx.stroke();
+      }
+      if (!snake) return;
+      // food
+      const fx = food.x*CELL + CELL/2, fy = food.y*CELL + CELL/2;
+      cx.save();
+      cx.shadowColor = "#ff5c8a"; cx.shadowBlur = 12;
+      cx.fillStyle = "#ff5c8a";
+      cx.beginPath(); cx.arc(fx, fy, CELL*.36, 0, 6.29); cx.fill();
+      cx.restore();
+      // snake
+      snake.forEach((s, i) => {
+        const t = 1 - i/snake.length;
+        cx.fillStyle = i === 0 ? "#aef" : acc;
+        cx.globalAlpha = i === 0 ? 1 : .35 + t*.6;
+        cx.beginPath();
+        cx.roundRect(s.x*CELL+1.5, s.y*CELL+1.5, CELL-3, CELL-3, 5);
+        cx.fill();
+      });
+      cx.globalAlpha = 1;
+      if (paused) {
+        cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(0,0,cv.width,cv.height);
+        cx.fillStyle = "#fff"; cx.font = "600 20px sans-serif"; cx.textAlign = "center";
+        cx.fillText("已暂停 — 空格继续", cv.width/2, cv.height/2);
+      }
+    }
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win) return;
+      const k = e.key.toLowerCase();
+      const map = { arrowup:[0,-1], w:[0,-1], arrowdown:[0,1], s:[0,1], arrowleft:[-1,0], a:[-1,0], arrowright:[1,0], d:[1,0] };
+      if (map[k]) {
+        e.preventDefault();
+        const [x,y] = map[k];
+        if (x !== -dir.x || y !== -dir.y) nextDir = {x,y};
+      }
+      if (k === " " && !dead) { e.preventDefault(); paused = !paused; draw(); }
+    });
+    win.onClose(() => clearInterval(timer));
+    reset(); draw();
+    overlay.style.display = "flex";
+  }
+});
+
+/* ---------------- 2048 ---------------- */
+OS.registerApp({
+  id:"g2048", name:"2048", icon:"🔢", desc:"滑动合并数字，冲向 2048",
+  w:470, h:620, desktop:true,
+
+  mount(body, win) {
+    const scoreEl = el("b", { text:"0" }), bestEl = el("b", { text: localStorage.getItem("aurora.2048.best") || "0" });
+    const board = el("div", { class:"g2048-board" });
+    for (let i = 0; i < 16; i++) board.append(el("div", { class:"t2-cell" }));
+    const stage = el("div", { class:"g-stage" }, board);
+    body.append(el("div", { class:"game-shell" },
+      el("div", { class:"g-hud" },
+        el("div", { class:"g-stat" }, scoreEl, el("span", { text:"得分" })),
+        el("div", { class:"g-stat" }, bestEl, el("span", { text:"最高分" })),
+        el("button", { class:"btn", text:"↻ 新游戏", onclick: () => start() })),
+      stage,
+      el("div", { class:"muted", style:{ padding:"0 0 14px", fontSize:"11px" }, text:"方向键 / WASD / 滑动屏幕" })));
+
+    let cells = [], grid, score, over, won;
+
+    function start() {
+      grid = Array(16).fill(0); score = 0; over = false; won = false;
+      scoreEl.textContent = "0";
+      addTile(); addTile(); render();
+    }
+    function addTile() {
+      const empty = grid.map((v,i) => v ? -1 : i).filter(i => i >= 0);
+      if (!empty.length) return;
+      const i = empty[randi(0, empty.length-1)];
+      grid[i] = Math.random() < 0.9 ? 2 : 4;
+      cells.push({ i, v: grid[i], new:true });
+    }
+    function render() {
+      $$(".t2-cell", board).forEach((c, i) => {
+        const v = grid[i];
+        c.innerHTML = "";
+        if (!v) return;
+        const cls = v <= 2048 ? "t2-v" + v : "t2-vbig";
+        const isNew = cells.some(t => t.i === i && t.new);
+        const merged = cells.some(t => t.i === i && t.merged && t.v === v);
+        c.append(el("div", { class: "t2-tile " + cls + (isNew ? "" : "") + (merged ? " merged" : ""), text: v }));
+      });
+      cells = [];
+    }
+    function move(dir) {
+      if (over) return;
+      const before = grid.join(",");
+      const lineIdx = [[],[],[],[]];
+      for (let i = 0; i < 16; i++) {
+        const r = Math.floor(i/4), c = i%4;
+        if (dir === "left") lineIdx[r].push(i);
+        if (dir === "right") lineIdx[r].unshift(i);
+        if (dir === "up") lineIdx[c].push(i);
+        if (dir === "down") lineIdx[c].unshift(i);
+      }
+      let gained = 0, mergedAny = false;
+      for (const line of lineIdx) {
+        const vals = line.map(i => grid[i]).filter(Boolean);
+        const out = [];
+        for (let i = 0; i < vals.length; i++) {
+          if (vals[i] === vals[i+1]) {
+            out.push(vals[i]*2);
+            gained += vals[i]*2;
+            mergedAny = true;
+            const pos = line[out.length-1];
+            cells.push({ i: pos, v: vals[i]*2, merged:true });
+            i++;
+          } else out.push(vals[i]);
+        }
+        line.forEach((idx, k) => grid[idx] = out[k] || 0);
+      }
+      if (grid.join(",") === before) return;
+      score += gained;
+      scoreEl.textContent = score;
+      const best = Math.max(score, parseInt(localStorage.getItem("aurora.2048.best")||"0"));
+      localStorage.setItem("aurora.2048.best", best);
+      bestEl.textContent = best;
+      addTile();
+      render();
+      if (grid.includes(2048) && !won) {
+        won = true;
+        UI.notify("2048", "🏆 你合成了 2048！可以继续挑战更高分", "🎉");
+      }
+      // game over check
+      let canMove = false;
+      for (let i = 0; i < 16 && !canMove; i++) {
+        if (!grid[i]) canMove = true;
+        else {
+          const r = Math.floor(i/4), c = i%4;
+          if (c < 3 && grid[i] === grid[i+1]) canMove = true;
+          if (r < 3 && grid[i] === grid[i+4]) canMove = true;
+        }
+      }
+      if (!canMove) {
+        over = true;
+        setTimeout(() => UI.alert("游戏结束", `本局得分 ${score}。最高分 ${best}。点「新游戏」再来一局。`, "🔢"), 250);
+      }
+    }
+    const keymap = { arrowleft:"left", a:"left", arrowright:"right", d:"right", arrowup:"up", w:"up", arrowdown:"down", s:"down" };
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win) return;
+      const d = keymap[e.key.toLowerCase()];
+      if (d) { e.preventDefault(); move(d); }
+    });
+    let touchStart = null;
+    win.listen(board, "pointerdown", e => touchStart = { x:e.clientX, y:e.clientY });
+    win.listen(board, "pointerup", e => {
+      if (!touchStart) return;
+      const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y;
+      touchStart = null;
+      if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
+      move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"));
+    });
+    start();
+  }
+});
+
+/* ---------------- Minesweeper ---------------- */
+OS.registerApp({
+  id:"mines", name:"扫雷", icon:"💣", desc:"左键翻开 · 右键插旗 · 首点必安全",
+  w:560, h:560, desktop:true,
+
+  mount(body, win) {
+    const state = { W:9, H:9, M:10 };
+    const ledMines = el("div", { class:"ms-led", text:"010" });
+    const ledTime = el("div", { class:"ms-led", text:"000" });
+    const face = el("button", { class:"ms-face", text:"🙂", onclick: () => start() });
+    const sel = el("select", { onchange: () => start(),
+      html: `<option value="9,9,10">初级 9×9</option><option value="16,16,40">中级 16×16</option><option value="16,30,80">高级 16×30</option>` });
+    const board = el("div", { class:"ms-board" });
+    const stage = el("div", { class:"g-stage", style:{ overflow:"auto" } }, board);
+    body.append(el("div", { class:"game-shell" },
+      el("div", { class:"g-hud" },
+        el("div", { class:"ms-top" },
+          ledMines, face, ledTime,
+          sel)),
+      stage));
+
+    let cells, started, deadFlag, flags, revealedCount, timer, time;
+
+    function start() {
+      const [W,H,M] = sel.value.split(",").map(Number);
+      Object.assign(state, { W,H,M });
+      document.documentElement.style.setProperty("--cs", (W > 12 ? 26 : 30) + "px");
+      cells = Array.from({length: W*H}, () => ({ mine:false, adj:0, st:0 })); // st 0 hidden 1 revealed 2 flag
+      started = false; deadFlag = false; flags = 0; revealedCount = 0; time = 0;
+      clearInterval(timer); timer = null;
+      ledMines.textContent = String(M).padStart(3,"0");
+      ledTime.textContent = "000";
+      face.textContent = "🙂";
+      board.style.gridTemplateColumns = `repeat(${W}, var(--cs))`;
+      buildDom();
+    }
+    function buildDom() {
+      board.innerHTML = "";
+      for (let i = 0; i < cells.length; i++) {
+        const d = el("div", { class:"ms-cell" });
+        d.addEventListener("click", () => reveal(i));
+        d.addEventListener("contextmenu", e => { e.preventDefault(); flag(i); });
+        cells[i].el = d;
+        board.append(d);
+      }
+    }
+    function neighbors(i) {
+      const r = Math.floor(i/state.W), c = i%state.W, out = [];
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        const nr = r+dr, nc = c+dc;
+        if (nr>=0 && nr<state.H && nc>=0 && nc<state.W) out.push(nr*state.W+nc);
+      }
+      return out;
+    }
+    function plant(safe) {
+      const banned = new Set([safe, ...neighbors(safe)]);
+      let placed = 0;
+      while (placed < state.M) {
+        const i = randi(0, cells.length-1);
+        if (cells[i].mine || banned.has(i)) continue;
+        cells[i].mine = true; placed++;
+      }
+      cells.forEach((c,i) => c.adj = neighbors(i).filter(n => cells[n].mine).length);
+      timer = setInterval(() => {
+        time = Math.min(999, time+1);
+        ledTime.textContent = String(time).padStart(3,"0");
+      }, 1000);
+      win._cleanup.push(() => clearInterval(timer));
+    }
+    function reveal(i) {
+      if (deadFlag || cells[i].st === 2 || cells[i].st === 1) return;
+      if (!started) { started = true; plant(i); }
+      if (cells[i].mine) return boom(i);
+      const stack = [i];
+      while (stack.length) {
+        const n = stack.pop();
+        const c = cells[n];
+        if (c.st === 1 || c.mine) continue;
+        c.st = 1; revealedCount++;
+        c.el.classList.add("revealed");
+        if (c.adj) { c.el.textContent = c.adj; c.el.classList.add("ms-n" + c.adj); }
+        else neighbors(n).forEach(m => { if (cells[m].st === 0) stack.push(m); });
+      }
+      checkWin();
+    }
+    function flag(i) {
+      if (deadFlag || cells[i].st === 1) return;
+      cells[i].st = cells[i].st === 2 ? 0 : 2;
+      flags += cells[i].st === 2 ? 1 : -1;
+      cells[i].el.classList.toggle("flag");
+      cells[i].el.textContent = cells[i].st === 2 ? "🚩" : "";
+      ledMines.textContent = String(Math.max(0, state.M - flags)).padStart(3,"0");
+    }
+    function boom(i) {
+      deadFlag = true;
+      clearInterval(timer);
+      face.textContent = "😵";
+      cells.forEach((c,n) => {
+        if (c.mine) { c.el.classList.add("revealed"); c.el.textContent = "💣"; }
+      });
+      cells[i].el.classList.add("boom");
+      cells[i].el.textContent = "💥";
+      UI.notify("扫雷", "💥 踩雷了！点笑脸重新开始", "💣");
+    }
+    function checkWin() {
+      if (revealedCount === cells.length - state.M) {
+        deadFlag = true;
+        clearInterval(timer);
+        face.textContent = "😎";
+        cells.forEach(c => { if (c.mine && c.st !== 2) { c.el.classList.add("flag"); c.el.textContent = "🚩"; }});
+        ledMines.textContent = "000";
+        UI.notify("扫雷", `🏆 胜利！用时 ${time} 秒`, "😎");
+      }
+    }
+    win.onClose(() => clearInterval(timer));
+    start();
+  }
+});
+
+/* ---------------- Breakout ---------------- */
+OS.registerApp({
+  id:"breakout", name:"打砖块", icon:"🧱", desc:"鼠标控制挡板 · 点击发球",
+  w:560, h:620, desktop:true,
+
+  mount(body, win) {
+    const W = 480, H = 520;
+    const scoreEl = el("b", { text:"0" }), livesEl = el("b", { text:"3" }), levelEl = el("b", { text:"1" });
+    const cv = el("canvas", { class:"brk-cv", width:W, height:H });
+    const stage = el("div", { class:"g-stage" }, el("div", { class:"g-canvas-frame" }, cv));
+    body.append(el("div", { class:"game-shell" },
+      el("div", { class:"g-hud" },
+        el("div", { class:"g-stat" }, scoreEl, el("span", { text:"得分" })),
+        el("div", { class:"g-stat" }, livesEl, el("span", { text:"生命" })),
+        el("div", { class:"g-stat" }, levelEl, el("span", { text:"关卡" }))),
+      stage));
+
+    const cx = cv.getContext("2d");
+    let paddle, ball, bricks, score, lives, level, running, raf, launched;
+
+    const overlay = gameOverlay(stage, "🧱 打砖块", "移动鼠标控制挡板，清空所有砖块", "开始游戏", () => startGame());
+    const COLORS = ["#ff5c8a","#ff8a5c","#fbbf24","#4ade80","#39d3e8","#8f7dff"];
+
+    function buildBricks() {
+      bricks = [];
+      const rows = 5, cols = 9, bw = (W-40)/cols, bh = 18;
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        bricks.push({ x: 20 + c*bw, y: 56 + r*(bh+7), w: bw-7, h: bh, color: COLORS[r%COLORS.length], alive: true });
+      }
+    }
+    function resetBall() {
+      ball = { x: paddle.x + paddle.w/2, y: paddle.y - 10, r: 6, vx: 0, vy: 0 };
+      launched = false;
+    }
+    function startGame() {
+      score = 0; lives = 3; level = 1;
+      scoreEl.textContent = "0"; livesEl.textContent = "3"; levelEl.textContent = "1";
+      paddle = { x: W/2-45, y: H-26, w: 90, h: 11 };
+      buildBricks();
+      resetBall();
+      overlay.style.display = "none";
+      running = true;
+    }
+    function launch() {
+      if (launched || !running) return;
+      launched = true;
+      const sp = 4 + level*.5;
+      ball.vx = rand(-1.6,1.6) || 1; ball.vy = -sp;
+    }
+    function step() {
+      raf = requestAnimationFrame(step);
+      if (!running) return;
+      if (launched) {
+        ball.x += ball.vx; ball.y += ball.vy;
+        if (ball.x < ball.r || ball.x > W-ball.r) { ball.vx *= -1; ball.x = clamp(ball.x, ball.r, W-ball.r); }
+        if (ball.y < ball.r) { ball.vy *= -1; ball.y = ball.r; }
+        // paddle
+        if (ball.vy > 0 && ball.y > paddle.y - ball.r && ball.y < paddle.y + paddle.h && ball.x > paddle.x - ball.r && ball.x < paddle.x + paddle.w + ball.r) {
+          const hit = (ball.x - (paddle.x + paddle.w/2)) / (paddle.w/2);
+          const sp = Math.hypot(ball.vx, ball.vy);
+          const ang = hit * 1.05;
+          ball.vx = sp * Math.sin(ang);
+          ball.vy = -Math.abs(sp * Math.cos(ang));
+        }
+        // bricks
+        for (const b of bricks) {
+          if (!b.alive) continue;
+          if (ball.x > b.x-ball.r && ball.x < b.x+b.w+ball.r && ball.y > b.y-ball.r && ball.y < b.y+b.h+ball.r) {
+            b.alive = false;
+            score += 10;
+            scoreEl.textContent = score;
+            const fromLeft = Math.abs(ball.x - b.x), fromRight = Math.abs(ball.x - (b.x+b.w));
+            const fromTop = Math.abs(ball.y - b.y), fromBot = Math.abs(ball.y - (b.y+b.h));
+            const minH = Math.min(fromLeft, fromRight), minV = Math.min(fromTop, fromBot);
+            if (minV < minH) ball.vy *= -1; else ball.vx *= -1;
+            break;
+          }
+        }
+        // death
+        if (ball.y > H + 20) {
+          lives--;
+          livesEl.textContent = lives;
+          if (lives <= 0) {
+            running = false;
+            overlay.show("💀 游戏结束", `得分 ${score} · 关卡 ${level}`, "再来一局");
+          } else resetBall();
+        }
+        // win
+        if (!bricks.some(b => b.alive)) {
+          level++;
+          levelEl.textContent = level;
+          score += 100;
+          scoreEl.textContent = score;
+          buildBricks();
+          resetBall();
+          UI.notify("打砖块", `关卡 ${level}！球速提升`, "🧱");
+        }
+      } else if (ball) {
+        ball.x = paddle.x + paddle.w/2;
+        ball.y = paddle.y - ball.r - 2;
+      }
+      draw();
+    }
+    function draw() {
+      cx.fillStyle = "#0b1024"; cx.fillRect(0,0,W,H);
+      // starfield-ish
+      cx.fillStyle = "rgba(255,255,255,.05)";
+      for (let i = 0; i < 30; i++) {
+        const x = (i*137) % W, y = (i*89) % H;
+        cx.fillRect(x, y, 1.5, 1.5);
+      }
+      for (const b of bricks) {
+        if (!b.alive) continue;
+        cx.fillStyle = b.color;
+        cx.shadowColor = b.color; cx.shadowBlur = 7;
+        cx.beginPath(); cx.roundRect(b.x, b.y, b.w, b.h, 4); cx.fill();
+        cx.shadowBlur = 0;
+      }
+      cx.fillStyle = "#e8ecf8";
+      cx.beginPath(); cx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 6); cx.fill();
+      cx.save();
+      cx.shadowColor = "#7c6cff"; cx.shadowBlur = 14;
+      cx.fillStyle = "#fff";
+      cx.beginPath(); cx.arc(ball.x, ball.y, ball.r, 0, 6.29); cx.fill();
+      cx.restore();
+      if (!launched && running) {
+        cx.fillStyle = "rgba(255,255,255,.7)"; cx.font = "13px sans-serif"; cx.textAlign = "center";
+        cx.fillText("点击 / 空格 发射", W/2, H - 60);
+      }
+    }
+    win.listen(cv, "pointermove", e => {
+      const r = cv.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (W/r.width);
+      if (paddle) paddle.x = clamp(x - paddle.w/2, 0, W - paddle.w);
+    });
+    win.listen(cv, "pointerdown", launch);
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win) return;
+      if (e.key === " ") { e.preventDefault(); launch(); }
+    });
+    win.onClose(() => cancelAnimationFrame(raf));
+    paddle = { x: W/2-45, y: H-26, w: 90, h: 11 };
+    buildBricks(); resetBall(); draw();
+    overlay.style.display = "flex";
+    step();
+  }
+});
+
+/* ================================================================
+   APP: 计算器
+   ================================================================ */
+OS.registerApp({
+  id:"calc", name:"计算器", icon:"🧮", desc:"标准计算器，支持历史记录",
+  w:340, h:560, desktop:true,
+
+  mount(body, win) {
+    let cur = "0", expr = "", hist = [];
+    const exprEl = el("div", { class:"calc-expr" });
+    const valEl = el("div", { class:"calc-val", text:"0" });
+    const histEl = el("div", { class:"calc-hist" });
+
+    const buttons = [
+      ["C","fn"],["(","fn"],[")","fn"],["÷","op"],
+      ["7"],["8"],["9"],["×","op"],
+      ["4"],["5"],["6"],["−","op"],
+      ["1"],["2"],["3"],["+","op"],
+      ["0"],["."],["⌫","fn"],["=","eq"],
+    ];
+    const grid = el("div", { class:"calc-grid" });
+    for (const [label, cls] of buttons) {
+      grid.append(el("button", {
+        class: cls ? "c-" + cls : "",
+        text: label,
+        onclick: () => press(label),
+      }));
+    }
+    body.append(el("div", { class:"calc" },
+      el("div", { class:"calc-screen" }, exprEl, valEl),
+      histEl, grid));
+
+    const evalExpr = s => {
+      const clean = s.replace(/×/g,"*").replace(/÷/g,"/").replace(/−/g,"-");
+      if (!/^[\d+\-*/().%\s]+$/.test(clean) || !clean.trim()) return NaN;
+      try { return Function(`"use strict";return (${clean})`)(); } catch(e) { return NaN; }
+    };
+    function render() {
+      valEl.textContent = cur;
+      exprEl.textContent = expr;
+      if (valEl.textContent.length > 12) valEl.style.fontSize = "24px"; else valEl.style.fontSize = "";
+    }
+    function pushHist(e2, v) {
+      hist.unshift([e2, v]);
+      if (hist.length > 12) hist.pop();
+      histEl.innerHTML = "";
+      for (const [ex, vv] of hist) {
+        histEl.append(el("div", {},
+          el("span", { text: ex }),
+          el("span", { text: "= " + vv }),
+        ));
+      }
+    }
+    function press(k) {
+      if (k === "C") { cur = "0"; expr = ""; render(); return; }
+      if (k === "⌫") { cur = cur.length > 1 ? cur.slice(0,-1) : "0"; render(); return; }
+      if (k === "=") {
+        const full = expr + cur;
+        const v = evalExpr(full);
+        if (isNaN(v) || !isFinite(v)) { cur = "错误"; expr = ""; render(); return; }
+        const vs = String(Math.round(v*1e10)/1e10);
+        pushHist(full, vs);
+        cur = vs; expr = "";
+        render(); return;
+      }
+      if ("÷×−+".includes(k)) {
+        expr += cur + (k === "−" ? "-" : k);
+        cur = "0"; render(); return;
+      }
+      if (k === "(" || k === ")") { expr += k; render(); return; }
+      if (k === ".") {
+        if (!cur.includes(".")) cur += ".";
+        render(); return;
+      }
+      if (cur === "0" || cur === "错误") cur = k; else cur += k;
+      render();
+    }
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win) return;
+      const k = e.key;
+      if (/^[0-9.]$/.test(k)) press(k);
+      else if (k === "+") press("+");
+      else if (k === "-") press("−");
+      else if (k === "*") press("×");
+      else if (k === "/") { e.preventDefault(); press("÷"); }
+      else if (k === "Enter" || k === "=") press("=");
+      else if (k === "Backspace") press("⌫");
+      else if (k === "Escape") press("C");
+      else if (k === "(" || k === ")") press(k);
+    });
+    render();
+  }
+});
+</script>
+<script>
+"use strict";
+/* ================================================================
+   APPS 3 — music / paint / shader / taskmgr / settings / welcome
+   ================================================================ */
+
+/* ---------------- 音乐工作室 ---------------- */
+OS.registerApp({
+  id:"music", name:"音乐工作室", icon:"🎹", desc:"合成器键盘 + 四轨鼓机音序器",
+  w:820, h:640, desktop:true,
+
+  mount(body, win) {
+    let ctx = null, master = null, analyser = null, noiseBuf = null;
+    let wave = "sine", attack = 0.01, release = 0.35, volume = 0.6;
+    const active = new Map();
+
+    const ensureAudio = () => {
+      if (ctx) return;
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain(); master.gain.value = volume;
+      analyser = ctx.createAnalyser(); analyser.fftSize = 256;
+      master.connect(analyser); analyser.connect(ctx.destination);
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random()*2-1;
+    };
+    const midiHz = m => 440 * Math.pow(2, (m-69)/12);
+
+    function noteOn(midi) {
+      ensureAudio();
+      if (ctx.state === "suspended") ctx.resume();
+      if (active.has(midi)) return;
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = wave; osc.frequency.value = midiHz(midi);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.42, ctx.currentTime + Math.max(0.003, attack));
+      osc.connect(g); g.connect(master);
+      osc.start();
+      active.set(midi, { osc, g });
+      keyEls[midi]?.classList.add("on");
+    }
+    function noteOff(midi) {
+      const v = active.get(midi);
+      if (!v) return;
+      active.delete(midi);
+      const t = ctx.currentTime;
+      v.g.gain.cancelScheduledValues(t);
+      v.g.gain.setValueAtTime(Math.max(v.g.gain.value, 0.0001), t);
+      v.g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.03, release));
+      v.osc.stop(t + release + 0.1);
+      keyEls[midi]?.classList.remove("on");
+    }
+    function drum(type, t) {
+      ensureAudio();
+      const g = ctx.createGain(); g.connect(master);
+      if (type === 0) { // kick
+        const o = ctx.createOscillator();
+        o.frequency.setValueAtTime(150, t);
+        o.frequency.exponentialRampToValueAtTime(42, t+0.22);
+        g.gain.setValueAtTime(0.9, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t+0.3);
+        o.connect(g); o.start(t); o.stop(t+0.32);
+      } else if (type === 1) { // snare
+        const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+        const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1800; f.Q.value = 0.9;
+        g.gain.setValueAtTime(0.5, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t+0.18);
+        n.connect(f); f.connect(g); n.start(t); n.stop(t+0.2);
+        const o = ctx.createOscillator(); o.frequency.value = 190;
+        const g2 = ctx.createGain(); g2.gain.setValueAtTime(0.35, t); g2.gain.exponentialRampToValueAtTime(0.001, t+0.1);
+        o.connect(g2); g2.connect(master); o.start(t); o.stop(t+0.12);
+      } else if (type === 2) { // hat
+        const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+        const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 7500;
+        g.gain.setValueAtTime(0.3, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t+0.05);
+        n.connect(f); f.connect(g); n.start(t); n.stop(t+0.06);
+      } else { // clap
+        const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+        const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1200; f.Q.value = 1.5;
+        for (let i = 0; i < 3; i++) {
+          const tt = t + i*0.012;
+          g.gain.setValueAtTime(0.4, tt);
+          g.gain.exponentialRampToValueAtTime(0.08, tt+0.01);
+        }
+        g.gain.exponentialRampToValueAtTime(0.001, t+0.2);
+        n.connect(f); f.connect(g); n.start(t); n.stop(t+0.22);
+      }
+    }
+
+    /* --- UI --- */
+    const vizCv = el("canvas", { class:"mus-viz", height:64 });
+    const waveSel = el("select", { html:"<option value=sine>正弦波 Sine</option><option value=square>方波 Square</option><option value=sawtooth>锯齿波 Saw</option><option value=triangle>三角波 Triangle</option>",
+      onchange: e => wave = e.target.value });
+    const atkSlider = el("input", { type:"range", min:"0.003", max:"0.5", step:"0.005", value:"0.01", oninput: e => attack = +e.target.value });
+    const relSlider = el("input", { type:"range", min:"0.05", max:"2", step:"0.05", value:"0.35", oninput: e => release = +e.target.value });
+    const volSlider = el("input", { type:"range", min:"0", max:"1", step:"0.05", value:"0.6", oninput: e => { volume = +e.target.value; if (master) master.gain.value = volume; } });
+
+    /* keyboard: C4..F5 */
+    const KEYMAP = { a:0, w:1, s:2, e:3, d:4, f:5, t:6, g:7, y:8, h:9, u:10, j:11, k:12, o:13, l:14, p:15, ";":16, "'":17 };
+    const KB_LABEL = { 0:"A",1:"W",2:"S",3:"E",4:"D",5:"F",6:"T",7:"G",8:"Y",9:"H",10:"U",11:"J",12:"K",13:"O",14:"L",15:"P",16:";",17:"'" };
+    const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+    const keysBox = el("div", { class:"mus-keys" });
+    const keyEls = {};
+    let whiteCount = 0; const totalWhite = [];
+    for (let off = 0; off <= 17; off++) if (![1,3,6,8,10].includes(off % 12)) totalWhite.push(off);
+    const nWhite = totalWhite.length;
+    let wIdx = 0;
+    for (let off = 0; off <= 17; off++) {
+      const midi = 60 + off;
+      const black = [1,3,6,8,10].includes(off % 12);
+      if (!black) {
+        const k = el("div", { class:"mkey", dataset:{ midi } },
+          el("span", { class:"mk-label", text: KB_LABEL[off] || NOTE_NAMES[off%12] + "4" }));
+        k.addEventListener("pointerdown", e => { e.preventDefault(); noteOn(midi); });
+        k.addEventListener("pointerup", () => noteOff(midi));
+        k.addEventListener("pointerleave", () => noteOff(midi));
+        keysBox.append(k);
+        keyEls[midi] = k;
+        wIdx++;
+      } else {
+        const k = el("div", { class:"mkey black", style:{ left: (wIdx * 100 / nWhite) + "%" }, dataset:{ midi } },
+          el("span", { class:"mk-label", text: KB_LABEL[off] || "" }));
+        k.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); noteOn(midi); });
+        k.addEventListener("pointerup", () => noteOff(midi));
+        k.addEventListener("pointerleave", () => noteOff(midi));
+        keysBox.append(k);
+        keyEls[midi] = k;
+      }
+    }
+
+    /* sequencer */
+    const TRACKS = ["🥁 底鼓","🪘 军鼓","🎩 踩镲","👏 拍手"];
+    const pattern = TRACKS.map(() => Array(16).fill(0));
+    // default groove
+    [0,4,8,10].forEach(i => pattern[0][i] = 1);
+    [4,12].forEach(i => pattern[1][i] = 1);
+    [2,6,10,14].forEach(i => pattern[2][i] = 1);
+    [7,15].forEach(i => pattern[3][i] = 1);
+    let bpm = 112, playing = false, seqStep = 0, nextTime = 0, schedTimer = null;
+    const stepEls = [];
+    const seqBox = el("div", { class:"mus-seq" });
+    TRACKS.forEach((label, ti) => {
+      const row = el("div", { class:"seq-track" }, el("div", { class:"seq-track-label", text: label.split(" ")[1] || label }));
+      const steps = el("div", { class:"seq-steps" });
+      const rowEls = [];
+      for (let s = 0; s < 16; s++) {
+        const st = el("div", { class:"seq-step" + ((s%4 === 0) ? " beat" : "") + (pattern[ti][s] ? " on" : ""),
+          onclick: () => { pattern[ti][s] ^= 1; st.classList.toggle("on"); ensureAudio(); if (ctx.state === "suspended") ctx.resume(); } });
+        rowEls.push(st); steps.append(st);
+      }
+      stepEls.push(rowEls);
+      row.append(steps); seqBox.append(row);
+    });
+    const bpmLabel = el("span", { class:"chip", text: bpm + " BPM" });
+    const bpmSlider = el("input", { type:"range", min:"60", max:"180", value:bpm, style:{ width:"130px" },
+      oninput: e => { bpm = +e.target.value; bpmLabel.textContent = bpm + " BPM"; } });
+    const playBtn = el("button", { class:"btn btn-primary mus-btn-play", text:"▶", onclick: () => {
+      ensureAudio();
+      if (ctx.state === "suspended") ctx.resume();
+      playing = !playing;
+      playBtn.textContent = playing ? "⏸" : "▶";
+      if (playing) { seqStep = 0; nextTime = ctx.currentTime + 0.06; schedTimer = setInterval(scheduler, 30); win._cleanup.push(() => clearInterval(schedTimer)); }
+      else clearInterval(schedTimer);
+      updatePlayhead(-1);
+    }});
+    const clearBtn = el("button", { class:"btn btn-ghost", text:"清空音序", onclick: () => {
+      pattern.forEach(r => r.fill(0));
+      stepEls.forEach(row => row.forEach(st => st.classList.remove("on")));
+    }});
+    function scheduler() {
+      const spb = 60/bpm/4;
+      while (nextTime < ctx.currentTime + 0.12) {
+        const s = seqStep;
+        for (let ti = 0; ti < 4; ti++) if (pattern[ti][s]) drum(ti, nextTime);
+        const delay = Math.max(0, (nextTime - ctx.currentTime) * 1000);
+        const ss = s;
+        setTimeout(() => updatePlayhead(ss), delay);
+        seqStep = (seqStep + 1) % 16;
+        nextTime += spb;
+      }
+    }
+    function updatePlayhead(s) {
+      if (!playing && s !== -1) return;
+      stepEls.forEach(row => row.forEach((st, i) => st.classList.toggle("playhead", i === s)));
+    }
+
+    /* visualizer */
+    const vc = vizCv.getContext("2d");
+    let vRaf;
+    const drawViz = () => {
+      vRaf = requestAnimationFrame(drawViz);
+      if (document.hidden) return;
+      const w = vizCv.width = vizCv.clientWidth;
+      const h = vizCv.height;
+      vc.clearRect(0,0,w,h);
+      vc.fillStyle = "#0a0e1a"; vc.fillRect(0,0,w,h);
+      if (!analyser) {
+        vc.fillStyle = "rgba(140,150,190,.4)";
+        vc.font = "11px sans-serif"; vc.textAlign = "center";
+        vc.fillText("按一个琴键唤醒音频引擎…", w/2, h/2+4);
+        return;
+      }
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+      const bars = 48;
+      for (let i = 0; i < bars; i++) {
+        const v = data[Math.floor(i*data.length/bars)] / 255;
+        const bh = v * (h-8);
+        const grad = vc.createLinearGradient(0, h-bh, 0, h);
+        grad.addColorStop(0, "#22d3ee"); grad.addColorStop(1, "#7c6cff");
+        vc.fillStyle = grad;
+        vc.fillRect(i*(w/bars)+2, h-bh-4, w/bars-4, bh);
+      }
+    };
+    drawViz();
+    win.onClose(() => { cancelAnimationFrame(vRaf); clearInterval(schedTimer); if (ctx) ctx.close(); });
+
+    /* computer keyboard */
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win || e.repeat || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      const off = KEYMAP[e.key.toLowerCase()];
+      if (off != null) { e.preventDefault(); noteOn(60 + off); }
+    });
+    win.listen(document, "keyup", e => {
+      const off = KEYMAP[e.key.toLowerCase()];
+      if (off != null) noteOff(60 + off);
+    });
+
+    body.append(el("div", { class:"mus" },
+      el("div", { class:"mus-sec" },
+        el("div", { class:"mus-sec-title" }, el("span", { text:"频谱可视化" })),
+        vizCv),
+      el("div", { class:"mus-sec" },
+        el("div", { class:"mus-sec-title" }, el("span", { text:"合成器" }),
+          el("span", { class:"muted", style:{ fontSize:"11px" }, text:"用键盘 A–' 演奏（黑键 W E T Y U O P…）" })),
+        keysBox,
+        el("div", { class:"mus-controls" },
+          el("label", {}, "波形", waveSel),
+          el("label", {}, "起音", atkSlider),
+          el("label", {}, "释音", relSlider),
+          el("label", {}, "音量", volSlider))),
+      el("div", { class:"mus-sec", style:{ borderBottom:"none" } },
+        el("div", { class:"mus-sec-title" }, el("span", { text:"步进音序器 · 4 轨 × 16 步" }),
+          el("span", { style:{ display:"flex", gap:"8px", alignItems:"center" } }, playBtn, clearBtn)),
+        seqBox,
+        el("div", { class:"mus-controls" },
+          el("label", {}, "速度", bpmSlider, bpmLabel)))
+    ));
+  }
+});
+
+/* ---------------- 画板 ---------------- */
+OS.registerApp({
+  id:"paint", name:"画板", icon:"🎨", desc:"画笔 / 形状 / 油漆桶 / 撤销，可保存到图片文件夹",
+  w:900, h:640, desktop:true,
+
+  mount(body, win) {
+    const W = 900, H = 540;
+    let tool = "brush", color = "#7c6cff", size = 6, drawing = false, sx0, sy0;
+    let snapshot = null;
+    const undoStack = [];
+    const PALETTE = ["#0f1222","#ffffff","#ff5c8a","#ff8a5c","#fbbf24","#4ade80","#39d3e8","#7c6cff","#c084fc","#8b6b57"];
+    const main = el("canvas", { width:W, height:H });
+    const prev = el("canvas", { width:W, height:H });
+    const wrap = el("div", { class:"pt-canvas-wrap" }, main, prev);
+    body.append(el("div", { class:"paint" }, toolbar(), el("div", { class:"pt-stage" }, wrap)));
+
+    const cx = main.getContext("2d", { willReadFrequently: true });
+    const px = prev.getContext("2d");
+    cx.fillStyle = "#ffffff"; cx.fillRect(0,0,W,H);
+
+    function toolbar() {
+      const tools = [["brush","🖌️","画笔"],["eraser","🧽","橡皮"],["line","📏","直线"],["rect","▭","矩形"],["ellipse","◯","椭圆"],["fill","🪣","油漆桶"]];
+      const toolBtns = [];
+      for (const [id, ico, title] of tools) {
+        const btn = el("button", { class:"pt-tool" + (id === tool ? " active" : ""), text: ico, title,
+          onclick: () => { tool = id; $$(".pt-tool", bar).forEach(x => x.classList.remove("active")); btn.classList.add("active"); } });
+        toolBtns.push(btn);
+      }
+      const pal = el("div", { class:"pt-pal" }, PALETTE.map(c => el("div", { class:"pt-sw" + (c === color ? " active" : ""), style:{ background:c },
+        onclick: e => { color = c; $$(".pt-sw", bar).forEach(s => s.classList.remove("active")); e.target.classList.add("active"); } })));
+      const colorInput = el("input", { type:"color", value: color, oninput: e => { color = e.target.value; $$(".pt-sw", bar).forEach(s => s.classList.remove("active")); } });
+      const sizeLabel = el("span", { class:"muted", style:{ fontSize:"11px" }, text: size + "px" });
+      const sizeSlider = el("input", { type:"range", min:"1", max:"60", value: size, style:{ width:"90px" },
+        oninput: e => { size = +e.target.value; sizeLabel.textContent = size + "px"; } });
+
+      const bar = el("div", { class:"pt-bar" },
+        ...toolBtns,
+        el("span", { class:"pt-sep" }),
+        pal, colorInput,
+        el("span", { class:"pt-sep" }),
+        sizeSlider, sizeLabel,
+        el("span", { class:"pt-sep" }),
+        el("button", { class:"pt-tool", text:"↩️", title:"撤销 (Ctrl+Z)", onclick: undo }),
+        el("button", { class:"pt-tool", text:"🗑️", title:"清空画布", onclick: () => UI.confirm("清空画布","确定要清空整块画布吗？","🗑️").then(ok => {
+          if (!ok) return; pushUndo(); cx.fillStyle = "#fff"; cx.fillRect(0,0,W,H);
+        })}),
+        el("button", { class:"pt-tool", text:"💾", title:"保存到 图片 文件夹", onclick: saveToFS }));
+      bar.dataset.ready = "1";
+      return bar;
+    }
+    const bar = $(".pt-bar", body);
+
+    function pushUndo() {
+      undoStack.push(main.toDataURL());
+      if (undoStack.length > 25) undoStack.shift();
+    }
+    function undo() {
+      const d = undoStack.pop();
+      if (!d) return;
+      const img = new Image();
+      img.onload = () => { cx.clearRect(0,0,W,H); cx.drawImage(img,0,0); };
+      img.src = d;
+    }
+    function saveToFS() {
+      const name = FS.uniqueName("/home/user/Pictures", `画作-${new Date().toTimeString().slice(0,8).replace(/:/g,"")}.png`);
+      const err = FS.writeFile("/home/user/Pictures/" + name, main.toDataURL("image/png"));
+      if (err) return UI.notify("画板", err, "⚠️");
+      Bus.emit("fs.reset");
+      UI.notify("画板", "已保存到 图片/" + name, "🎨");
+    }
+    function pos(e) {
+      const r = main.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * W/r.width, y: (e.clientY - r.top) * H/r.height };
+    }
+    function hex2rgb(h) { const n = parseInt(h.slice(1),16); return [n>>16&255, n>>8&255, n&255]; }
+    function flood(sx, sy) {
+      const x0 = Math.round(sx), y0 = Math.round(sy);
+      if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return;
+      const img = cx.getImageData(0,0,W,H), d = img.data;
+      const [fr,fg,fb] = hex2rgb(color);
+      const si = (y0*W+x0)*4;
+      const tr = d[si], tg = d[si+1], tb = d[si+2];
+      if (Math.abs(tr-fr)+Math.abs(tg-fg)+Math.abs(tb-fb) < 10) return;
+      const tol = 48;
+      const match = i => Math.abs(d[i]-tr) + Math.abs(d[i+1]-tg) + Math.abs(d[i+2]-tb) <= tol*1.7;
+      const stack = [[x0,y0]];
+      while (stack.length) {
+        const [x,y] = stack.pop();
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const i = (y*W+x)*4;
+        if (!match(i)) continue;
+        d[i] = fr; d[i+1] = fg; d[i+2] = fb; d[i+3] = 255;
+        stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+      }
+      cx.putImageData(img,0,0);
+    }
+    function strokeStyle() {
+      cx.strokeStyle = color; cx.fillStyle = color;
+      cx.lineWidth = size; cx.lineCap = "round"; cx.lineJoin = "round";
+    }
+    win.listen(main, "pointerdown", e => {
+      const p = pos(e);
+      if (tool === "fill") { pushUndo(); flood(p.x, p.y); return; }
+      pushUndo();
+      drawing = true; sx0 = p.x; sy0 = p.y;
+      main.setPointerCapture(e.pointerId);
+      if (tool === "brush" || tool === "eraser") {
+        strokeStyle();
+        if (tool === "eraser") { cx.strokeStyle = "#fff"; cx.fillStyle = "#fff"; }
+        cx.beginPath(); cx.moveTo(p.x, p.y); cx.lineTo(p.x+.01, p.y); cx.stroke();
+      } else snapshot = cx.getImageData(0,0,W,H);
+    });
+    win.listen(main, "pointermove", e => {
+      if (!drawing) return;
+      const p = pos(e);
+      if (tool === "brush" || tool === "eraser") { cx.lineTo(p.x, p.y); cx.stroke(); return; }
+      px.clearRect(0,0,W,H);
+      if (snapshot) cx.putImageData(snapshot, 0, 0);
+      strokeStyle();
+      if (tool === "line") { cx.beginPath(); cx.moveTo(sx0, sy0); cx.lineTo(p.x, p.y); cx.stroke(); }
+      else if (tool === "rect") { px.strokeStyle = color; px.lineWidth = size; px.strokeRect(Math.min(sx0,p.x), Math.min(sy0,p.y), Math.abs(p.x-sx0), Math.abs(p.y-sy0)); }
+      else if (tool === "ellipse") {
+        px.strokeStyle = color; px.lineWidth = size;
+        px.beginPath();
+        px.ellipse((sx0+p.x)/2, (sy0+p.y)/2, Math.abs(p.x-sx0)/2, Math.abs(p.y-sy0)/2, 0, 0, 6.29);
+        px.stroke();
+      }
+    });
+    const finish = e => {
+      if (!drawing) return;
+      drawing = false;
+      const p = pos(e);
+      if (tool === "rect") { strokeStyle(); cx.strokeRect(Math.min(sx0,p.x), Math.min(sy0,p.y), Math.abs(p.x-sx0), Math.abs(p.y-sy0)); }
+      else if (tool === "ellipse") {
+        strokeStyle(); cx.beginPath();
+        cx.ellipse((sx0+p.x)/2, (sy0+p.y)/2, Math.abs(p.x-sx0)/2, Math.abs(p.y-sy0)/2, 0, 0, 6.29);
+        cx.stroke();
+      }
+      px.clearRect(0,0,W,H);
+      snapshot = null;
+    };
+    win.listen(main, "pointerup", finish);
+    win.listen(main, "pointercancel", () => { drawing = false; px.clearRect(0,0,W,H); });
+    win.listen(document, "keydown", e => {
+      if (OS.focused !== win) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveToFS(); }
+    });
+  }
+});
+
+/* ---------------- 星云 · WebGL 着色器引擎 ---------------- */
+const SHADERS = {
+  "等离子 Plasma": `precision highp float;
+uniform float u_time; uniform vec2 u_res; uniform vec2 u_mouse;
+void main(){
+  vec2 uv=(gl_FragCoord.xy*2.0-u_res)/min(u_res.x,u_res.y);
+  float t=u_time*0.6;
+  float v=sin(uv.x*3.0+t)+sin(uv.y*3.0-t*1.3)+sin((uv.x+uv.y)*2.0+t*0.7)+sin(length(uv)*4.0-t);
+  vec3 col=0.5+0.5*cos(v+vec3(0.0,2.1,4.2)+t*0.3);
+  col*=0.85+0.15*sin(length(uv)*8.0-t*2.0);
+  gl_FragColor=vec4(col*0.9,1.0);
+}`,
+  "极光 Aurora": `precision highp float;
+uniform float u_time; uniform vec2 u_res;
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1.0,0.0)),f.x),mix(hash(i+vec2(0.0,1.0)),hash(i+vec2(1.0,1.0)),f.x),f.y);}
+void main(){
+  vec2 uv=gl_FragCoord.xy/u_res;
+  vec3 col=mix(vec3(0.015,0.02,0.06),vec3(0.04,0.06,0.16),uv.y);
+  float t=u_time*0.22;
+  for(int i=0;i<3;i++){
+    float fi=float(i);
+    float band=noise(vec2(uv.x*2.2+fi*7.3+t*(0.4+fi*0.15),uv.y*1.4+t*0.25));
+    float m=exp(-pow((uv.y-(0.32+band*0.38))*(3.4+fi),2.0));
+    col+=m*mix(vec3(0.1,0.9,0.5),vec3(0.25,0.45,1.0),fi*0.5)*0.55;
+  }
+  float st=step(0.9985,hash(floor(gl_FragCoord.xy/1.5)))*(0.4+0.6*abs(sin(u_time*2.0+hash(floor(gl_FragCoord.xy))*40.0)));
+  col+=st*0.6;
+  gl_FragColor=vec4(col,1.0);
+}`,
+  "时空隧道 Tunnel": `precision highp float;
+uniform float u_time; uniform vec2 u_res;
+void main(){
+  vec2 uv=(gl_FragCoord.xy*2.0-u_res)/min(u_res.x,u_res.y);
+  uv+=0.15*vec2(sin(u_time*0.4),cos(u_time*0.3));
+  float a=atan(uv.y,uv.x); float r=length(uv);
+  float rings=sin(1.0/(r+0.12)-u_time*2.2);
+  float checker=step(0.0,sin(a*8.0+u_time))*step(0.0,rings);
+  vec3 col=mix(vec3(0.05,0.0,0.15),vec3(0.35,0.75,1.0),0.5+0.5*rings);
+  col+=checker*vec3(0.9,0.35,0.65)*0.35;
+  col*=smoothstep(1.7,0.15,r);
+  gl_FragColor=vec4(col,1.0);
+}`,
+  "星体 Sphere": `precision highp float;
+uniform float u_time; uniform vec2 u_res; uniform vec2 u_mouse;
+void main(){
+  vec2 uv=(gl_FragCoord.xy*2.0-u_res)/min(u_res.x,u_res.y);
+  vec3 ro=vec3(0.0,0.0,-3.1);
+  vec3 rd=normalize(vec3(uv,1.7));
+  float ma=(u_mouse.x/max(u_res.x,1.0)-0.5)*3.0;
+  float mb=(u_mouse.y/max(u_res.y,1.0)-0.5)*1.5;
+  vec3 L=normalize(vec3(sin(u_time*0.4+ma),0.55+mb,-0.5));
+  vec3 oc=ro;
+  float b=dot(oc,rd); float c=dot(oc,oc)-1.0; float h=b*b-c;
+  vec3 col=vec3(0.02,0.03,0.08);
+  if(h>0.0){
+    float tHit=-b-sqrt(h);
+    vec3 pos=ro+rd*tHit; vec3 n=normalize(pos);
+    float dif=max(dot(n,L),0.0);
+    float spe=pow(max(dot(reflect(-L,n),-rd),0.0),42.0);
+    col=vec3(0.10,0.13,0.32)*0.35+vec3(0.85,0.9,1.0)*dif*0.85+spe;
+    col+=pow(1.0-max(dot(n,-rd),0.0),3.0)*vec3(0.25,0.5,1.0)*0.7;
+  }
+  gl_FragColor=vec4(col,1.0);
+}`,
+};
+
+OS.registerApp({
+  id:"shader", name:"星云", icon:"🌌", desc:"实时 WebGL 片元着色器引擎，四种可切换程序",
+  w:760, h:540, desktop:true,
+
+  mount(body, win) {
+    const cv = el("canvas");
+    const fpsEl = el("div", { class:"shd-fps", text:"-- fps" });
+    const errBox = el("div", { class:"shd-err" });
+    const presetSel = el("select", { onchange: e => load(e.target.value) });
+    for (const name of Object.keys(SHADERS)) presetSel.append(el("option", { text:name }));
+    const bar = el("div", { class:"shd-bar" }, presetSel,
+      el("span", { class:"muted", style:{ fontSize:"11px", color:"#9fb" }, text:"移动鼠标可以和「星体」互动" }));
+    body.append(el("div", { class:"shd" }, cv, bar, fpsEl, errBox));
+
+    const gl = cv.getContext("webgl", { antialias:false, alpha:false });
+    if (!gl) {
+      errBox.style.display = "block";
+      errBox.textContent = "你的浏览器不支持 WebGL。";
+      return;
+    }
+    let program = null, uTime, uRes, uMouse, mouse = { x: 0.5, y: 0.5 }, raf, t0 = performance.now();
+    const mouseCv = [0, 0];
+
+    const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+    function compile(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    function load(name) {
+      const FS_SRC = SHADERS[name];
+      try {
+        const p = gl.createProgram();
+        gl.attachShader(p, compile(gl.VERTEX_SHADER, VS));
+        gl.attachShader(p, compile(gl.FRAGMENT_SHADER, FS_SRC));
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+        program = p;
+        uTime = gl.getUniformLocation(p, "u_time");
+        uRes  = gl.getUniformLocation(p, "u_res");
+        uMouse = gl.getUniformLocation(p, "u_mouse");
+        errBox.style.display = "none";
+      } catch(err) {
+        errBox.style.display = "block";
+        errBox.textContent = "着色器编译失败:\n" + err.message;
+      }
+    }
+    // fullscreen triangle
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+    win.listen(cv, "pointermove", e => {
+      const r = cv.getBoundingClientRect();
+      mouse = { x: e.clientX - r.left, y: r.height - (e.clientY - r.top) };
+    });
+
+    let frames = 0, lastFps = performance.now();
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      if (document.hidden) return;
+      const dpr = Math.min(devicePixelRatio, 1.5);
+      const w = Math.floor(cv.clientWidth * dpr), h = Math.floor(cv.clientHeight * dpr);
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      gl.viewport(0,0,w,h);
+      if (program) {
+        gl.useProgram(program);
+        const loc = gl.getAttribLocation(program, "p");
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform1f(uTime, (performance.now()-t0)/1000);
+        gl.uniform2f(uRes, w, h);
+        gl.uniform2f(uMouse, mouse.x*dpr, mouse.y*dpr);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      frames++;
+      const now = performance.now();
+      if (now - lastFps > 500) {
+        fpsEl.textContent = Math.round(frames*1000/(now-lastFps)) + " fps · " + cv.width + "×" + cv.height;
+        frames = 0; lastFps = now;
+      }
+    };
+    win.onClose(() => { cancelAnimationFrame(raf); gl.getExtension("WEBGL_lose_context")?.loseContext(); });
+    load(Object.keys(SHADERS)[0]);
+    loop();
+  }
+});
+
+/* ---------------- 任务管理器 ---------------- */
+OS.registerApp({
+  id:"taskmgr", name:"任务管理器", icon:"📊", desc:"查看运行中的窗口与资源占用",
+  w:620, h:480, desktop:true,
+
+  mount(body, win) {
+    const sparkCv = el("canvas", { height:92 });
+    const sparkVal = el("div", { class:"tm-viz-val", text:"0%" });
+    const list = el("div", { class:"tm-list" });
+    const statusLine = el("div", { class:"tm-status" });
+    const mem = {}; const cpuHist = Array(80).fill(0);
+    let total = 0;
+
+    body.append(el("div", { class:"tm" },
+      el("div", { class:"tm-viz" }, sparkCv, el("div", { class:"tm-viz-label", text:"TOTAL CPU" }), sparkVal),
+      el("div", { class:"tm-head" },
+        el("div", { class:"tm-name", text:"进程" }),
+        el("div", { class:"tm-cpu", text:"CPU" }),
+        el("div", { class:"tm-mem", text:"内存" }),
+        el("div", { style:{ width:"70px" }, text:"" })),
+      list, statusLine));
+
+    const tick = () => {
+      // simulate
+      total = clamp(total + rand(-3,3.4), 4, 96);
+      cpuHist.push(total); cpuHist.shift();
+      sparkVal.textContent = total.toFixed(0) + "%";
+      const sc = sparkCv.getContext("2d");
+      const w = sparkCv.width = sparkCv.clientWidth;
+      const h = sparkCv.height;
+      sc.clearRect(0,0,w,h);
+      const grad = sc.createLinearGradient(0,0,0,h);
+      grad.addColorStop(0,"rgba(124,108,255,.5)"); grad.addColorStop(1,"rgba(124,108,255,0)");
+      sc.beginPath(); sc.moveTo(0,h);
+      cpuHist.forEach((v,i) => sc.lineTo(i/(cpuHist.length-1)*w, h - v/100*h));
+      sc.lineTo(w,h); sc.closePath();
+      sc.fillStyle = grad; sc.fill();
+      sc.beginPath();
+      cpuHist.forEach((v,i) => { const x = i/(cpuHist.length-1)*w, y = h - v/100*h; i ? sc.lineTo(x,y) : sc.moveTo(x,y); });
+      sc.strokeStyle = "#8f7dff"; sc.lineWidth = 2; sc.stroke();
+
+      // rows
+      list.innerHTML = "";
+      for (const w2 of OS.windows) {
+        mem[w2.id] = (mem[w2.id] || 40 + (w2.app.w||600)/10) + rand(-1.5,1.8);
+        mem[w2.id] = clamp(mem[w2.id], 24, 800);
+        const cpu = Math.max(0, Math.min(99, (OS.focused === w2 ? 6 : 1.5) + rand(0,8) + (["shader","music","snake","breakout"].includes(w2.appId) ? 14 : 0)));
+        const row = el("div", { class:"tm-row" },
+          el("div", { class:"tm-name" }, el("span", { text: w2.app.icon }), el("span", { text: w2.titleEl.textContent })),
+          el("div", { class:"tm-cpu" }, el("div", { class:"tm-meter" }, el("i", { style:{ width: cpu+"%" } })), el("span", { class:"muted", style:{ fontSize:"11px", width:"34px" }, text: cpu.toFixed(0)+"%" })),
+          el("div", { class:"tm-mem", text: mem[w2.id].toFixed(0) + " MB" }),
+          el("button", { class:"btn btn-danger", style:{ height:"26px", fontSize:"11.5px" }, text:"结束进程",
+            onclick: () => OS.close(w2) }));
+        list.append(row);
+      }
+      if (!OS.windows.length) list.append(el("div", { class:"muted", style:{ padding:"26px", textAlign:"center" }, text:"没有运行中的窗口" }));
+      statusLine.innerHTML = "";
+      statusLine.append(
+        el("span", { text:"窗口数 " + OS.windows.length }),
+        el("span", { text:"运行时间 " + fmtUptime(Date.now()-OS.bootTime) }),
+        el("span", { text:"磁盘占用 " + fmtBytes(FS.size()) }),
+        el("span", { text:"渲染引擎 " + (navigator.userAgent.includes("Chrome") ? "Blink" : navigator.userAgent.includes("Firefox") ? "Gecko" : "Web") }));
+    };
+    tick();
+    win.every(1000, tick);
+  }
+});
+
+/* ---------------- 设置中心 ---------------- */
+OS.registerApp({
+  id:"settings", name:"设置", icon:"⚙️", desc:"主题 · 强调色 · 壁纸 · 系统", single:true,
+  w:720, h:560, desktop:true,
+
+  mount(body, win) {
+    const THEMES = [
+      ["aurora","Aurora 极光","#0b1020,#7c6cff,#22d3ee"],
+      ["midnight","Midnight 午夜","#04060d,#3b82f6,#8b5cf6"],
+      ["sunset","Sunset 落日","#150a10,#ff5c8a,#ffb86b"],
+      ["forest","Forest 森林","#071009,#34d399,#a3e635"],
+      ["daylight","Daylight 白昼","#e8edf9,#6d5cff,#0ea5b7"],
+    ];
+    const ACCENTS = ["#7c6cff","#3b82f6","#22d3ee","#34d399","#fbbf24","#ff5c8a","#e5484d","#a3e635"];
+    const WALLS = [["aurora","Aurora 光斑","radial-gradient(circle at 30% 40%,#7c6cff55,transparent 60%),#0a0f1e"],
+      ["starfield","Starfield 星野","#05070f"],
+      ["waves","Waves 波浪","linear-gradient(180deg,#0a0f1e,#12204a)"],
+      ["grid","Grid 网格地平线","#0a0f1e"]];
+
+    const wrap = el("div", { class:"set-wrap" });
+
+    const render = () => {
+      wrap.innerHTML = "";
+      wrap.append(el("div", { class:"h1" }, "⚙️ 设置"));
+
+      // appearance
+      const themeRow = el("div", { class:"theme-row" });
+      for (const [id, label, colors] of THEMES) {
+        const [bg, a1, a2] = colors.split(",");
+        themeRow.append(el("div", { class:"theme-card" + (Settings.data.theme === id ? " active" : ""),
+          onclick: () => { Settings.set("theme", id); render(); } },
+          el("div", { class:"theme-prev", style:{ background:`linear-gradient(135deg,${bg} 40%,${a1}cc), ${bg}` } },
+            el("div", { class:"tp-bar" })),
+          el("div", { class:"theme-name", text: label })));
+      }
+      const accRow = el("div", { class:"acc-row" });
+      for (const c of ACCENTS) {
+        accRow.append(el("div", { class:"acc-swatch" + (Settings.data.accent === c ? " active" : ""), style:{ background:c },
+          onclick: () => { Settings.set("accent", c); render(); } }));
+      }
+      accRow.append(el("input", { type:"color", value: Settings.data.accent, title:"自定义颜色",
+        onchange: e => { Settings.set("accent", e.target.value); render(); } }));
+      const wpRow = el("div", { class:"wp-row" });
+      for (const [id, label, css] of WALLS) {
+        wpRow.append(el("div", { class:"wp-card" + (Settings.data.wallpaper === id ? " active" : ""), style:{ background: css },
+          onclick: () => { Settings.set("wallpaper", id); render(); } },
+          el("span", { text: label })));
+      }
+      const animSwitch = el("div", { class:"switch" + (Settings.data.animations ? " on" : ""),
+        onclick: () => { Settings.set("animations", !Settings.data.animations); render(); } });
+
+      wrap.append(
+        el("div", { class:"set-section" },
+          el("h3", {}, "🎨", "外观"),
+          el("div", { class:"set-desc", text:"主题会即时切换，强调色影响整个系统的按钮、光标和高亮。" }),
+          themeRow,
+          el("div", { class:"set-card", style:{ marginTop:"10px" } },
+            el("div", { class:"sc-main" }, el("div", { class:"sc-title", text:"强调色" }), el("div", { class:"sc-sub", text:"accent color" })),
+            accRow),
+          el("div", { class:"set-card" },
+            el("div", { class:"sc-main" }, el("div", { class:"sc-title", text:"动态壁纸动画" }), el("div", { class:"sc-sub", text:"关闭后壁纸静止，更省电" })),
+            animSwitch)));
+
+      // wallpaper
+      wrap.append(el("div", { class:"set-section" },
+        el("h3", {}, "🖼️", "壁纸"),
+        el("div", { class:"set-desc", text:"全部壁纸由 Canvas 引擎实时绘制。" }),
+        wpRow));
+
+      // system
+      const fsBytes = FS.size();
+      const lsBytes = (() => { try { return (localStorage.getItem(FS.KEY)||"").length + (localStorage.getItem(Settings.KEY)||"").length; } catch(e){ return 0; } })();
+      wrap.append(el("div", { class:"set-section" },
+        el("h3", {}, "💻", "系统"),
+        el("div", { class:"set-card" },
+          el("div", { class:"sc-main" },
+            el("div", { class:"kv" }, el("span", { text:"版本" }), el("b", { text:"AuroraOS 1.0 · Nebula" })),
+            el("div", { class:"kv" }, el("span", { text:"内核" }), el("b", { class:"mono", text:"aurora-js (single file)" })),
+            el("div", { class:"kv" }, el("span", { text:"文件系统占用" }), el("b", { text: fmtBytes(fsBytes) + " (" + fmtBytes(lsBytes) + " 原始)" })),
+            el("div", { class:"kv" }, el("span", { text:"已安装应用" }), el("b", { text: Object.values(OS.apps).filter(a=>!a.hidden).length + " 个" })),
+            el("div", { class:"kv" }, el("span", { text:"运行时间" }), el("b", { text: fmtUptime(Date.now()-OS.bootTime) }))),
+        ),
+        el("div", { class:"set-btn-row" },
+          el("button", { class:"btn", text:"🔄 重启系统", onclick: rebootOS }),
+          el("button", { class:"btn btn-danger", text:"⚠️ 恢复出厂设置", onclick: () => {
+            UI.confirm("恢复出厂", "这将清空虚拟文件系统中的全部文件并重置设置。此操作无法撤销。", "⚠️").then(ok => {
+              if (!ok) return;
+              FS.factoryReset();
+              Settings.data = { theme:"aurora", accent:"#7c6cff", wallpaper:"aurora", animations:true };
+              Settings.save(); Settings.apply();
+              UI.notify("设置", "已恢复出厂设置，即将重启…", "⚡");
+              setTimeout(rebootOS, 900);
+            });
+          }}))));
+    };
+    render();
+    body.append(el("div", { class:"set" }, wrap));
+  }
+});
+
+/* ---------------- 欢迎中心 ---------------- */
+OS.registerApp({
+  id:"welcome", name:"欢迎中心", icon:"🌠", desc:"系统简介与快速启动", single:true,
+  w:700, h:580, desktop:true, x: 120, y: 40,
+
+  mount(body, win) {
+    const LOGO =
+` █████╗ ██╗   ██╗██████╗  ██████╗ ██████╗  █████╗
+██╔══██╗██║   ██║██╔══██╗██╔═══██╗██╔══██╗██╔══██╗
+███████║██║   ██║██████╔╝██║   ██║██████╔╝███████║
+██╔══██║██║   ██║██╔══██╗██║   ██║██╔══██╗██╔══██║
+██║  ██║╚██████╔╝██║  ██║╚██████╔╝██║  ██║██║  ██║
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  O S`;
+    const quick = ["terminal","files","editor","shader","music","paint","snake","g2048","mines","breakout","calc","taskmgr","settings"]
+      .map(id => OS.apps[id]).filter(Boolean)
+      .map(app => el("div", { class:"wf-app", onclick: () => OS.launch(app.id) },
+        el("div", { class:"wa-ico", text: app.icon }),
+        el("div", {},
+          el("div", { class:"wa-name", text: app.name }),
+          el("div", { class:"wa-desc", text: app.desc }))));
+    body.append(el("div", { class:"welcome" },
+      el("div", { class:"welcome-inner" },
+        el("div", { class:"wf-logo mono", text: LOGO }),
+        el("div", {},
+          el("div", { class:"wf-title", text:"欢迎来到 AuroraOS" }),
+          el("div", { class:"wf-sub", text:"一台完全运行在这个 HTML 文件里的桌面电脑 —— 窗口管理器、虚拟文件系统、终端 Shell、代码编辑器、游戏、合成器和 WebGL 引擎，全部离线运行，数据保存在浏览器里。" })),
+        el("div", { class:"wf-grid" }, ...quick),
+        el("div", { class:"wf-tips" },
+          el("div", {}, "💡 <b>提示</b> — 桌面和文件管理器里藏着<b>右键菜单</b>；拖窗口到屏幕边缘可以分屏；双击标题栏最大化。"),
+          el("div", {}, "⌨️ <b>终端</b> — 输入 <code>help</code> 看全部命令，试试 <code>neofetch</code>、<code>tree /</code>、<code>cowsay 你好</code>、<code>matrix</code>。"),
+          el("div", {}, "📝 <b>编辑器</b> — 打开 <code>Documents/hello.js</code> 点 ▶ 直接运行；HTML 文件可以实时预览。"),
+          el("div", {}, "🎹 <b>音乐</b> — 键盘 <code>A W S E D F…</code> 就是琴键，下面的鼓机点格子编排节奏。"),
+          el("div", {}, "⚡ <b>快捷键</b> — <code>Ctrl+Alt+T</code> 召唤终端 · <code>Ctrl+S</code> 保存 · <code>Ctrl+Z</code> 画板撤销。")))));
+  }
+});
+
+/* ---------------- 图片查看器 ---------------- */
+OS.registerApp({
+  id:"viewer", name:"图片查看器", icon:"🖼️", desc:"查看 PNG 图片", hidden:true,
+  w:640, h:500,
+
+  mount(body, win, args) {
+    let zoom = 1;
+    const img = el("img", { src: args.path ? (FS.read(args.path) || "") : "" });
+    const stage = el("div", { class:"viewer-stage" }, img);
+    const setZoom = z => { zoom = clamp(z, .1, 8); img.style.transform = `scale(${zoom})`; };
+    body.append(el("div", { class:"viewer" },
+      el("div", { class:"viewer-bar" },
+        el("button", { class:"btn btn-ghost icon-btn", text:"➖", onclick: () => setZoom(zoom/1.25) }),
+        el("span", { class:"muted mono", style:{ fontSize:"11.5px" }, text: (args.path||"").split("/").pop() }),
+        el("button", { class:"btn btn-ghost icon-btn", text:"➕", onclick: () => setZoom(zoom*1.25) }),
+        el("button", { class:"btn", text:"适应", onclick: () => setZoom(1) })),
+      stage));
+    win.setTitle((args.path||"图片").split("/").pop() + " — 查看器");
+  }
+});
+
+/* ---------------- file association helper ---------------- */
+const Apps = {
+  openFile(path, content) {
+    if (typeof content === "string" && content.startsWith("data:image"))
+      return OS.launch("viewer", { path });
+    const ext = (path.split(".").pop() || "").toLowerCase();
+    if (["js","html","htm","css","md","txt","json","log"].includes(ext))
+      return OS.launch("editor", { path });
+    return OS.launch("editor", { path });
+  }
+};
+
+/* ================================================================
+   INIT
+   ================================================================ */
+(function init() {
+  Settings.load();
+  FS.init();
+  Wallpaper.init();
+  Settings.apply();
+  Shell.init();
+  OS.bootTime = Date.now();
+
+  // first-run gift: a generated picture in Pictures
+  if (!FS.ls("/home/user/Pictures").length) {
+    try {
+      const gcv = document.createElement("canvas");
+      gcv.width = 480; gcv.height = 300;
+      const g = gcv.getContext("2d");
+      const grad = g.createLinearGradient(0,0,480,300);
+      grad.addColorStop(0,"#0a0f2e"); grad.addColorStop(1,"#1a1040");
+      g.fillStyle = grad; g.fillRect(0,0,480,300);
+      for (let i = 0; i < 90; i++) {
+        g.fillStyle = `rgba(255,255,255,${rand(.2,.9)})`;
+        g.beginPath(); g.arc(rand(0,480), rand(0,220), rand(.5,1.6), 0, 6.29); g.fill();
+      }
+      for (const [cx2, cy2, r, col] of [[160,240,190,"rgba(124,108,255,.5)"],[340,260,150,"rgba(34,211,238,.4)"]]) {
+        const rg = g.createRadialGradient(cx2,cy2,0,cx2,cy2,r);
+        rg.addColorStop(0,col); rg.addColorStop(1,"rgba(0,0,0,0)");
+        g.fillStyle = rg; g.beginPath(); g.arc(cx2,cy2,r,0,6.29); g.fill();
+      }
+      g.fillStyle = "#0a0a14"; g.beginPath();
+      g.moveTo(0,300); g.lineTo(0,240); g.lineTo(90,190); g.lineTo(180,235); g.lineTo(270,170); g.lineTo(360,225); g.lineTo(480,180); g.lineTo(480,300);
+      g.closePath(); g.fill();
+      FS.writeFile("/home/user/Pictures/第一张夜景.png", gcv.toDataURL("image/png"));
+    } catch(e){}
+  }
+
+  let errCount = 0;
+  addEventListener("error", e => {
+    if (errCount++ < 3) UI.notify("系统错误", String(e.message || "unknown"), "🐞");
+  });
+
+  Boot.run(() => {
+    OS.launch("welcome");
+    setTimeout(() => UI.notify("AuroraOS", "系统就绪。双击图标打开应用，或按 Ctrl+Alt+T 打开终端。", "🌠"), 700);
+  });
+})();
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d142dbc9ece18e',t:'MTc4OTc0NDA1NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

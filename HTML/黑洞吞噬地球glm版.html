@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>吞噬 · 当黑洞逼近地球 — 引力透镜实时模拟</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    -webkit-user-select:none;user-select:none;}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab;}
+  #gl.drag{cursor:grabbing;}
+  .panel{position:fixed;color:#cfe2ff;background:rgba(4,8,20,.55);border:1px solid rgba(120,170,255,.18);
+    border-radius:10px;padding:10px 14px;font-size:12px;line-height:1.7;backdrop-filter:blur(6px);
+    pointer-events:none;letter-spacing:.02em;}
+  #phase{top:16px;left:16px;min-width:200px;}
+  #phase .t1{font-size:15px;font-weight:700;color:#eaf2ff;letter-spacing:.12em;}
+  #phase .t2{font-size:10px;color:#7fa8e8;letter-spacing:.28em;margin-top:2px;}
+  #phase .rule{height:1px;background:linear-gradient(90deg,rgba(130,180,255,.5),transparent);margin:7px 0 6px;}
+  #live{top:16px;right:16px;text-align:right;min-width:210px;}
+  #live b{color:#ffe9b8;font-weight:600;font-variant-numeric:tabular-nums;}
+  #live .k{color:#7fa8e8;font-size:10px;letter-spacing:.2em;}
+  #caption{left:50%;bottom:92px;transform:translateX(-50%);max-width:min(880px,86vw);text-align:center;
+    font-size:15px;color:#e8f0ff;text-shadow:0 1px 8px #000,0 0 24px rgba(0,0,0,.9);
+    background:none;border:none;transition:opacity .6s;line-height:1.8;}
+  #caption .f{color:#9fc4ff;font-size:12px;opacity:.85;}
+  #bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;
+    background:rgba(4,8,20,.6);border:1px solid rgba(120,170,255,.18);border-radius:12px;padding:8px 12px;
+    backdrop-filter:blur(8px);}
+  #bar button{background:rgba(30,50,90,.5);color:#dce8ff;border:1px solid rgba(130,180,255,.25);border-radius:7px;
+    padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  #bar button:hover{background:rgba(60,90,150,.6);}
+  #bar button.on{background:rgba(90,140,230,.55);border-color:rgba(160,200,255,.6);}
+  #scrub{width:min(420px,34vw);accent-color:#7fb0ff;cursor:pointer;}
+  #hint{position:fixed;left:16px;bottom:18px;color:rgba(150,180,230,.5);font-size:11px;pointer-events:none;letter-spacing:.05em;}
+  #fps{position:fixed;right:16px;bottom:18px;color:rgba(150,180,230,.45);font-size:11px;pointer-events:none;}
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(2,6,16,.82),rgba(0,0,0,.96));z-index:50;
+    color:#dfe9ff;text-align:center;transition:opacity .9s;}
+  .overlay.hide{opacity:0;pointer-events:none;}
+  #start h1{font-size:clamp(30px,5vw,54px);margin:0 0 6px;letter-spacing:.3em;font-weight:300;text-indent:.3em;
+    color:#f2f6ff;text-shadow:0 0 40px rgba(120,170,255,.45);}
+  #start .en{font-size:11px;letter-spacing:.55em;color:#6f95d8;text-indent:.55em;margin-bottom:26px;}
+  #start .card{font-size:12.5px;line-height:2.05;color:#a9c2ea;background:rgba(8,14,30,.6);
+    border:1px solid rgba(120,170,255,.16);border-radius:12px;padding:14px 30px;margin-bottom:30px;}
+  #start .card b{color:#ffe9b8;font-weight:600;}
+  .bigbtn{background:linear-gradient(180deg,rgba(80,120,210,.35),rgba(40,60,120,.45));color:#fff;
+    border:1px solid rgba(150,190,255,.5);border-radius:999px;padding:13px 52px;font-size:16px;letter-spacing:.4em;
+    text-indent:.4em;cursor:pointer;font-family:inherit;transition:all .25s;box-shadow:0 0 30px rgba(90,140,255,.25);}
+  .bigbtn:hover{background:linear-gradient(180deg,rgba(110,150,240,.5),rgba(60,85,160,.6));
+    box-shadow:0 0 50px rgba(120,170,255,.45);transform:scale(1.04);}
+  #start .tip{margin-top:18px;font-size:11px;color:#5f7db2;letter-spacing:.1em;}
+  #endcard{opacity:0;pointer-events:none;background:#000;}
+  #endcard.show{opacity:1;pointer-events:auto;transition:opacity 2.5s;}
+  #endcard h2{font-size:22px;letter-spacing:.5em;text-indent:.5em;font-weight:300;color:#9db8e8;margin-bottom:26px;}
+  #endcard p{font-size:14px;line-height:2.3;color:#8fa6cf;max-width:640px;margin:4px 0;}
+  #endcard p b{color:#d8e4ff;font-weight:600;}
+  #endcard .small{font-size:11px;color:#54688f;line-height:2;margin-top:26px;}
+  #endcard .bigbtn{margin-top:34px;}
+  #err{position:fixed;top:8px;left:8px;right:8px;color:#ff9c9c;font:11px/1.5 Consolas,monospace;white-space:pre-wrap;
+    z-index:99;pointer-events:none;text-shadow:0 1px 2px #000;}
+  #nogl{display:none;position:fixed;inset:0;color:#fff;align-items:center;justify-content:center;z-index:100;
+    font-size:15px;background:#05070d;}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:40;}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="phase" class="panel">
+  <div class="t1" id="phaseT">接近阶段</div>
+  <div class="t2" id="phaseE">APPROACH</div>
+  <div class="rule"></div>
+  <div>黑洞质量 <b style="color:#ffe9b8">10⁵ M☉</b>　r<sub>s</sub> ≈ 29.5 万 km</div>
+  <div>吸积盘 3–20 r<sub>s</sub>　洛希极限 ≈ 87 r<sub>s</sub></div>
+</div>
+
+<div id="live" class="panel">
+  <div class="k">DISTANCE / 黑洞距离</div><div><b id="lvD">—</b></div>
+  <div class="k">TIDAL ACC / 地球所受潮汐加速度</div><div><b id="lvT">—</b></div>
+  <div class="k">γ-FACTOR / 观察者处 √(1−r<sub>s</sub>/r)</div><div><b id="lvG">—</b></div>
+  <div class="k">β = v/c / 观察者坠落速度</div><div><b id="lvB">—</b></div>
+</div>
+
+<div id="caption" class="panel"><span id="capText"></span><br><span class="f" id="capSub"></span></div>
+
+<div id="bar">
+  <button id="btnPlay">⏸ 暂停</button>
+  <input id="scrub" type="range" min="0" max="101" step="0.1" value="0">
+  <button id="btnSpd">×1</button>
+  <button id="btnQ">画质:高</button>
+  <button id="btnMute">🔊</button>
+  <button id="btnRe">↻ 重播</button>
+</div>
+<div id="hint">拖动鼠标环视 · 滚轮变焦 · 空格暂停 · 底部进度条可拖动时间</div>
+<div id="fps"></div>
+<div id="flash"></div>
+<div id="err"></div>
+<div id="nogl"><div>⚠ 当前浏览器不支持 WebGL2，请使用 Chrome / Edge / Firefox 等现代浏览器打开。</div></div>
+
+<div id="start" class="overlay">
+  <h1>吞　噬</h1>
+  <div class="en">DEVOURED · A BLACK HOLE APPROACHES EARTH</div>
+  <div class="card">
+    公元 2087 年 · 一个 <b>10 万倍太阳质量</b>的恒星级遗迹黑洞闯入太阳系<br>
+    视界半径 r<sub>s</sub> ≈ <b>29.5 万公里</b>　·　吸积盘内缘 = 最内稳定圆轨道 3 r<sub>s</sub><br>
+    引力透镜 / 多普勒集束 / 引力红移 / 洛希极限潮汐撕裂 —— 全部依据广义相对论实时计算<br>
+    <span style="color:#5f7db2">（演示时间流速约为真实的 3000 倍）</span>
+  </div>
+  <button class="bigbtn" id="btnStart">开 始 观 测</button>
+  <div class="tip">建议佩戴耳机 · 全程约 100 秒</div>
+</div>
+
+<div id="endcard" class="overlay">
+  <h2>观测终止</h2>
+  <p><b>r = r<sub>s</sub> —— 事件视界</b></p>
+  <p>从这里开始，所有指向"未来"的方向都汇聚于奇点。</p>
+  <p>对远方的宇宙而言，观察者的影像<b>永远冻结在视界上</b>，随时间指数式红移熄灭；<br>
+     而对坠落者本人，一切在有限的固有时内终结。</p>
+  <p class="small">
+    渲染方法：史瓦西时空零测地线数值积分（每像素光线追踪）<br>
+    光线弯曲 F = −(3/2)·h²·r⃗/r⁵ → 阴影半径 √27/2·r<sub>s</sub> ≈ 2.6 r<sub>s</sub>（自动涌现）<br>
+    吸积盘：开普勒剪切 + 多普勒集束 I∝δ³⁻⁴ + 引力红移 √(1−r<sub>s</sub>/r)<br>
+    潮汐解体：d<sub>Roche</sub> = (2GM·R<sub>⊕</sub>/g)<sup>1/3</sup> ≈ 87 r<sub>s</sub>，潮汐加速度 ∝ d<sup>−3</sup>
+  </p>
+  <button class="bigbtn" id="btnReplay">重 新 观 测</button>
+</div>
+
+<script>
+(function(){
+'use strict';
+var Q=new URLSearchParams(location.search);
+
+// ============ WebGL setup ============
+var canvas=document.getElementById('gl');
+var gl=canvas.getContext('webgl2',{antialias:false,alpha:false,depth:false,stencil:false,powerPreference:'high-performance'});
+var errBox=document.getElementById('err');
+if(!gl){document.getElementById('nogl').style.display='flex';return;}
+function fail(m){errBox.textContent+=m+"\n";}
+
+var VERT='#version 300 es\nprecision highp float;\nconst vec2 P[3]=vec2[3](vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));\nvoid main(){gl_Position=vec4(P[gl_VertexID],0.,1.);}';
+
+var FRAG=`#version 300 es
+precision highp float;
+out vec4 fragColor;
+
+uniform vec2 uRes;
+uniform float uTime;
+uniform vec3 uCamPos,uCamR,uCamU,uCamF;
+uniform float uFovTan;
+uniform vec3 uBH,uSunDir;
+uniform vec3 uDiskN,uDiskX,uDiskZ;
+uniform float uEarthR,uEarthS,uEarthSq;
+uniform vec3 uEarthAx;
+uniform float uTide,uBreak,uDiskGlow,uFlare,uFlarePhi;
+uniform float uStreamOn,uStreamW,uChunkOn,uChunkHeat;
+uniform vec3 uStreamPts[20];
+uniform vec4 uChunks[12];
+uniform float uExpo,uEnd;
+uniform vec3 uGalN;
+uniform int uSteps;
+
+const float PI=3.141592653589793;
+
+// ---------- hash / noise ----------
+float h13(vec3 p){p=fract(p*0.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+vec3 h33(vec3 p){p=fract(p*vec3(0.1031,0.1030,0.0973));p+=dot(p,p.yxz+33.33);return fract((p.xxy+p.yxx)*p.zyx);}
+float h12(vec2 p){vec3 q=fract(vec3(p.xyx)*0.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+float vnoise(vec3 p){
+  vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  return mix(
+    mix(mix(h13(i),h13(i+vec3(1,0,0)),f.x),mix(h13(i+vec3(0,1,0)),h13(i+vec3(1,1,0)),f.x),f.y),
+    mix(mix(h13(i+vec3(0,0,1)),h13(i+vec3(1,0,1)),f.x),mix(h13(i+vec3(0,1,1)),h13(i+vec3(1,1,1)),f.x),f.y),f.z);
+}
+float fbm(vec3 p){float a=0.5,s=0.0;for(int i=0;i<5;i++){s+=a*vnoise(p);p=p*2.03+vec3(11.7,5.3,9.1);a*=0.5;}return s;}
+float fbm4(vec3 p){float a=0.5,s=0.0;for(int i=0;i<4;i++){s+=a*vnoise(p);p=p*2.13+vec3(7.7,3.1,5.9);a*=0.5;}return s;}
+
+// ---------- blackbody (Tanner Helland approximation) ----------
+vec3 blackbody(float T){
+  T=clamp(T,1200.0,32000.0);
+  float t=T*0.01;vec3 c;
+  c.r=t<=66.0?1.0:clamp(1.292936*pow(t-60.0,-0.1332047),0.0,1.0);
+  c.g=t<=66.0?clamp(0.3900816*log(t)-0.6318414,0.0,1.0):clamp(1.129891*pow(t-60.0,-0.0755148),0.0,1.0);
+  c.b=t>=66.0?1.0:(t<=19.0?0.0:clamp(0.5432068*log(t-10.0)-1.19625408,0.0,1.0));
+  return c;
+}
+vec3 aces(vec3 x){return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);}
+
+// ---------- sky ----------
+vec3 starLayer(vec3 d,float n,float thr){
+  vec3 p=d*n;vec3 id=floor(p);vec3 f=fract(p)-0.5;
+  vec3 rnd=h33(id);
+  if(rnd.x<thr)return vec3(0.0);
+  vec3 sp=(rnd-0.5)*0.66;
+  float dst=length(f-sp);
+  float b=1.0-smoothstep(0.0,0.16,dst);b*=b;
+  float m=h13(id+17.7);
+  b*=0.35+3.2*m*m*m*m;
+  vec3 tint=mix(vec3(0.62,0.74,1.0),vec3(1.0,0.76,0.55),rnd.y);
+  return tint*b*1.5;
+}
+vec3 skyColor(vec3 d){
+  vec3 c=vec3(0.0);
+  float band=exp(-abs(dot(d,uGalN))*7.0);
+  float neb=fbm4(d*5.0+3.0);
+  c+=band*(vec3(0.020,0.026,0.048)*(0.35+neb)*0.9+vec3(0.004,0.005,0.009));
+  c+=vec3(0.0028,0.0033,0.0058);
+  c+=starLayer(d,23.0,0.84)*1.6;
+  c+=starLayer(d,47.0,0.88)*1.1;
+  c+=starLayer(d,91.0,0.90)*0.8;
+  float sd=dot(d,uSunDir);
+  c+=vec3(1.0,0.97,0.92)*(smoothstep(0.99985,0.99996,sd)*60.0+pow(max(sd,0.0),1600.0)*2.4+pow(max(sd,0.0),70.0)*0.05);
+  return c;
+}
+
+// ---------- accretion disk ----------
+vec3 diskShade(vec3 q,vec3 vdir,out float alpha){
+  vec3 rel=q-uBH;float r=length(rel);
+  float xn=dot(rel,uDiskX),zn=dot(rel,uDiskZ);
+  float ang=atan(zn,xn);
+  float w=10.0*pow(r,-1.5)*uTime;
+  float ca=cos(w),sa=sin(w);
+  float cr=xn*ca-zn*sa,sr=xn*sa+zn*ca;
+  float pat=fbm(vec3(r*2.8,cr*1.15,sr*1.15));
+  pat=0.55+0.9*(pat-0.5)+0.45*(fbm4(vec3(r*7.5,cr*3.0,sr*3.0))-0.5);
+  float env=(1.0-smoothstep(15.0,23.5,r))*smoothstep(2.72,4.1,r);
+  float T=6800.0*pow(3.0/max(r,2.8),0.75);
+  vec3 vel=normalize(cross(uDiskN,rel));
+  float beta=min(0.70,sqrt(0.5/max(r,2.0)));
+  vec3 nph=-normalize(vdir);
+  float dop=sqrt(1.0-beta*beta)/max(1.0-beta*dot(vel,nph),0.28);
+  float grav=sqrt(max(1.0-1.0/r,0.05));
+  float shift=dop*grav;
+  vec3 c=blackbody(T*shift);
+  float bright=pow(shift,3.5)*env*(0.28+0.95*max(pat,0.0));
+  bright*=uDiskGlow*(1.0+2.5*uFlare*exp(-pow(ang-uFlarePhi,2.0)*3.0));
+  alpha=clamp(env*(0.5+0.5*pat),0.0,1.0)*0.9;
+  return c*bright*1.7;
+}
+
+// ---------- debris stream (volumetric) ----------
+void streamShade(inout vec3 col,inout float Tr,vec3 p,vec3 vdir,float dt){
+  if(uStreamOn<0.02)return;
+  float rbh2=dot(p-uBH,p-uBH);
+  float p2=dot(p,p);
+  if(rbh2>25600.0&&p2>25600.0)return;
+  float dmin=1e9;float qj=0.0;
+  for(int j=0;j<20;j++){
+    vec3 dv=p-uStreamPts[j];
+    float dd=dot(dv,dv);
+    if(dd<dmin){dmin=dd;qj=float(j)*0.05263158;}
+  }
+  dmin=sqrt(dmin);
+  float width=uStreamW*(0.22+0.95*qj);
+  if(dmin>width*3.2)return;
+  float dens=exp(-(dmin*dmin)/(width*width));
+  float clump=fbm(p*(4.5-2.5*qj)+vec3(0.0,uTime*0.10,0.0));
+  dens*=smoothstep(0.30,0.62,clump);
+  if(dens<0.004)return;
+  dens*=smoothstep(0.02,0.14,length(p-uCamPos));
+  float rb=length(p-uBH);
+  float temp=950.0+15000.0*pow(18.0/max(rb,3.0),1.25);
+  vec3 em=blackbody(temp);
+  float lam=0.12+2.4*pow(18.0/max(rb,3.0),1.7);
+  vec3 vv=normalize(uBH-p);
+  float beta=min(0.62,sqrt(1.0/max(rb,2.0)));
+  float dop=sqrt(1.0-beta*beta)/max(1.0-beta*dot(vv,-normalize(vdir)),0.30);
+  em*=pow(dop,3.0)*lam*dens;
+  col+=Tr*em*dt*3.0;
+  Tr*=exp(-dens*dt*2.6);
+}
+
+// ---------- earth ----------
+vec3 shadeEarth(vec3 sp,vec3 n,vec3 vdir){
+  float cont=fbm(sp*2.4+0.55*vec3(fbm(sp*4.5),fbm(sp*4.5+7.7),fbm(sp*4.5+3.1)));
+  float land=smoothstep(0.46,0.53,cont);
+  float lat=abs(sp.y);
+  vec3 ocean=mix(vec3(0.008,0.035,0.100),vec3(0.012,0.070,0.150),fbm4(sp*6.0));
+  float desert=smoothstep(0.25,0.42,lat)*smoothstep(0.55,0.40,lat);
+  vec3 landc=mix(vec3(0.045,0.100,0.030),vec3(0.380,0.270,0.130),desert);
+  landc=mix(landc,vec3(0.150,0.130,0.050),smoothstep(0.35,0.60,cont));
+  float ice=smoothstep(0.80,0.90,lat+0.07*fbm4(sp*8.0));
+  vec3 alb=mix(ocean,landc,land);
+  alb=mix(alb,vec3(0.82,0.86,0.92),ice);
+  float ndl=dot(n,uSunDir);
+  float day=pow(max(ndl,0.0),0.75);
+  vec3 col=alb*(0.05+1.45*day);
+  float cl=smoothstep(0.48,0.78,fbm(sp*3.6+vec3(uTime*0.006,0.0,uTime*0.004)));
+  col=mix(col,vec3(0.90,0.92,0.95)*(0.03+1.25*max(ndl,0.0)),cl*0.85);
+  float night=smoothstep(0.03,-0.15,ndl);
+  float cities=smoothstep(0.60,0.82,fbm(sp*9.5+11.3))*land*(1.0-ice)*night;
+  col+=vec3(1.0,0.72,0.38)*cities*0.6;
+  vec3 hv=normalize(uSunDir-vdir);
+  col+=vec3(1.0,0.95,0.85)*pow(max(dot(n,hv),0.0),120.0)*(1.0-land)*max(ndl,0.0)*0.9;
+  vec3 bhDir=normalize(uBH);
+  float bhl=max(dot(n,bhDir),0.0);
+  col+=alb*vec3(0.60,0.72,1.00)*bhl*uDiskGlow*(0.22+0.55*uFlare);
+  if(uTide>0.12){
+    float ridge=1.0-abs(2.0*fbm(sp*5.5+31.0)-1.0);
+    float thr=mix(1.15,0.855,uTide);
+    float crack=smoothstep(thr,thr+0.05,ridge)*smoothstep(0.12,0.5,uTide);
+    float heat=uTide*uTide*(0.6+0.8*vnoise(sp*14.0));
+    col+=vec3(1.7,0.42,0.07)*crack*heat*2.6;
+  }
+  col=mix(col,blackbody(1500.0+1200.0*fbm4(sp*7.0))*1.7,uBreak*0.78);
+  float fres=pow(1.0-max(dot(n,-vdir),0.0),2.8);
+  col+=vec3(0.22,0.45,0.95)*fres*(0.18+1.1*max(ndl,0.0)+bhl*uDiskGlow*0.35);
+  return col;
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy*2.0-uRes)/uRes.y;
+  vec3 rd=normalize(uCamF+uFovTan*(uv.x*uCamR+uv.y*uCamU));
+  vec3 p=uCamPos;
+  vec3 v=rd;
+  vec3 rel0=p-uBH;
+  vec3 hv=cross(rel0,v);
+  float h2=dot(hv,hv);
+  vec3 col=vec3(0.0);
+  float Tr=1.0;
+  bool hitE=false,captured=false,escaped=false;
+
+  float yPrev=dot(p-uBH,uDiskN);
+  vec3 pPrev=p;
+
+  for(int i=0;i<440;i++){
+    if(i>=uSteps)break;
+    vec3 rel=p-uBH;
+    float r=length(rel);
+    float dt=clamp(0.10*(r-0.95),0.004,60.0);
+    float dy=abs(dot(rel,uDiskN));
+    if(r<32.0)dt=min(dt,max(0.015,dy*0.6+0.008));
+    float de=length(p);
+    if(uBreak<0.92&&de<uEarthR*10.0)dt=min(dt,max(0.0004,abs(de-uEarthR)*0.55+0.0004));
+
+    // velocity-Verlet step of null geodesic: a = -1.5 h^2 x / r^5
+    vec3 a1=-1.5*h2*rel/pow(r,5.0);
+    vec3 pNew=p+v*dt+0.5*a1*dt*dt;
+    vec3 relM=pNew-uBH;
+    float rM=length(relM);
+    vec3 a2=-1.5*h2*relM/pow(rM,5.0);
+    vec3 vNew=v+0.5*(a1+a2)*dt;
+
+    pPrev=p;yPrev=dot(pPrev-uBH,uDiskN);
+    p=pNew;v=vNew;
+    float yNow=dot(p-uBH,uDiskN);
+
+    // disk plane crossing
+    if(yPrev*yNow<0.0){
+      float f=yPrev/(yPrev-yNow);
+      vec3 q=mix(pPrev,p,f);
+      float rq=length(q-uBH);
+      if(rq>2.66&&rq<23.5){
+        float al;
+        vec3 dc=diskShade(q,v,al);
+        col+=Tr*dc*al;
+        Tr*=(1.0-al*0.92);
+        if(Tr<0.02)break;
+      }
+    }
+
+    // debris stream volume
+    streamShade(col,Tr,p,v,dt);
+
+    // atmosphere shell around earth
+    if(uBreak<0.6){
+      float hgt=(de-uEarthR)/(uEarthR*0.07);
+      if(hgt>0.0&&hgt<3.0){
+        float ddat=exp(-hgt*1.5);
+        float dayf=max(dot(normalize(p),uSunDir),0.0)*0.85+0.06;
+        col+=Tr*vec3(0.24,0.48,1.0)*ddat*dt*(0.6/uEarthR)*dayf;
+      }
+    }
+
+    // earth (tidally stretched ellipsoid)
+    if(uBreak<0.92&&de<uEarthR*10.0){
+      vec3 s=pPrev,e=p;
+      vec3 sA=uEarthAx*dot(s,uEarthAx),sP=s-sA;
+      vec3 eA=uEarthAx*dot(e,uEarthAx),eP=e-eA;
+      vec3 so=sA/uEarthS+sP*uEarthSq;
+      vec3 eo=eA/uEarthS+eP*uEarthSq;
+      vec3 dd3=eo-so;
+      float A=dot(dd3,dd3);
+      if(A>1e-18){
+        float Bq=2.0*dot(so,dd3);
+        float Cq=dot(so,so)-uEarthR*uEarthR;
+        float disc=Bq*Bq-4.0*A*Cq;
+        if(disc>0.0){
+          float tt=(-Bq-sqrt(disc))/(2.0*A);
+          if(tt>=0.0&&tt<=1.0){
+            vec3 q1=so+dd3*tt;
+            vec3 al2=uEarthAx*dot(q1,uEarthAx);
+            vec3 pp2=q1-al2;
+            vec3 n=normalize(al2/(uEarthS*uEarthS)+pp2*uEarthS);
+            vec3 sph=normalize(q1/uEarthR);
+            col+=Tr*shadeEarth(sph,n,normalize(v));
+            hitE=true;
+            break;
+          }
+        }
+      }
+    }
+
+    // debris chunks near camera
+    if(uChunkOn>0.01){
+      vec3 sv=p-pPrev;
+      float segLen=length(sv);
+      if(segLen>1e-9){
+        sv/=segLen;
+        for(int ci=0;ci<12;ci++){
+          vec3 cc=uChunks[ci].xyz;
+          float R=uChunks[ci].w;
+          if(R<=0.0)continue;
+          vec3 oc=pPrev-cc;
+          float b=dot(oc,sv);
+          float cq=dot(oc,oc)-R*R;
+          float disc=b*b-cq;
+          if(disc>0.0){
+            float tH=-b-sqrt(disc);
+            if(tH>0.0&&tH<segLen){
+              vec3 hp=pPrev+sv*tH;
+              vec3 n=normalize(hp-cc);
+              float ndl=max(dot(n,uSunDir),0.0);
+              float rock=0.5+0.8*fbm4(hp*260.0+3.0);
+              vec3 bhD=normalize(uBH-hp);
+              float heat=max(dot(n,bhD),0.0);
+              vec3 cc3=vec3(0.055,0.05,0.046)*(0.05+1.2*ndl)*rock;
+              cc3+=blackbody(1100.0+4200.0*heat*heat)*heat*heat*(0.7+uFlare*1.5+uChunkHeat*1.5);
+              float fr=pow(1.0-max(dot(n,-normalize(v)),0.0),2.2);
+              cc3+=vec3(0.55,0.68,1.0)*fr*(0.35*uDiskGlow*(0.3+heat)+0.25);
+              col+=Tr*cc3;
+              hitE=true; // opaque, stop
+              break;
+            }
+          }
+        }
+        if(hitE)break;
+      }
+    }
+
+    if(!hitE){
+      float r2=length(p-uBH);
+      if(r2<1.02){captured=true;break;}
+      if(r2>1100.0&&dot(p-uBH,v)>0.0){escaped=true;break;}
+    }
+  }
+
+  vec3 final3=col;
+  if(!hitE&&!captured){
+    vec3 vd=normalize(v);
+    final3+=Tr*skyColor(vd);
+    float bpar=sqrt(h2);
+    final3+=Tr*vec3(1.0,0.82,0.60)*exp(-pow((bpar-2.62)/0.30,2.0))*uDiskGlow*0.055;
+    final3+=Tr*vec3(0.9,0.8,0.7)*exp(-pow((bpar-2.62)/1.7,2.0))*uDiskGlow*0.016;
+  }
+
+  final3*=uExpo;
+  final3=mix(final3,vec3(dot(final3,vec3(0.299,0.587,0.114)))*vec3(0.72,0.84,1.65),uEnd*0.55);
+  final3*=(1.0+uEnd*2.6);
+  final3=aces(final3);
+  vec2 q2=gl_FragCoord.xy/uRes;
+  final3*=pow(16.0*q2.x*q2.y*(1.0-q2.x)*(1.0-q2.y),0.12);
+  final3+=(h12(gl_FragCoord.xy+vec2(fract(uTime)*137.0))-0.5)*0.014;
+  fragColor=vec4(pow(max(final3,0.0),vec3(1.0/2.2)),1.0);
+}
+`;
+
+function makeShader(type,src,name){
+  var s=gl.createShader(type);
+  gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
+    fail('=== '+name+' compile error ===\n'+gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+var vs=makeShader(gl.VERTEX_SHADER,VERT,'vertex');
+var fs=makeShader(gl.FRAGMENT_SHADER,FRAG,'fragment');
+if(!vs||!fs)fail('(渲染器编译失败，画面将无法显示)');
+var prog=gl.createProgram();
+gl.attachShader(prog,vs);gl.attachShader(prog,fs);gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS))fail('link: '+gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+var vao=gl.createVertexArray();gl.bindVertexArray(vao);
+
+var U={};
+['uRes','uTime','uCamPos','uCamR','uCamU','uCamF','uFovTan','uBH','uSunDir',
+ 'uDiskN','uDiskX','uDiskZ','uEarthR','uEarthS','uEarthSq','uEarthAx',
+ 'uTide','uBreak','uDiskGlow','uFlare','uFlarePhi','uStreamOn','uStreamW','uChunkOn','uChunkHeat',
+ 'uExpo','uEnd','uGalN','uSteps'].forEach(function(n){U[n]=gl.getUniformLocation(prog,n);});
+U.uStreamPts=gl.getUniformLocation(prog,'uStreamPts[0]');
+U.uChunks=gl.getUniformLocation(prog,'uChunks[0]');
+
+// ============ constants (units: r_s = 1) ============
+var RE=0.0216;            // earth radius in r_s
+var ROCHE=87.0;           // roche limit distance
+var EARTH=vec3(0,0,0);    // earth at origin
+function vec3(x,y,z){return new Float32Array([x,y,z]);}
+function v3(x,y,z){return [x,y,z];}
+function add(a,b){return [a[0]+b[0],a[1]+b[1],a[2]+b[2]];}
+function sub(a,b){return [a[0]-b[0],a[1]-b[1],a[2]-b[2]];}
+function scl(a,s){return [a[0]*s,a[1]*s,a[2]*s];}
+function dot3(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+function norm(a){var l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l];}
+function mixv(a,b,f){return [a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];}
+function rotAxis(v,ax,ang){ // Rodrigues
+  var c=Math.cos(ang),s=Math.sin(ang);
+  var cr=cross(ax,v),d=dot3(ax,v)*(1-c);
+  return [v[0]*c+cr[0]*s+ax[0]*d, v[1]*c+cr[1]*s+ax[1]*d, v[2]*c+cr[2]*s+ax[2]*d];
+}
+function bez(A,C,B,t){
+  var u=1-t;
+  return [u*u*A[0]+2*u*t*C[0]+t*t*B[0], u*u*A[1]+2*u*t*C[1]+t*t*B[1], u*u*A[2]+2*u*t*C[2]+t*t*B[2]];
+}
+function sstep(a,b,x){x=Math.min(1,Math.max(0,(x-a)/(b-a)));return x*x*(3-2*x);}
+function track(keys,t){
+  if(t<=keys[0][0])return keys[0][1];
+  for(var i=0;i<keys.length-1;i++){
+    var a=keys[i],b=keys[i+1];
+    if(t<=b[0]){var f=(t-a[0])/(b[0]-a[0]);f=f*f*(3-2*f);return a[1]+(b[1]-a[1])*f;}
+  }
+  return keys[keys.length-1][1];
+}
+function trackV(keys,t){
+  if(t<=keys[0][0])return keys[0][1].slice();
+  for(var i=0;i<keys.length-1;i++){
+    var a=keys[i],b=keys[i+1];
+    if(t<=b[0]){var f=(t-a[0])/(b[0]-a[0]);f=f*f*(3-2*f);return mixv(a[1],b[1],f);}
+  }
+  return keys[keys.length-1][1].slice();
+}
+
+var DK=[[0,900],[10,780],[20,640],[30,500],[40,360],[48,255],[54,185],[60,132],[64,106],[68,88],
+        [72,73],[76,62],[82,46],[88,33],[94,21],[100,10]];
+var SUN=norm([-0.55,0.25,0.65]);
+var GALN=norm([0.45,0.80,0.38]);
+var DISKN=norm([0.10,0.97,0.22]);
+var DISKX=norm(cross(DISKN,[0,0,1]));
+var DISKZ=cross(DISKX,DISKN);
+var ENTRY0=norm([0.28,-0.10,-0.95]);
+
+// ============ state ============
+var animT=Q.has('t')?parseFloat(Q.get('t'))||0:0;
+var TOTAL=101;
+var playing=false;
+var speed=parseFloat(Q.get('speed'))||1;
+var quality=Q.get('scale')!=null?(parseInt(Q.get('scale'))||1):1;
+var renderScales=[0.5,0.72,1.0];
+var stepsOpts=[210,290,380];
+var fovZoom=1.0;
+var yaw=0,pitch=0,dragging=false,lastX=0,lastY=0;
+var muted=false,audio=null;
+var autoStart=Q.has('t')||Q.get('auto')==='1';
+
+// ============ audio ============
+function initAudio(){
+  if(audio)return;
+  try{
+    var ctx=new (window.AudioContext||window.webkitAudioContext)();
+    var master=ctx.createGain();master.gain.value=0.5;master.connect(ctx.destination);
+    var len=2*ctx.sampleRate;
+    var buf=ctx.createBuffer(1,len,ctx.sampleRate);
+    var d=buf.getChannelData(0);
+    var last=0;
+    for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.2;}
+    var noise=ctx.createBufferSource();noise.buffer=buf;noise.loop=true;
+    var lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=70;
+    var gRum=ctx.createGain();gRum.gain.value=0.0;
+    noise.connect(lp);lp.connect(gRum);gRum.connect(master);noise.start();
+    var o1=ctx.createOscillator();o1.frequency.value=36;o1.type='sine';
+    var o2=ctx.createOscillator();o2.frequency.value=54.5;o2.type='sine';
+    var gDr=ctx.createGain();gDr.gain.value=0.0;
+    o1.connect(gDr);o2.connect(gDr);gDr.connect(master);o1.start();o2.start();
+    var bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=1900;bp.Q.value=6;
+    var gSh=ctx.createGain();gSh.gain.value=0.0;
+    noise.connect(bp);bp.connect(gSh);gSh.connect(master);
+    audio={ctx:ctx,master:master,lp:lp,gRum:gRum,gDr:gDr,gSh:gSh};
+  }catch(e){}
+}
+function updateAudio(t,tideG,brk,end){
+  if(!audio||muted)return;
+  var T=audio.ctx.currentTime;
+  var q=Math.min(1,tideG*0.85+brk*0.5+sstep(76,92,t)*0.5);
+  audio.gRum.gain.setTargetAtTime(0.05+0.6*q,T,0.2);
+  audio.lp.frequency.setTargetAtTime(70+750*Math.min(1,q),T,0.3);
+  audio.gDr.gain.setTargetAtTime(0.04+0.10*Math.min(1,tideG+brk),T,0.3);
+  audio.gSh.gain.setTargetAtTime(0.14*sstep(70,90,t)*(1-end),T,0.4);
+}
+
+// ============ captions ============
+var CAPS=[
+ [2,8,'公元 2087 年。一个 10⁵ 倍太阳质量的黑洞，正从 2.7 亿公里外逼近地球。','它在穿越银河系悬臂时吸积星际气体，拖着一只炽热的吸积盘'],
+ [10,8,'黑洞的"阴影"半径约为 2.6 r_s —— 引力透镜把视界的影像放大了','吸积盘最内缘是最内稳定圆轨道（ISCO）= 3 r_s，此处轨道速度约为光速的一半'],
+ [18,8,'引力透镜：光线在时空中弯曲','黑洞正后方的星光被拉成一个光环 —— 「爱因斯坦环」'],
+ [28,8,'多普勒集束效应：吸积盘朝向观察者转来的一侧更亮、更蓝','辐射强度 ∝ δ³⁽⁴⁾，δ 为相对论多普勒因子 —— 这是相对论性束流，不是盘本身的亮度差'],
+ [40,8,'潮汐力登场：差分引力 ∝ GM·R⊕ / d³，随距离立方增长','地壳应力累积 —— 全球性地震开始了'],
+ [50,7,'潮汐隆起正在撕裂岩石圈：超级地震、千米级海啸','背向黑洞一面的地壳被"抬"起，大气开始向黑洞方向流失'],
+ [58,7,'接近洛希极限 d ≈ 2.6×10⁷ km：此处潮汐加速度 ≈ 1 g','地球自身引力即将无法束缚自己 —— 行星撕裂倒计时'],
+ [66,6,'越过洛希极限 —— 潮汐力超过地球自引力','地球解体'],
+ [73,7,'碎片流进入坠落轨道：约半数物质被直接吞噬','其余物质获得角动量，螺旋坠入，形成新的吸积流'],
+ [81,7,'引力势能转化为辐射：碎片流撞击吸积盘，亮度暴涨','本观测站被碎片流捕获，一同坠落'],
+ [89,7,'自由坠落：β = v/c → 1，前方的光蓝移、增亮','潮汐梯度开始沿坠落方向拉长一切物体 —— "面条化"'],
+ [95,6,'接近视界：对远方宇宙，你的影像将永远冻结在视界上','而对坠落者，穿过视界只需有限的固有时'],
+];
+var PHASES=[[0,'接近阶段','APPROACH'],[42,'潮汐阶段','TIDAL STRESS'],[58,'洛希极限','ROCHE LIMIT'],
+            [66,'行星解体','DISRUPTION'],[73,'吸积爆发','ACCRETION'],[89,'坠　落','INFALL'],
+            [100.5,'视界以内','BEYOND THE HORIZON']];
+
+// ============ camera ============
+// vantage on Earth's night side (-X), so Earth (lower-left) and the incoming
+// black hole (+X, beyond Earth's limb) share the frame
+var camPosK=[[0,[-0.055,0.010,0.051]],[30,[-0.048,0.008,0.055]],[48,[-0.040,0.006,0.058]],
+             [62,[-0.032,0.004,0.060]],[70,[-0.024,0.002,0.062]]];
+var camLookK=[[0,[0.90,-0.05,-0.42]],[30,[0.94,-0.03,-0.34]],[48,[0.96,0.00,-0.28]],
+              [62,[0.86,-0.03,-0.51]],[70,[0.83,-0.02,-0.56]]];
+var infallU=[[70,0.001],[74,0.08],[78,0.22],[82,0.42],[86,0.62],[90,0.77],[94,0.875],[96.5,0.925]];
+var fovK=[[0,60],[62,66],[70,68],[84,76],[96,92],[100,104]];
+var rollK=[[0,0],[70,0.02],[84,0.30],[100,1.05]];
+var shakeK=[[42,0],[52,0.0004],[60,0.0016],[66,0.0045],[69,0.008],[73,0.005],[82,0.0028],[94,0.0015],[100,0.0012]];
+
+function sceneAt(t){
+  var d=track(DK,t);
+  var bh=[d,0,0];
+  var tideG=Math.pow(ROCHE/d,3);
+  var tide=Math.min(1,Math.max(0,(tideG-0.04)/0.92));
+  var brk=sstep(68,76.5,t);
+  var earthScale=RE*(1-0.93*sstep(0.10,0.72,brk));
+  var earthOn=brk<0.95;
+  var flare=Math.exp(-Math.pow((t-69.8)/2.6,2))*1.0+0.4*sstep(73,80,t)*(1-0.6*sstep(90,99,t));
+  var diskGlow=1.0+0.9*sstep(64,78,t)+1.1*flare;
+  var expo=1.0/(1.0+1.6*sstep(72,92,t));
+  expo*=1.0+0.7*Math.exp(-Math.pow((t-69.8)/1.8,2));
+  expo*=1.0+3.5*sstep(97.2,100.2,t);
+  var end=sstep(99.4,100.35,t);
+
+  // stream geometry
+  var streamOn=sstep(68.5,70.5,t);
+  var entryDir=rotAxis(ENTRY0,DISKN,-0.55-(t-70)*0.085);
+  var B=add(bh,scl(entryDir,6.5));
+  var A=[0,0,0];
+  var sag=Math.min(1,d/70);
+  var C=add(mixv(A,B,0.45),[0,-2.6*sag,1.4*sag]);
+  var streamPts=new Float32Array(60);
+  var tangents=[];
+  for(var i=0;i<20;i++){
+    var u=i/19;
+    var P1=bez(A,C,B,u);
+    streamPts[i*3]=P1[0];streamPts[i*3+1]=P1[1];streamPts[i*3+2]=P1[2];
+    tangents.push(norm(sub(bez(A,C,B,Math.min(1,u+0.02)),P1)));
+  }
+  var streamW=0.60*(1.0-0.42*sstep(70,95,t));
+  var flarePhi=Math.atan2(dot3(sub(B,bh),DISKZ),dot3(sub(B,bh),DISKX));
+
+  // camera
+  var pos=trackV(camPosK,t);
+  var look=norm(trackV(camLookK,t));
+  if(t>70){
+    var u=track(infallU,t);
+    var orbitPos=trackV(camPosK,70);
+    var streamPos=bez(A,C,B,u);
+    var blend=sstep(70,76,t);
+    pos=mixv(orbitPos,streamPos,blend);
+    if(t>96){
+      var f=(t-96)/4.2;f=f*f;
+      pos=mixv(pos,add(bh,scl(norm(sub(bh,pos))||[1,0,0],1.30)),Math.min(1,f));
+    }
+    var toBH=norm(sub(bh,pos));
+    var ti=Math.min(19,Math.max(0,Math.round(u*19)));
+    look=norm(add(norm(add(scl(look,1-blend),scl(toBH,blend))),scl(tangents[ti],-0.25*(1-sstep(70,77,t)))));
+  }
+  var fov=track(fovK,t)*fovZoom;
+  var roll=track(rollK,t);
+  var shk=track(shakeK,t);
+  var s1=Math.sin(t*13.7),s2=Math.sin(t*17.3+2.1),s3=Math.sin(t*11.1+4.2);
+  var s4=Math.sin(t*23.7+1.3),s5=Math.sin(t*29.3),s6=Math.sin(t*19.7+3.3);
+  pos=add(pos,scl([s1,s2,s3],shk));
+  look=norm(add(look,scl([s4,s5,s6],shk*14)));
+
+  // chunks
+  var chunkOn=sstep(0.18,0.45,brk)*sstep(63,66,t);
+  var chunkHeat=Math.max(0,1.2-brk*1.1);
+  var chunks=new Float32Array(48);
+  var ucam=t>70?track(infallU,t):0;
+  for(var ci=0;ci<12;ci++){
+    var h1=(ci*0.618033988)%1,h2=((ci+1)*0.3819660113)%1,h3=((ci+2)*0.7548776662)%1;
+    var uc;
+    if(ci<4){ // companions near camera
+      uc=Math.min(0.97,Math.max(0.02,ucam-0.06+0.12*h1));
+    }else{
+      uc=0.05+0.9*((h1+0.03*Math.sin(t*0.2+ci))%1);
+    }
+    var P1=bez(A,C,B,uc);
+    var wdt=streamW*(0.22+0.95*uc)*1.7;
+    var off=[Math.sin(t*(0.4+h2)+ci*2.1)*wdt,0.5*Math.sin(t*(0.3+h3)+ci*1.7)*wdt,Math.cos(t*(0.35+h1)+ci)*wdt];
+    if(ci<4){
+      var tang=tangents[Math.min(19,Math.max(0,Math.round(uc*19)))];
+      var perp=norm(cross(tang,[0,1,0.01]));
+      var up2=norm(cross(perp,tang));
+      var rr=(0.010+0.025*h2);
+      var ang2=t*(0.5+h1)*2+ci*1.9;
+      P1=add(pos,add(scl(perp,Math.cos(ang2)*rr),scl(up2,Math.sin(ang2)*rr*0.7+rr*0.3)));
+      off=[0,0,0];
+    }
+    var rad=(0.0005+0.0022*h3)*(ci<4?1.2:1);
+    chunks[ci*4]=P1[0]+off[0];chunks[ci*4+1]=P1[1]+off[1];chunks[ci*4+2]=P1[2]+off[2];chunks[ci*4+3]=rad;
+  }
+
+  // camera basis with yaw/pitch/roll
+  var up0=[0,1,0];
+  var right=norm(cross(look,up0));
+  var up=cross(right,look);
+  var cy=Math.cos(yaw),sy=Math.sin(yaw);
+  look=norm(add(scl(look,cy),scl(right,sy)));
+  right=norm(cross(look,up0));
+  up=cross(right,look);
+  var cp=Math.cos(pitch),sp=Math.sin(pitch);
+  look=norm(add(scl(look,cp),scl(up,sp)));
+  right=norm(cross(look,up0));
+  up=cross(right,look);
+  var cr=Math.cos(roll),sr=Math.sin(roll);
+  var r2=add(scl(right,cr),scl(up,sr));
+  var u2=add(scl(up,cr),scl(right,-sr));
+
+  var rCam=Math.hypot(pos[0]-bh[0],pos[1]-bh[1],pos[2]-bh[2]);
+
+  return {
+    t:t,d:d,bh:bh,tide:tide,tideG:tideG,brk:brk,flare:flare,diskGlow:diskGlow,
+    expo:expo,end:end,streamOn:streamOn,streamPts:streamPts,streamW:streamW,flarePhi:flarePhi,
+    pos:pos,look:look,right:r2,up:u2,fov:fov,earthR:earthScale,earthOn:earthOn,
+    chunkOn:chunkOn,chunks:chunks,chunkHeat:chunkHeat,rCam:rCam
+  };
+}
+
+// ============ render ============
+function resize(){
+  var dpr=Math.min(window.devicePixelRatio||1,1.75);
+  var s=renderScales[quality];
+  var w=Math.max(2,Math.round(canvas.clientWidth*dpr*s));
+  var h=Math.max(2,Math.round(canvas.clientHeight*dpr*s));
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+}
+window.addEventListener('resize',resize);
+
+var startEl=document.getElementById('start');
+var endEl=document.getElementById('endcard');
+var btnPlay=document.getElementById('btnPlay');
+var scrub=document.getElementById('scrub');
+var btnSpd=document.getElementById('btnSpd');
+var btnQ=document.getElementById('btnQ');
+var btnMute=document.getElementById('btnMute');
+var capText=document.getElementById('capText');
+var capSub=document.getElementById('capSub');
+var phaseT=document.getElementById('phaseT');
+var phaseE=document.getElementById('phaseE');
+var lvD=document.getElementById('lvD'),lvT=document.getElementById('lvT'),
+    lvG=document.getElementById('lvG'),lvB=document.getElementById('lvB');
+var flashEl=document.getElementById('flash');
+var fpsEl=document.getElementById('fps');
+var speeds=[0.5,1,2,4],spdIdx=1;
+var qNames=['低','中','高'];
+
+function startShow(){
+  startEl.classList.add('hide');
+  playing=true;btnPlay.textContent='⏸ 暂停';
+  initAudio();
+}
+document.getElementById('btnStart').addEventListener('click',startShow);
+if(autoStart){startEl.classList.add('hide');playing=!Q.get('pause');}
+
+btnPlay.addEventListener('click',function(){
+  playing=!playing;btnPlay.textContent=playing?'⏸ 暂停':'▶ 播放';
+});
+btnSpd.addEventListener('click',function(){
+  spdIdx=(spdIdx+1)%speeds.length;speed=speeds[spdIdx];
+  btnSpd.textContent='×'+speed;btnSpd.classList.toggle('on',speed!==1);
+});
+btnQ.addEventListener('click',function(){
+  quality=(quality+1)%3;btnQ.textContent='画质:'+qNames[quality];
+});
+btnMute.addEventListener('click',function(){
+  muted=!muted;
+  if(audio)audio.master.gain.value=muted?0:0.5;
+  btnMute.textContent=muted?'🔇':'🔊';
+});
+document.getElementById('btnRe').addEventListener('click',function(){animT=0;endEl.classList.remove('show');playing=true;btnPlay.textContent='⏸ 暂停';});
+document.getElementById('btnReplay').addEventListener('click',function(){animT=0;endEl.classList.remove('show');playing=true;});
+scrub.addEventListener('input',function(){animT=parseFloat(scrub.value);endEl.classList.remove('show');});
+window.addEventListener('keydown',function(e){
+  if(e.code==='Space'){e.preventDefault();btnPlay.click();}
+});
+canvas.addEventListener('pointerdown',function(e){dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.classList.add('drag');canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointerup',function(){dragging=false;canvas.classList.remove('drag');});
+canvas.addEventListener('pointermove',function(e){
+  if(!dragging)return;
+  yaw+=(e.clientX-lastX)*0.0022;
+  pitch+=(e.clientY-lastY)*0.0022;
+  pitch=Math.max(-0.9,Math.min(0.9,pitch));
+  yaw=Math.max(-1.2,Math.min(1.2,yaw));
+  lastX=e.clientX;lastY=e.clientY;
+});
+canvas.addEventListener('wheel',function(e){
+  e.preventDefault();
+  fovZoom*=(1+e.deltaY*0.0009);
+  fovZoom=Math.max(0.6,Math.min(1.6,fovZoom));
+},{passive:false});
+
+window.__bh={setT:function(t){animT=t;endEl.classList.remove('show');},get:function(){return animT;},
+  debug:function(){var S=sceneAt(animT);return {t:animT,d:S.d,bh:S.bh,pos:S.pos,look:S.look,rCam:S.rCam,
+    streamOn:S.streamOn,chunkOn:S.chunkOn,earthR:S.earthR,tide:S.tide,brk:S.brk,expo:S.expo};}};
+
+// perf auto-tune
+var frames=0,fpsAcc=0,perfT=0,dropped=0,badWins=0;
+
+function fmtDist(d){
+  var km=d*295000;
+  if(km>=1e8)return (km/1e8).toFixed(2)+' 亿 km';
+  if(km>=1e4)return (km/1e4).toFixed(0)+' 万 km';
+  return km.toFixed(0)+' km';
+}
+
+var prevStamp=performance.now();
+function frame(stamp){
+  var dtms=stamp-prevStamp;prevStamp=stamp;
+  var dt=Math.min(0.1,dtms/1000);
+  if(playing)animT+=dt*speed;
+  if(animT>=TOTAL){animT=TOTAL;playing=false;btnPlay.textContent='▶ 播放';endEl.classList.add('show');}
+  var S=sceneAt(animT);
+
+  // HUD
+  lvD.textContent=fmtDist(S.d);
+  lvT.textContent=S.tideG>=0.01?S.tideG.toFixed(2)+' g':(S.tideG*1000).toFixed(1)+' mg';
+  var dil=Math.sqrt(Math.max(0,1-1/Math.max(S.rCam,1.0001)));
+  lvG.textContent=dil.toFixed(4);
+  var beta=Math.min(0.985,Math.sqrt(1/Math.max(S.rCam,1.02)));
+  lvB.textContent=S.rCam<60?beta.toFixed(3):'—';
+  scrub.value=animT.toFixed(1);
+  for(var pi=PHASES.length-1;pi>=0;pi--){if(animT>=PHASES[pi][0]){phaseT.textContent=PHASES[pi][1];phaseE.textContent=PHASES[pi][2];break;}}
+  var cap=null,capS=null;
+  for(var ci=0;ci<CAPS.length;ci++){var c=CAPS[ci];if(animT>=c[0]&&animT<c[0]+c[1]){cap=c[2];capS=c[3];break;}}
+  if(cap){capText.textContent=cap;capSub.textContent=capS||'';capText.parentElement.style.opacity=1;}
+  else{capText.parentElement.style.opacity=0;}
+  if(S.brk>0.02&&S.brk<0.2&&Math.abs(animT-68.6)<0.25){flashEl.style.opacity=String(0.75*(1-Math.abs(animT-68.6)/0.25));}
+  else flashEl.style.opacity='0';
+
+  updateAudio(animT,S.tideG,S.brk,S.end);
+
+  resize();
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.uniform2f(U.uRes,canvas.width,canvas.height);
+  gl.uniform1f(U.uTime,animT);
+  gl.uniform3fv(U.uCamPos,S.pos);
+  gl.uniform3fv(U.uCamR,S.right);
+  gl.uniform3fv(U.uCamU,S.up);
+  gl.uniform3fv(U.uCamF,S.look);
+  gl.uniform1f(U.uFovTan,Math.tan(S.fov*Math.PI/360));
+  gl.uniform3fv(U.uBH,S.bh);
+  gl.uniform3fv(U.uSunDir,SUN);
+  gl.uniform3fv(U.uDiskN,DISKN);
+  gl.uniform3fv(U.uDiskX,DISKX);
+  gl.uniform3fv(U.uDiskZ,DISKZ);
+  gl.uniform1f(U.uEarthR,S.earthR);
+  gl.uniform1f(U.uEarthS,1+0.36*S.tide);
+  gl.uniform1f(U.uEarthSq,Math.sqrt(1+0.36*S.tide));
+  gl.uniform3fv(U.uEarthAx,norm(S.bh));
+  gl.uniform1f(U.uTide,S.tide);
+  gl.uniform1f(U.uBreak,S.brk);
+  gl.uniform1f(U.uDiskGlow,S.diskGlow);
+  gl.uniform1f(U.uFlare,S.flare);
+  gl.uniform1f(U.uFlarePhi,S.flarePhi);
+  gl.uniform1f(U.uStreamOn,S.streamOn);
+  gl.uniform1f(U.uStreamW,S.streamW);
+  gl.uniform1f(U.uChunkOn,S.chunkOn);
+  gl.uniform1f(U.uChunkHeat,S.chunkHeat);
+  gl.uniform3fv(U.uStreamPts,S.streamPts);
+  gl.uniform4fv(U.uChunks,S.chunks);
+  gl.uniform1f(U.uExpo,S.expo);
+  gl.uniform1f(U.uEnd,S.end);
+  gl.uniform3fv(U.uGalN,GALN);
+  gl.uniform1i(U.uSteps,stepsOpts[quality]);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  // perf meter
+  frames++;fpsAcc+=dtms;perfT+=dtms;
+  if(perfT>2000){
+    var fps=1000*frames/fpsAcc;
+    fpsEl.textContent=fps.toFixed(0)+' fps · '+canvas.width+'×'+canvas.height+' · '+stepsOpts[quality]+' 步';
+    if(dropped<2&&quality>0&&animT>6){
+      if(fps<26)badWins++;else badWins=0;
+      if(badWins>=2){quality--;dropped++;badWins=0;btnQ.textContent='画质:'+qNames[quality];}
+    }
+    frames=0;fpsAcc=0;perfT=0;
+  }
+  requestAnimationFrame(frame);
+}
+btnQ.textContent='画质:'+qNames[quality];
+btnSpd.textContent='×'+speed;
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3d143096cb8c3e2',t:'MTc4OTc0NDA2Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
