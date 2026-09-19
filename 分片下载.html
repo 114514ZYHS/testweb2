@@ -209,6 +209,11 @@
 
     <div class="card">
         <h2>文件信息</h2>
+        <div class="opt-row">
+            <label for="fileSel">选择文件</label>
+            <select id="fileSel"></select>
+            <span class="hint" id="fileHint">切换后会自动载入对应的分片清单</span>
+        </div>
         <table class="meta-table">
             <tr><td>文件名</td><td class="mono" id="mName">—</td></tr>
             <tr><td>大小</td><td class="mono" id="mSize">—</td></tr>
@@ -240,7 +245,11 @@
                 <option value="6">6</option>
                 <option value="8">8</option>
                 <option value="12">12</option>
-                <option value="16">16（最猛）</option>
+                <option value="16">16</option>
+                <option value="24">24</option>
+                <option value="32">32</option>
+                <option value="48">48</option>
+                <option value="64">64（最猛）</option>
             </select>
             <span class="hint" id="concHint">同时拉取的分片个数，网络差就调小</span>
         </div>
@@ -262,7 +271,7 @@
    分片下载 + 浏览器端合成
    -------------------------------------------------------------------------
    原理：
-     1. 原始大文件被切成 N 个 .partNN 分片，和 manifest.json 一起放在 parts/ 目录
+     1. 原始大文件被切成 N 个 .partNN 分片，和对应的 manifest 一起放在 parts/ 目录
      2. 浏览器按并发数同时 fetch 这些分片，拿到的 ArrayBuffer 存在内存里
      3. 全部到齐后 new Blob([...buffers]) 拼成完整文件，触发保存
 
@@ -270,13 +279,29 @@
      - 分片是按字节精确切的，顺序不能乱，manifest 里的 order 决定拼接顺序
      - 不支持 Range 请求也不要紧，因为根本没用 Range，是整片下载
      - 内存占用约为文件大小，几十 MB 的文件没问题，上 G 的要慎重
+     - 页面支持多个文件（FILES 数组），靠下拉框切换，各自读自己的 manifest
    ========================================================================= */
 
-var MANIFEST = "parts/manifest.json";
+/* 可选文件清单。加新文件就往这里加一条，同时把分片放进 parts/。 */
+var FILES = [
+    {
+        id: "mihomo",
+        label: "mihomo 内核（Linux amd64）",
+        manifest: "parts/manifest.json"
+    },
+    {
+        id: "cmfa",
+        label: "Clash Meta for Android（APK）",
+        manifest: "parts/manifest-cmfa.json"
+    }
+];
+var FILE_KEY = "split.file";        /* 记住上次选的文件 */
+
 var CONC_KEY = "split.conc";        /* 记住上次选的线程数 */
-var CONC_MAX = 16;                  /* 上限，防止有人填个 999 把浏览器打爆 */
+var CONC_MAX = 64;                  /* 上限。分片总数一般也就几十个，超过这个数没意义 */
 
 var state = {
+    file: FILES[0],  // 当前选中的文件条目
     manifest: null,
     buffers: [],     // 每个分片的 ArrayBuffer，null 表示还没到
     status: [],      // 'wait' | 'doing' | 'done' | 'fail'
@@ -305,8 +330,9 @@ function log(msg, cls) {
 }
 
 /* ---------- 载入清单 ---------- */
-function loadManifest() {
-    return fetch(MANIFEST, { cache: "no-store" })
+function loadManifest(src) {
+    var url = src || state.file.manifest;
+    return fetch(url, { cache: "no-store" })
         .then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
             return r.json();
@@ -514,6 +540,7 @@ $("btnStart").addEventListener("click", function () {
     $("btnStart").disabled = true;
     $("btnCancel").disabled = false;
     $("concSel").disabled = true;
+    $("fileSel").disabled = true;
     $("btnRetry").classList.add("hidden");
     $("btnSave").classList.add("hidden");
     $("status").textContent = "正在下载…";
@@ -527,6 +554,7 @@ $("btnStart").addEventListener("click", function () {
         stopSpeed();
         $("btnCancel").disabled = true;
         $("concSel").disabled = false;
+        $("fileSel").disabled = false;
         if (state.cancelled) {
             $("status").textContent = "已取消";
             log("已取消。", "er");
@@ -588,6 +616,7 @@ $("btnRetry").addEventListener("click", function () {
     $("btnStart").disabled = true;
     $("btnCancel").disabled = false;
     $("concSel").disabled = true;
+    $("fileSel").disabled = true;
     log("重试失败分片…", "hi");
     startSpeed();
     runPool().then(function () {
@@ -595,6 +624,7 @@ $("btnRetry").addEventListener("click", function () {
         stopSpeed();
         $("btnCancel").disabled = true;
         $("concSel").disabled = false;
+        $("fileSel").disabled = false;
         var failed = state.status.filter(function (s) { return s === "fail"; }).length;
         if (failed) {
             $("btnRetry").classList.remove("hidden");
@@ -621,27 +651,84 @@ function applyConc(n, remember) {
     state.conc = n;
     $("concSel").value = String(n);
     if (remember) { try { localStorage.setItem(CONC_KEY, String(n)); } catch (e) {} }
-    $("concHint").textContent = n <= 2 ? "同时拉取 " + n + " 个分片，慢但稳"
-                            : n >= 12 ? "同时拉取 " + n + " 个分片，快但吃带宽"
-                            : "同时拉取 " + n + " 个分片，网络差就调小";
+    /* 提示分三档，但分片总数不够时并发开再大也没用，所以顺带提一句 */
+    var total = state.manifest ? state.manifest.parts.length : 0;
+    var tail = total && n > total ? "（本文件只有 " + total + " 片，实际按 " + total + " 跑）" : "";
+    $("concHint").textContent = n <= 2 ? "同时拉取 " + n + " 个分片，慢但稳" + tail
+                            : n >= 24 ? "同时拉取 " + n + " 个分片，很吃带宽" + tail
+                            : n >= 12 ? "同时拉取 " + n + " 个分片，快但吃带宽" + tail
+                            : "同时拉取 " + n + " 个分片，网络差就调小" + tail;
 }
 $("concSel").addEventListener("change", function () {
     applyConc(this.value, true);
 });
 
+/* ---------- 文件选择 ---------- */
+function applyFile(f, remember) {
+    state.file = f;
+    $("fileSel").value = f.id;
+    if (remember) { try { localStorage.setItem(FILE_KEY, f.id); } catch (e) {} }
+    $("fileHint").textContent = "已切换，正在载入清单…";
+    return loadManifest(f.manifest)
+        .then(function (m) {
+            $("fileHint").textContent = "共 " + m.parts.length + " 个分片，可以开始了";
+            log("已切换文件：" + m.name + "（" + m.parts.length + " 片）", "hi");
+            applyConc(state.conc, false);   /* 刷新提示里的分片数 */
+            resetRun();
+        })
+        .catch(function (e) {
+            $("fileHint").textContent = "清单载入失败：" + e.message;
+            log("清单载入失败：" + e.message, "er");
+        });
+}
+
+function resetRun() {
+    state.running = false;
+    state.cancelled = false;
+    state.bytesDone = 0;
+    stopSpeed();
+    if (state.manifest) {
+        state.buffers = state.manifest.parts.map(function () { return null; });
+        state.status = state.manifest.parts.map(function () { return "wait"; });
+        renderPieces();
+        renderSegBar();
+    }
+    $("barFill").style.width = "0%";
+    $("status").textContent = "等待开始";
+    $("btnStart").disabled = false;
+    $("btnCancel").disabled = true;
+    $("btnRetry").classList.add("hidden");
+    $("btnSave").classList.add("hidden");
+    $("concSel").disabled = false;
+    $("fileSel").disabled = false;
+}
+
 /* ---------- 初始化 ---------- */
+(function initFile() {
+    var sel = $("fileSel");
+    FILES.forEach(function (f) {
+        var o = document.createElement("option");
+        o.value = f.id;
+        o.textContent = f.label;
+        sel.appendChild(o);
+    });
+    var savedId = null;
+    try { savedId = localStorage.getItem(FILE_KEY); } catch (e) {}
+    var chosen = FILES.filter(function (f) { return f.id === savedId; })[0] || FILES[0];
+    sel.addEventListener("change", function () {
+        if (state.running) { this.value = state.file.id; return; }   /* 下载中不让切 */
+        var f = FILES.filter(function (x) { return x.id === this.value; }.bind(this))[0];
+        if (f) applyFile(f, true);
+    });
+    applyFile(chosen, false);
+})();
+
 (function initConc() {
     var saved = 4;
     try { saved = parseInt(localStorage.getItem(CONC_KEY), 10) || 4; } catch (e) {}
     applyConc(saved, false);
 })();
 
-loadManifest().catch(function (e) {
-    $("status").textContent = "清单读取失败";
-    log("读不到 " + MANIFEST + "：" + e.message, "er");
-    log("如果你是在本地双击打开的，浏览器会禁止读取同目录文件——放到网站上访问即可。", "hi");
-    $("btnStart").disabled = true;
-});
 </script>
 </body>
 </html>
