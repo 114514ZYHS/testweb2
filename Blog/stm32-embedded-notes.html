@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>从一块 STM32F401 说开：嵌入式入门绕不开的几件事 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    .tbl { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+    .tbl th, .tbl td { border: 1px solid #d0d7de; padding: 7px 10px; text-align: left; }
+    .tbl th { background: #f6f8fa; font-weight: 600; }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .steps { counter-reset: s; list-style: none; padding-left: 0; }
+    .steps > li {
+        counter-increment: s; position: relative;
+        padding-left: 34px; margin: 14px 0;
+    }
+    .steps > li::before {
+        content: counter(s);
+        position: absolute; left: 0; top: 1px;
+        width: 22px; height: 22px; line-height: 22px;
+        text-align: center; font-size: 12px; font-weight: 600;
+        background: #0969da; color: #ffffff;
+    }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        .tbl th, .tbl td { border-color: #30363d; }
+        .tbl th { background: #161b22; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+        .tbl { font-size: 13px; }
+    }
+</style>
+</head>
+<body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>从一块 STM32F401 说开：嵌入式入门绕不开的几件事</h1>
+    <div class="meta">2026-09-19 · 硬件 · 嵌入式</div>
+
+    <div class="article">
+        <p>STM32F401CCU6 是一块很适合当入门平台的芯片：价格便宜、资料多、
+        性能比经典的 F103 强不少，但复杂度又远没到 Cortex-M7 那种程度。
+        用它做一个多传感器采集的小项目，几乎能把嵌入式入门的所有基础问题都碰到一遍。</p>
+
+        <p>这篇不写代码清单，写的是<b>踩过之后才明白的那几件事</b>。这些道理在手册里都有，
+        但手册不会告诉你「哪一条真正会让你卡住」。</p>
+
+        <h2>一、先搞清楚的规格边界</h2>
+
+        <p>选芯片之前，把参数表看透能省掉后面很多返工。以 F401CCU6 为例：</p>
+
+        <table class="tbl">
+            <tr><th>项目</th><th>参数</th><th>意味着什么</th></tr>
+            <tr><td>内核</td><td>Cortex-M4 @ 最高 84 MHz</td><td>带单精度 FPU，浮点运算不用软件模拟</td></tr>
+            <tr><td>FPU 精度</td><td>仅单精度（float）</td><td><span class="hl">double 会退化成软件运算，慢很多</span></td></tr>
+            <tr><td>Flash</td><td>256 KB</td><td>上完整 HAL 库会吃掉相当一部分</td></tr>
+            <tr><td>RAM</td><td>64 KB</td><td>大数组、大缓冲区要提前算计好</td></tr>
+            <tr><td>封装</td><td>UFQFPN48</td><td>引脚密、无引脚伸出，手工焊有难度</td></tr>
+        </table>
+
+        <div class="note">
+            <b>FPU 只支持单精度，这一条很容易被忽略。</b>M4 的 FPU 是单精度的，
+            代码里如果用 <code>double</code>，编译器不会报错，但运算会走软件库，
+            速度掉一大截。<b>嵌入式里除非确有必要，浮点一律用 <code>float</code>。</b>
+            这一点在做传感器数据滤波时尤其明显。
+        </div>
+
+        <h2>二、时钟树：出错最隐蔽的地方</h2>
+
+        <p>时钟配置是嵌入式的第一道坎，因为它<b>配错了往往不是「不工作」，而是「工作得不太对」</b>——
+        串口波特率偏一点、延时不准、外设偶尔抽风。这类问题最难查。</p>
+
+        <p>典型的一条路径是：<b>外部晶振（HSE）→ PLL 倍频 → 系统时钟（SYSCLK）→ 各总线分频</b>。
+        以 25 MHz 晶振倍频到 84 MHz 为例，需要算清楚 PLL 的 M / N / P 三个分频系数：</p>
+
+        <ul>
+            <li><b>VCO 输入频率</b> = HSE ÷ M，一般要求落在 1–2 MHz 这个推荐区间</li>
+            <li><b>VCO 输出频率</b> = VCO 输入 × N，要落在 100–432 MHz 之间</li>
+            <li><b>SYSCLK</b> = VCO 输出 ÷ P</li>
+        </ul>
+
+        <p>算完之后还要检查<b>总线分频</b>：APB1 和 APB2 各有自己的最高频率限制
+        （F401 上 APB1 通常不能超过 42 MHz，APB2 可达 84 MHz）。
+        挂在不同总线上的外设，能拿到的时钟是不同的。</p>
+
+        <div class="note">
+            <b>一个非常容易踩的坑：串口波特率算错。</b>
+            如果外设挂的时钟和你以为的不一样，波特率就会有固定比例的偏差。
+            现象是「能收到数据但全是乱码」或者「偶尔能收到」，很容易误判成硬件接触问题。
+            <b>串口乱码时，第一件事是回去核对时钟树和分频系数，而不是换线。</b>
+        </div>
+
+        <h2>三、标准库还是 HAL</h2>
+
+        <p>这是个被争论很久的话题，其实答案是看场景：</p>
+
+        <table class="tbl">
+            <tr><th></th><th>标准外设库（SPL）</th><th>HAL / LL 库</th></tr>
+            <tr><td>抽象层次</td><td>贴近寄存器，直接操作外设结构体</td><td>面向功能，封装更厚</td></tr>
+            <tr><td>代码体积</td><td>小</td><td>大（Flash 紧张时是负担）</td></tr>
+            <tr><td>可读性</td><td>需要翻手册才知道每个位在干什么</td><td>函数名即意图，上手快</td></tr>
+            <tr><td>跨型号移植</td><td>差，不同型号寄存器布局有差异</td><td>好，CubeMX 一键切换</td></tr>
+            <tr><td>适合</td><td>教学、资源受限、要抠每一个寄存器的场合</td><td>快速开发、产品迭代、多型号覆盖</td></tr>
+        </table>
+
+        <p><b>用 SPL 并不是「落后」。</b>它的价值在于：你必须去看参考手册，必须知道
+        「使能外设要先开它挂在哪个总线的时钟」这类基本事实。
+        用 HAL 的人经常写到最后也不清楚这些，一旦遇到问题就无从下手。</p>
+
+        <p>反过来说，如果是做产品、要快速迭代、要跨多个型号，
+        HAL 加 CubeMX 的效率优势是压倒性的。<b>两者没有对错，只有阶段和场景的区别。</b></p>
+
+        <div class="note">
+            <b>一个务实的建议：</b>初学时用 SPL 把一两个外设（比如 GPIO 和定时器）亲手配一遍，
+            把「开时钟 → 配结构体 → 使能 → 用」这个流程走通。
+            <b>走通之后再切到 HAL，你会发现能看懂 HAL 在背后做了什么，而不是只会复制粘贴。</b>
+            这个顺序比直接用 HAL 效果好不少。
+        </div>
+
+        <h2>四、I2C：嵌入式里最磨人的一种总线</h2>
+
+        <p>如果用 I2C 接传感器（很常见，比如气压计和温湿度计都走 I2C），
+        那大概率会在这里花掉最多的时间。<b>I2C 的坑密度是最高的。</b></p>
+
+        <h3>为什么它容易出问题</h3>
+
+        <ul>
+            <li><b>它是开漏输出，靠上拉电阻把电平拉高。</b>上拉电阻选得不对（太大或太小），
+            波形上升沿就会变缓或者功耗变大，通信稳定性立刻受影响。</li>
+            <li><b>总线上的从机地址可能冲突。</b>不同型号的传感器常常支持同一批地址，
+            接到同一条总线上就会打架。</li>
+            <li><b>一次通信是完整的时序单元。</b>起始、地址、应答、数据、停止，
+            任何一步被打断，从机就可能停在某个状态不响应，需要发时钟脉冲去解锁。</li>
+        </ul>
+
+        <h3>调试时的排查顺序</h3>
+
+        <ol class="steps">
+            <li><b>先确认能不能扫到地址。</b>写一段遍历地址的程序，看哪些地址有应答。
+            <b>扫不到就别往下查了</b>，先解决硬件连接和上拉问题。</li>
+            <li><b>扫到地址但读不到数据</b>，通常是寄存器地址或读时序写错了，
+            或者从机需要先配置一个初始化寄存器才肯输出数据。</li>
+            <li><b>偶尔成功、偶尔失败</b>，优先怀疑上拉电阻和线长，
+            以及是否有其他设备占用总线。</li>
+            <li><b>用逻辑分析仪看波形。</b>这是最直接的判断方式，
+            比反复改代码猜快得多。</li>
+        </ol>
+
+        <div class="note">
+            <b>关于速率：</b>400 kHz（快速模式）在长导线、弱上拉的条件下很容易出问题。
+            <b>调试阶段先用 100 kHz</b>，确认通信正常之后再往上提。
+            如果一提速就出错，说明是硬件条件（上拉阻值、线长、走线）的问题，
+            改代码是解决不了的。
+        </div>
+
+        <h2>五、USB 虚拟串口：方便且容易出岔子</h2>
+
+        <p>用 USB OTG 做一个虚拟串口（CDC）来输出调试信息，比接一个独立的 USB 转串口芯片方便得多，
+        桌上也能少一根线。它能非常有效地替代传统串口打印。</p>
+
+        <p>但有几个特点需要提前知道：</p>
+
+        <ul>
+            <li><b>USB 通信是中断驱动的，不能随便在中断里长时间阻塞。</b>
+            如果打印函数里等发送完成，容易把主循环卡住。</li>
+            <li><b>要处理「主机还没打开串口」的情况。</b>虚拟串口的另一端是 PC 上的软件，
+            如果对方没打开，直接往里写会丢数据。稳妥的做法是先判断连接状态再发。</li>
+            <li><b>枚举过程依赖 USB 时钟。</b>USB 外设对时钟精度要求很高，
+            <b>如果用内部 RC 振荡器（HSI），USB 往往工作不稳定。
+            需要精确的外部晶振</b>——这一点在时钟树那一节就埋下了伏笔。</li>
+            <li><b>复位重启后 PC 端可能不重新枚举。</b>有时需要重新插拔或者删掉设备重认。</li>
+        </ul>
+
+        <div class="note">
+            <b>把 USB 时钟和系统时钟的关系理清楚，能省掉很多「偶尔识别不到」的困扰。</b>
+            USB 要求很窄的时钟误差范围，这是它和普通外设最大的不同。
+            室内温度变化导致晶振轻微漂移都可能影响稳定性。
+        </div>
+
+        <h2>六、传感器读数的两件事</h2>
+
+        <h3>原始值 ≠ 物理量</h3>
+
+        <p>传感器返回的基本都是数字原始值，要经过<b>标定系数</b>才能变成有意义的物理量。
+        这个换算过程一定要有依据——写在数据手册里或者厂家提供的公式里。</p>
+
+        <p><b>不要凭感觉凑系数。</b>凑出来的结果是「看起来很合理」但实际上是错的，
+        而且一旦换环境就会露馅。<b>宁可用手册的粗略公式，也不要自己猜。</b></p>
+
+        <h3>数据抖动是正常的</h3>
+
+        <p>任何传感器读数都会抖。处理方式看需求：</p>
+
+        <ul>
+            <li><b>算术平均</b>：最简单，采样 N 次求均值。缺点是响应变慢。</li>
+            <li><b>滑动平均</b>：维护一个固定长度的窗口，每来一个新值就挤掉最旧的。
+            兼顾平滑和响应，最常用。</li>
+            <li><b>中值滤波</b>：排序后取中间值。专门对付<strong>偶发的野值</strong>
+            （比如某个采样点突然跳出一个离谱的数）而不会拖慢响应。</li>
+        </ul>
+
+        <p><b>需要提醒的是：滤波只是让数字好看，它不产生信息。</b>
+        如果数据本身有系统性偏差（比如温度漂移），滤波是掩盖不掉的，
+        要从硬件和标定上解决。</p>
+
+        <h2>七、几条通用经验</h2>
+
+        <ul>
+            <li><b>出问题先怀疑时钟和电源，最后怀疑代码。</b>嵌入式的故障大多在硬件配置和电气条件上，
+            代码逻辑错误反而是容易发现的那种。</li>
+            <li><b>示波器和逻辑分析仪的价值远超想象。</b>有些问题靠读代码永远想不明白，
+            看一眼波形几秒钟就清楚了。</li>
+            <li><b>先让一个最小的程序跑通，再加功能。</b>点灯、串口打印、读写一个寄存器——
+            这个顺序不能乱。<b>一口气写完所有功能再调试，几乎必然失败。</b></li>
+            <li><b>手册要当成工具书随时翻。</b>遇到不确定的地方就查，
+            绝不要凭印象填一个值。嵌入式里「应该是这样」通常就是错的开始。</li>
+            <li><b>把每一步的配置记下来。</b>时钟树怎么设的、哪个外设挂哪条总线、
+            用了哪些引脚——这些信息过两周就忘。<b>写个简单的注释比事后翻历史强。</b></li>
+        </ul>
+
+        <h2>八、小结</h2>
+
+        <p>F401 这类芯片的好处是<b>它足够复杂，能让你碰到所有基础问题；又不够复杂，不会让问题淹没在抽象层里</b>。
+        一个多传感器采集的项目做下来，时钟、总线、中断、外设、数据处理这些环节都会走一遍。</p>
+
+        <p>真正的分水岭不在会不会写代码，而在<b>遇到问题时知不知道往哪个方向找</b>。
+        这个判断力只能靠亲手把项目做完、把坑一个个踩过来才能积累。
+        <b>看别人的教程能学会怎么写，但学不会怎么查。</b></p>
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS · 硬件<br>
+        参数以 ST 官方数据手册为准，具体项目请自行核对
+    </div>
+</body>
+</html>
