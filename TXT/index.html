@@ -437,22 +437,34 @@ function totalPages() {
    长篇（几百章）靠翻页根本没法用，所以要能按章跳。
    章节靠正则从正文里认，认不出就自动隐藏这组控件，短篇不受影响。
 
-   注意两种写法都要认：标题和章号之间有空格（"第99章 某标题"），
-   以及直接贴在一起（"第99章某标题"）。源文件里两种混着有。 */
-var CHAP_RE = /^第(\d+)章[ \u3000]*(.*)$/;
+   源文件里的标题写法很不统一，下面三种都要认：
+     1) "第99章 某标题"      阿拉伯数字 + 空格
+     2) "第99章某标题"       阿拉伯数字，紧贴着
+     3) "第一百二十三章 某标题"  中文数字（老书常见）
+     4) "  12 第12章 某标题"   行首还有一个无关的序号，要忽略掉
+   只认第一种的话，中文数字那本书会一章都认不出来。 */
+
+/* 行首可选的裸序号，例如 " 12 第12章 xxx" 里的 "12 "，属于源文件杂质 */
+var CHAP_LINE_RE = /^\s*(?:\d+\s+)?(第\s*[0-9一二三四五六七八九十百千零两]+\s*章[^\n]*)$/gm;
+/* 不捕获章号数字本身，只取原文标题，避免中文数字还要转阿拉伯数字 */
+var CHAP_RE = /^第\s*[0-9一二三四五六七八九十百千零两]+\s*章[\s\u3000]*(.*)$/;
 
 function scanChapters() {
     state.chaps = [];
     if (!state.text) return;
-    var re = /^第\d+章[^\n]*$/gm;
+    CHAP_LINE_RE.lastIndex = 0;
     var m;
-    while ((m = re.exec(state.text)) !== null) {
-        var g = CHAP_RE.exec(m[0]);
+    while ((m = CHAP_LINE_RE.exec(state.text)) !== null) {
+        var line = m[1];
+        var g = CHAP_RE.exec(line);
         if (!g) continue;
+        /* 序号用「第几个被扫到」而不是章号本身：
+           中文数字不必转换，且源文件偶尔跳号也不会让下拉框错位 */
         state.chaps.push({
-            pos: m.index,
-            num: g[1],
-            title: g[2].trim()
+            pos: m.index + m[0].indexOf(line),
+            num: String(state.chaps.length + 1),
+            title: g[1].trim(),
+            label: line.trim()
         });
     }
 }
@@ -470,7 +482,9 @@ function renderChapControls() {
         state.chaps.forEach(function (c, i) {
             var o = document.createElement("option");
             o.value = String(i);
-            o.textContent = "第" + c.num + "章" + (c.title ? " " + c.title : "");
+            /* 直接用原文标题行，不要自己拼「第N章」——
+               中文数字的书拼出来会变成「第1章」和原文对不上 */
+            o.textContent = c.label || ("第" + c.num + "章" + (c.title ? " " + c.title : ""));
             sel.appendChild(o);
         });
     }
