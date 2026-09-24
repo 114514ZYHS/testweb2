@@ -503,45 +503,51 @@ function currentChapIndex() {
     return ans;
 }
 
-/* 「下一章」：跳到下一章标题所在的那一页。
-   页边界不会正好压在章标题上，所以这里不按整除算页号，
-   而是把标题所在位置那页对齐——也就是说跳到标题刚出现的那一页。 */
+/* 把全文某个字符位置换算成「该位置所在的那一页」。
+   不能直接用 Math.floor(pos / per)：renderPage 为了不在半句话里断开，
+   会把每页结尾往后补到最近的句读，实际翻页位置比 per 要靠后。
+   所以按「页首不超过 pos 的最后一页」来找，才不会偏一页。 */
+function pageForPos(pos) {
+    var total = totalPages();
+    var lo = 0, hi = total - 1, ans = 0;
+    while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (mid * state.per <= pos) { ans = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return ans;
+}
+
+/* 「下一章」：跳到下一章标题所在的那一页。 */
 function nextChapter() {
     var ci = currentChapIndex();
     if (ci < 0 || ci >= state.chaps.length - 1) return;
-    var total = totalPages();
-    var pos = state.chaps[ci + 1].pos;
-    /* 让标题落在页首：向上取整，标题刚好完整地出现在新一页开头 */
-    var pg = Math.ceil(pos / state.per);
-    if (pg * state.per > pos) pg -= 1;         /* 若整除则用该页，否则退一页让标题露出来 */
-    state.page = Math.max(0, Math.min(pg, total - 1));
+    state.page = pageForPos(state.chaps[ci + 1].pos);
     renderPage();
     saveProg();
     window.scrollTo(0, 0);
 }
 
-/* 「上一章」：如果在章中间，先回本章开头；已经在章开头则退到上一章。 */
+/* 「上一章」：如果在本章中间（标题已经翻过去了），先回本章开头；
+   如果本页开头就在本章标题处，说明已经在章首，则退到上一章。 */
 function prevChapter() {
     var ci = currentChapIndex();
     if (ci < 0) return;
-    var total = totalPages();
     var thisPos = state.chaps[ci].pos;
-    /* 本页开头是否已经到达（或越过）本章标题 */
     var pageStart = state.page * state.per;
     var atChapStart = pageStart <= thisPos;
     var target = atChapStart ? (ci > 0 ? state.chaps[ci - 1].pos : thisPos) : thisPos;
-    var pg = Math.min(Math.floor(target / state.per), total - 1);
-    state.page = Math.max(0, pg);
+    state.page = pageForPos(target);
     renderPage();
     saveProg();
     window.scrollTo(0, 0);
 }
 
+/* 下拉框直接跳章：和「下一章」用同一套对齐规则，
+   否则会出现「选了第 100 章，但页面上还是第 99 章的尾巴」。 */
 function gotoChapter(i) {
     if (i < 0 || i >= state.chaps.length) return;
-    var total = totalPages();
-    var pg = Math.min(Math.ceil(state.chaps[i].pos / state.per), total - 1);
-    state.page = Math.max(0, pg);
+    state.page = pageForPos(state.chaps[i].pos);
     renderPage();
     saveProg();
     window.scrollTo(0, 0);
