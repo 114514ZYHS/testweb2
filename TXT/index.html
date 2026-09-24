@@ -90,6 +90,14 @@
     /* 书库下拉：藏在 select 里，不占地方 */
     #bookSel { max-width: 190px; }
 
+    /* 章节跳转：只在认得出章节的书里显示，短篇自动隐藏 */
+    #chapBar { display: none; }
+    #chapSel {
+        max-width: 200px;
+        font-size: 12px;
+    }
+    #chapBar button { font-size: 12px; }
+
     /* ============ 正文区：没有框，尽可能占满 ============ */
     .reader {
         flex: 1 1 auto;
@@ -197,6 +205,14 @@
 
     <span class="sep">|</span>
 
+    <span class="pager chap" id="chapBar">
+        <button type="button" id="cPrev" title="上一章">上一章</button>
+        <select id="chapSel" title="跳转章节"><option>（无章节）</option></select>
+        <button type="button" id="cNext" title="下一章">下一章</button>
+    </span>
+
+    <span class="sep">|</span>
+
     <label>字号
         <select id="fontSize">
             <option value="14">14</option>
@@ -278,7 +294,8 @@ var FALLBACK_BOOKS = [
 var state = {
     books: [], idx: -1, text: "",
     page: 0, font: 18, per: 1000, lh: 1.8, night: false,
-    local: false           /* 当前看的是不是本地文件 */
+    local: false,          /* 当前看的是不是本地文件 */
+    chaps: []              /* 章节表：[{pos, num, title}]，短篇为空 */
 };
 
 var PROG_KEY = "novel.prog";        /* 阅读进度表：{ 书名: 字符偏移 } */
@@ -364,13 +381,15 @@ function openBook(i) {
         })
         .then(function (t) {
             state.text = t.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+            scanChapters();
             state.page = loadProgFor("book:" + b.file);   /* 各篇分别接着上次看 */
             renderPage();
             try { localStorage.setItem("novel.last", b.file); } catch (e) {}
         })
         .catch(function (e) {
             state.text = "读取失败：" + e.message +
-                "\n\n如果是本地双击打开的，浏览器不允许读取同目录文件，这是安全限制。放到网站上访问即可。";
+                "\n\n如果是本地双击打开的，浏览器会拦截读取同目录文件，放到网站上即可。";
+            state.chaps = [];
             state.page = 0;
             renderPage();
         });
@@ -385,6 +404,7 @@ function openLocalFile(file) {
         state.local = true;
         state.localName = file.name;
         state.idx = -1;
+        scanChapters();          /* 本地长篇一样能按章跳 */
         /* 下拉框里加/选中"本地"这一项 */
         var sel = $("bookSel");
         var o = document.getElementById("optLocal");
@@ -411,6 +431,120 @@ function openLocalFile(file) {
 function totalPages() {
     if (!state.text) return 1;
     return Math.max(1, Math.ceil(state.text.length / state.per));
+}
+
+/* ---------- 章节 ----------
+   长篇（几百章）靠翻页根本没法用，所以要能按章跳。
+   章节靠正则从正文里认，认不出就自动隐藏这组控件，短篇不受影响。
+
+   注意两种写法都要认：标题和章号之间有空格（"第99章 某标题"），
+   以及直接贴在一起（"第99章某标题"）。源文件里两种混着有。 */
+var CHAP_RE = /^第(\d+)章[ \u3000]*(.*)$/;
+
+function scanChapters() {
+    state.chaps = [];
+    if (!state.text) return;
+    var re = /^第\d+章[^\n]*$/gm;
+    var m;
+    while ((m = re.exec(state.text)) !== null) {
+        var g = CHAP_RE.exec(m[0]);
+        if (!g) continue;
+        state.chaps.push({
+            pos: m.index,
+            num: g[1],
+            title: g[2].trim()
+        });
+    }
+}
+
+function renderChapControls() {
+    var bar = $("chapBar");
+    var sel = $("chapSel");
+    var has = state.chaps.length > 1;
+    bar.style.display = has ? "flex" : "none";
+    if (!has) return;
+
+    // 只在章节列表变了的时候重建 option，避免每次翻页都重排
+    if (sel.options.length !== state.chaps.length) {
+        sel.innerHTML = "";
+        state.chaps.forEach(function (c, i) {
+            var o = document.createElement("option");
+            o.value = String(i);
+            o.textContent = "第" + c.num + "章" + (c.title ? " " + c.title : "");
+            sel.appendChild(o);
+        });
+    }
+
+    var ci = currentChapIndex();
+    sel.value = String(ci < 0 ? 0 : ci);
+    var isLastChap = ci >= state.chaps.length - 1;
+    $("cPrev").disabled = ci <= 0;
+    /* 末章且已到全文结尾时，才真正没有下一章可去 */
+    $("cNext").disabled = ci < 0 || (isLastChap && state.page >= totalPages() - 1);
+}
+
+/* 当前读的是哪一章：取"这一页里出现过的最后一个章标题"。
+   为什么要这样算：章标题常常落在某一页的中间（页边界和章边界不重合），
+   这时候把这一页整页看成"新章节"更符合直觉——读者已经看见标题了。
+   分页时不会把标题劈开（renderPage 会往后补到句读），所以一页里最多一个标题。 */
+function currentChapIndex() {
+    if (!state.chaps.length) return -1;
+    var start = state.page * state.per;
+    var end = start + state.per;               /* 本页覆盖的字符区间 */
+    var lo = 0, hi = state.chaps.length - 1, ans = -1;
+    /* 找最后一个 pos < end 的章节（即本页内出现过的） */
+    while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (state.chaps[mid].pos < end) { ans = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    if (ans < 0) ans = 0;
+    /* 再确认它确实在本页范围内（pos >= start 或者就是上一章延续下来） */
+    return ans;
+}
+
+/* 「下一章」：跳到下一章标题所在的那一页。
+   页边界不会正好压在章标题上，所以这里不按整除算页号，
+   而是把标题所在位置那页对齐——也就是说跳到标题刚出现的那一页。 */
+function nextChapter() {
+    var ci = currentChapIndex();
+    if (ci < 0 || ci >= state.chaps.length - 1) return;
+    var total = totalPages();
+    var pos = state.chaps[ci + 1].pos;
+    /* 让标题落在页首：向上取整，标题刚好完整地出现在新一页开头 */
+    var pg = Math.ceil(pos / state.per);
+    if (pg * state.per > pos) pg -= 1;         /* 若整除则用该页，否则退一页让标题露出来 */
+    state.page = Math.max(0, Math.min(pg, total - 1));
+    renderPage();
+    saveProg();
+    window.scrollTo(0, 0);
+}
+
+/* 「上一章」：如果在章中间，先回本章开头；已经在章开头则退到上一章。 */
+function prevChapter() {
+    var ci = currentChapIndex();
+    if (ci < 0) return;
+    var total = totalPages();
+    var thisPos = state.chaps[ci].pos;
+    /* 本页开头是否已经到达（或越过）本章标题 */
+    var pageStart = state.page * state.per;
+    var atChapStart = pageStart <= thisPos;
+    var target = atChapStart ? (ci > 0 ? state.chaps[ci - 1].pos : thisPos) : thisPos;
+    var pg = Math.min(Math.floor(target / state.per), total - 1);
+    state.page = Math.max(0, pg);
+    renderPage();
+    saveProg();
+    window.scrollTo(0, 0);
+}
+
+function gotoChapter(i) {
+    if (i < 0 || i >= state.chaps.length) return;
+    var total = totalPages();
+    var pg = Math.min(Math.ceil(state.chaps[i].pos / state.per), total - 1);
+    state.page = Math.max(0, pg);
+    renderPage();
+    saveProg();
+    window.scrollTo(0, 0);
 }
 
 /* 当前页的中间位置对应全文第几个字符（换档位时用它当锚点）。
@@ -452,6 +586,8 @@ function renderPage() {
     ["tPrev", "bPrev"].forEach(function (id) { $(id).disabled = first; });
     ["tNext", "bNext"].forEach(function (id) { $(id).disabled = last; });
     ["tLast", "bLast"].forEach(function (id) { $(id).disabled = last; });
+
+    renderChapControls();
 }
 
 function go(p) {
@@ -515,6 +651,21 @@ $("btnNight").addEventListener("click", function () { setNight(!state.night); })
 });
 ["tNext", "bNext"].forEach(function (id) {
     $(id).addEventListener("click", function () { go(state.page + 1); });
+});
+
+/* ---------- 章节跳转 ---------- */
+$("cPrev").addEventListener("click", prevChapter);
+$("cNext").addEventListener("click", nextChapter);
+$("chapSel").addEventListener("change", function () {
+    gotoChapter(parseInt(this.value, 10) || 0);
+});
+/* 键盘：左右方向键翻章（在有章节的书里） */
+document.addEventListener("keydown", function (e) {
+    if (!state.chaps.length) return;
+    var tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "select" || tag === "input" || tag === "textarea") return;
+    if (e.key === "ArrowLeft") prevChapter();
+    else if (e.key === "ArrowRight") nextChapter();
 });
 $("bar").addEventListener("click", function (ev) {
     var r = this.getBoundingClientRect();
