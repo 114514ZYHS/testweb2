@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 的 Wi-Fi 三种模式，以及单套射频带来的硬限制 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    .tbl { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+    .tbl th, .tbl td { border: 1px solid #d0d7de; padding: 7px 10px; text-align: left; }
+    .tbl th { background: #f6f8fa; font-weight: 600; }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .steps { counter-reset: s; list-style: none; padding-left: 0; }
+    .steps > li {
+        counter-increment: s; position: relative;
+        padding-left: 34px; margin: 14px 0;
+    }
+    .steps > li::before {
+        content: counter(s);
+        position: absolute; left: 0; top: 1px;
+        width: 22px; height: 22px; line-height: 22px;
+        text-align: center; font-size: 12px; font-weight: 600;
+        background: #0969da; color: #ffffff;
+    }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        .tbl th, .tbl td { border-color: #30363d; }
+        .tbl th { background: #161b22; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+        .tbl { font-size: 13px; }
+    }
+</style>
+</head><body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>ESP32 的 Wi-Fi 三种模式，以及单套射频带来的硬限制</h1>
+    <div class="meta">2026-09-20 · 硬件 · 联网</div>
+
+    <div class="article">
+
+<p>ESP32 的 Wi-Fi 有 STA、AP、STA+AP 三种模式。写过几行的人都知道，
+但真正让人卡住的不是怎么切模式，而是<b>连不上、连上又断、开了热点就掉线</b>这几件事。
+它们的根子都在同一个地方：ESP32 只有一套射频，很多事不能同时干。</p>
+
+<h2>一、三种模式各自是什么</h2>
+
+<p><b>STA（Station）</b>是作为客户端去连路由器。这是最常见的用法。
+连上之后 ESP32 从路由器拿到 IP，可以访问外网。</p>
+
+<p><b>AP（SoftAP）</b>是自己当热点，发一个 Wi-Fi 出来让别人连。
+这时候 ESP32 不连任何路由器，它自己发 IP（默认网段通常是 192.168.4.x）。
+典型场景是设备首次配网：设备先开热点，手机连上去，把家里的 Wi-Fi 账号密码发给它。</p>
+
+<p><b>STA+AP</b>是同时开两个。ESP32 一边连着路由器，一边自己发热点。
+可以理解成它是一个「路由器」——上联走 STA，下联走 AP。很多 Wi-Fi 中继、
+智能插座就是这么工作的。</p>
+
+<h2>二、为什么连 Wi-Fi 要等一两秒</h2>
+
+<p>从调用连接函数到真正连上，中间有一串物理层的动作，跳不过去：</p>
+
+<ol>
+    <li><b>扫描（Scan）。</b>被动扫描是关掉自身发射、只听周围 AP 广播的 Beacon 帧，
+    每个信道停留约 120 ms。2.4 GHz 有 13 个信道，全扫一遍要 1.5 秒以上。
+    主动扫描则会向每个信道发 Probe Request 帧，快一些但要发射。</li>
+    <li><b>认证与关联（Authentication / Association）。</b>和选中的 AP 建立链路。</li>
+    <li><b>四次握手（4-Way Handshake）。</b>WPA2 加密必须走完这一步才算真正连上。</li>
+    <li><b>DHCP。</b>拿 IP 地址、网关、DNS。这一步是走网络的，慢的时候能拖到几秒。</li>
+</ol>
+
+<p><span class="hl">如果你在代码里指定了信道和 BSSID，扫描这一步可以省掉</span>，
+连接时间能明显缩短。代价是换了路由器就得改代码。
+这也是为什么很多量产固件会记住上次成功连接的信道，下次优先直连。</p>
+
+<div class="note">
+    <b>调试提示：</b>串口打印出 <code>scanning...</code> 然后卡住，
+    不是程序死了，是它在扫信道。看到这行就耐心等，
+    别急着加超时重试——重试只会让它反复从头扫。
+</div>
+
+<h2>三、单套射频带来的硬限制</h2>
+
+<p>这是这一类问题里最容易吃亏的地方。ESP32 只有一个射频前端，
+Wi-Fi 和蓝牙共用，STA 和 AP 也共用。</p>
+
+<h3>开热点会打断连接</h3>
+
+<p>ESP32 在 Station 模式下扫描时，<b>SoftAP 的信道会跟着一起改变</b>。
+乐鑫规格书里专门写了这一条。意思是：你如果让设备定时扫描周围 Wi-Fi
+（比如做个信号强度扫描器），已经连上你这个热点的设备会掉线重连。
+正确做法是别在 AP 工作期间做全信道扫描，或者接受短暂中断。</p>
+
+<h3>STA 和 AP 必须在同一信道</h3>
+
+<p>STA+AP 模式下，AP 自己发的信号必须跟 STA 连上的那个路由器在同一信道，
+否则射频没法兼顾。这就带来一个具体后果：<b>如果路由器的信道是自动选择的，
+它一换信道，你的 AP 也就得跟着换，连在 AP 上的客户端全部掉线。</b>
+做主从架构的设备时，建议把路由器的信道固定住。</p>
+
+<h3>Wi-Fi 和蓝牙不能真正并行</h3>
+
+<p>两者共用射频，靠时间分片（时分复用）来「同时」工作。
+所以一边跑 Wi-Fi 一边跑 BLE，两边吞吐都会下降。
+对吞吐敏感的应用，尽量只用其中一种。</p>
+
+<h2>四、功耗上的差别</h2>
+
+<p>AP 模式比 STA 耗电得多。原因很直接：AP 必须周期性发送 Beacon 帧，
+哪怕没有任何客户端连着，射频也得一直醒着发。STA 模式则可以进入
+省电模式（Modem-sleep / Light-sleep / Deep-sleep），
+只在 DTIM 周期醒来收一下缓存的数据。</p>
+
+<p>电池供电的项目，<b>不要让设备一直开热点</b>。合理的做法是：
+平时 STA 模式连接网关，只在配网阶段临时开 AP，配完立刻关掉。</p>
+
+<h2>五、配网这件事的几种做法</h2>
+
+<p>设备出厂不知道怎么连家里的 Wi-Fi，这是所有联网设备都要解决的问题。
+常见的几条路：</p>
+
+<ul>
+    <li><b>AP 配网。</b>设备开热点，手机连上去打开网页填账号密码。
+    最通用，不依赖 App。缺点是手机要临时断开自己的网络。</li>
+    <li><b>SmartConfig / ESP-Touch。</b>手机 App 把账号密码编码进一连串
+    特殊长度的 UDP 广播包，设备在混杂模式下嗅探解析。用户体验好，
+    但对路由器设置敏感，有些环境成功率不高。</li>
+    <li><b>蓝牙配网。</b>用 BLE 传账号密码。适合没有按键和屏的设备，
+    现在 ESP-IDF 里有现成的 <code>wifi_provisioning</code> 组件支持。</li>
+    <li><b>串口 / 硬编码。</b>开发阶段最省事，产品化时该换掉。</li>
+</ul>
+
+<p>选哪种主要看两件事：设备有没有屏或者按键可以反馈状态，
+以及目标用户愿不愿意装一个 App。如果设备上有屏，AP 配网是最稳的，
+因为你可以把「现在连到 192.168.4.1」直接写在屏上，用户不用猜。</p>
+
+<h2>六、几个反复踩的坑</h2>
+
+<ul>
+    <li><b>连上但拿不到 IP。</b>多半是 DHCP 没走完就急着用网络了。
+    要等拿到 <code>IP_EVENT_STA_GOT_IP</code> 事件，而不是
+    <code>WIFI_EVENT_STA_CONNECTED</code>。这两个事件不是一回事。</li>
+    <li><b>路由器是 5 GHz 的。</b>ESP32 全系只支持 2.4 GHz。
+    如果路由器把 2.4G 和 5G 合成了一个 SSID（双频合一），
+    设备可能反复尝试连到 5G 上失败。解决办法是给 2.4G 单独起一个 SSID。</li>
+    <li><b>SSID 是中文或者带特殊字符。</b>部分老固件处理不好。
+    开发阶段建议用纯 ASCII 的 SSID 和密码排查问题。</li>
+    <li><b>开了省电模式之后响应变慢。</b>Modem-sleep 会让设备在 DTIM
+    间隔才醒，延迟能从几毫秒涨到几百毫秒。做实时控制时记得关掉省电。</li>
+</ul>
+
+<p>这些坑的共同点是：<b>它们都不是代码写错了，而是对「只有一套射频」这个物理事实
+没有预期。</b>把这条记住，遇到连接类问题能少走很多弯路。</p>
+
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS
+    </div>
+</body>
+</html>

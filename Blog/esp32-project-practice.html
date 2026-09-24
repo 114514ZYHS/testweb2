@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 项目实践：从能跑到稳定跑的几道坎 - Blog - ZYHS</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 40px auto;
+        padding: 0 20px;
+        background: #f0f2f5;
+        color: #1e1e1e;
+        position: relative;
+        min-height: 100vh;
+        line-height: 1.85;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+        filter: brightness(0.42);
+    }
+    .nav {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; font-size: 14px;
+    }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 {
+        font-size: 30px; font-weight: 600; line-height: 1.4;
+        border-bottom: 2px solid #d0d7de; padding-bottom: 14px; margin-bottom: 10px;
+    }
+    .meta { font-size: 13px; color: #8b949e; font-family: monospace; margin-bottom: 30px; }
+    .article { background: rgba(255, 255, 255, 0.82); border: 1px solid #d0d7de; padding: 30px 34px; }
+    h2 {
+        font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+        padding-left: 11px; border-left: 3px solid #0969da;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; }
+    p { margin: 12px 0; }
+    ul, ol { margin: 12px 0; padding-left: 26px; }
+    li { margin: 6px 0; }
+    code {
+        font-family: ui-monospace, Consolas, monospace; font-size: 13.5px;
+        background: #eef1f4; padding: 1px 5px;
+    }
+    .tbl { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+    .tbl th, .tbl td { border: 1px solid #d0d7de; padding: 7px 10px; text-align: left; }
+    .tbl th { background: #f6f8fa; font-weight: 600; }
+    .note { border-left: 3px solid #bf8700; background: #fdf8ec; padding: 12px 16px; margin: 18px 0; font-size: 14.5px; }
+    .note b { color: #bf8700; }
+    .hl { color: #cf222e; font-weight: 600; }
+    .steps { counter-reset: s; list-style: none; padding-left: 0; }
+    .steps > li {
+        counter-increment: s; position: relative;
+        padding-left: 34px; margin: 14px 0;
+    }
+    .steps > li::before {
+        content: counter(s);
+        position: absolute; left: 0; top: 1px;
+        width: 22px; height: 22px; line-height: 22px;
+        text-align: center; font-size: 12px; font-weight: 600;
+        background: #0969da; color: #ffffff;
+    }
+    .footer {
+        margin-top: 36px; text-align: center; font-size: 13px;
+        color: #8b949e; border-top: 1px solid #d0d7de; padding-top: 16px; line-height: 1.8;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; color: #c9d1d9; }
+        body::before { filter: brightness(0.32); }
+        h1 { border-bottom-color: #30363d; }
+        .article { background: rgba(22, 27, 34, 0.85); border-color: #30363d; }
+        a { color: #58a6ff; }
+        code { background: #21262d; }
+        .tbl th, .tbl td { border-color: #30363d; }
+        .tbl th { background: #161b22; }
+        .note { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; }
+        .note b { color: #d29922; }
+        .hl { color: #f85149; }
+        .footer { border-top-color: #30363d; }
+    }
+    @media (max-width: 640px) {
+        .article { padding: 20px 18px; }
+        h1 { font-size: 24px; }
+        .tbl { font-size: 13px; }
+    }
+</style>
+</head><body>
+    <div class="nav">
+        <a href="index.html">← 返回文章列表</a>
+        <a href="../index.html">主页</a>
+    </div>
+
+    <h1>ESP32 项目实践：从能跑到稳定跑的几道坎</h1>
+    <div class="meta">2026-09-20 · 硬件 · 联网</div>
+
+    <div class="article">
+
+<p>ESP32 上手很快，把一个 LED 点亮挂到网上可能半小时就搞定。
+但从「能跑」到「稳定跑几个月不出问题」，中间还差不少东西。
+这篇写的是后者——那些只有在设备真的用起来之后才会暴露的问题。</p>
+
+<h2>一、Wi-Fi 断了要能自己回来</h2>
+
+<p>开发时连着好好的，实际部署后 Wi-Fi 掉线是常态：
+路由器重启、信号被遮挡、邻居换了信道。设备必须能自动重连。</p>
+
+<p>需要注意的实现细节：</p>
+
+<ul>
+    <li><b>重连要退避。</b>发现掉线就立刻疯狂重连，会让路由器把它当成攻击。
+    合理的做法是第一次等 1 秒，之后逐步拉长到 30 秒上限，连上后重置。</li>
+    <li><b>重连不等于拿到 IP。</b>前面提过，连上 AP 和拿到 IP 是两个事件。
+    重连逻辑要等的是拿到 IP 那一步。</li>
+    <li><b>Wi-Fi 掉线时正在做的事要能恢复。</b>如果设备正在上传数据，
+    连接断开会返回错误，代码要能记住「这批没发出去」，下次连上补发。</li>
+    <li><b>长时间连不上要有兜底。</b>比如连续失败 N 次后重启设备，
+    这是最土但最有效的办法。很多商用设备就是靠定期重启撑住的。</li>
+</ul>
+
+<h2>二、别让网络阻塞主循环</h2>
+
+<p>ESP32 是双核的（C3 除外，它是单核），但网络操作仍然是耗时的。
+一个典型的错误写法是在主循环里同步地等 HTTP 响应。</p>
+
+<p>如果一次请求超时 5 秒，主循环就停 5 秒。对于要读传感器、
+要刷屏、要响应按键的设备，这是致命的。表现是「界面卡住」「按键没反应」。</p>
+
+<p>解决办法按复杂度排：</p>
+
+<ul>
+    <li><b>拆成状态机。</b>把「发起请求」和「处理响应」分成两步，
+    中间让主循环继续跑。这是最简单有效的改法。</li>
+    <li><b>用独立的 FreeRTOS 任务。</b>网络放一个任务，界面和传感器放另一个，
+    之间用队列通信。ESP32 的 SDK 本身就是基于 FreeRTOS 的，
+    用起来很自然。</li>
+    <li><b>双核分工。</b>经典版和 S3 是双核，
+    可以让一个核跑协议栈和网络，另一个核专注实时控制。
+    但要注意共享数据的保护。</li>
+</ul>
+
+<div class="note">
+    <b>关于「双核」的实际含义：</b>ESP32 经典版的双核是 Xtensa LX6 双核，
+    240 MHz 下双核 CoreMark 跑分 1079.96，单核是 539.98。
+    数字上接近翻倍，但实际收益取决于你的任务能不能真正并行。
+    如果两个任务都在等同一个锁，多一个核也没有用。
+</div>
+
+<h2>三、内存要当回事</h2>
+
+<p>ESP32-C3 标称 400 KB SRAM，S3 是 512 KB，经典版是 520 KB。
+看着不少，但这是芯片内总量，协议栈、Wi-Fi 缓冲区、蓝牙栈都要从这里分。</p>
+
+<p>几个实际建议：</p>
+
+<ul>
+    <li><b>看编译输出，别按标称值设计。</b>编译完看 <code>idf.py size</code> 的结果，
+    那里有静态占用和剩余堆的真实情况。</li>
+    <li><b>避免频繁的大块内存分配和释放。</b>长时间运行的程序容易出现堆碎片，
+    表现为「刚启动好好的，跑几天就崩」。需要大缓冲的话，
+    启动时一次性分配好，之后复用。</li>
+    <li><b>注意字符串拼接。</b><code>String</code> 类型的拼接在循环里会产生大量临时对象，
+    是嵌入式里很常见的隐性内存黑洞。需要格式化输出时，
+    用固定大小的 <code>char</code> 缓冲区加 <code>snprintf</code>。</li>
+    <li><b>JSON 要选对库。</b>用那种把整个文档解析进内存的库，
+    一个稍微大的响应就能把堆吃光。选可以流式解析的，
+    或者干脆别用 JSON，用简单的文本协议。</li>
+</ul>
+
+<h2>四、OTA 升级要早做规划</h2>
+
+<p>OTA（空中升级）如果不从一开始就设计进去，后期加会很痛苦。
+关键点在于<b>分区表</b>。</p>
+
+<p>OTA 的机制是准备两个应用分区（通常叫 <code>ota_0</code> 和 <code>ota_1</code>），
+新固件写到空闲的那个分区里，写完校验通过后修改启动标志，
+下次重启就从新分区启动。旧固件还留着，新固件起不来可以回滚。</p>
+
+<p>由此推出的两条硬约束：</p>
+
+<ul>
+    <li><b>Flash 要够大。</b>两个应用分区加上 NVS 等数据分区，
+    需要的 Flash 容量大约是单份固件的两倍以上。4 MB 的模组做 OTA 时，
+    应用分区能用的空间其实很紧张。</li>
+    <li><b>要能回滚。</b>新固件启动后要先做自检（比如连上 Wi-Fi、连上服务器），
+    确认没问题再调用「标记为有效」。如果一直不标记，
+    看门狗重启几次后会自动回滚到旧固件。这个机制一定要用上，
+    否则一次失败的上传会让设备彻底失联，只能上门去接串口。</li>
+</ul>
+
+<h2>五、现场调试的几条退路</h2>
+
+<p>设备装到用户家里之后，你没法再插串口看日志。所以要提前留好后路：</p>
+
+<ul>
+    <li><b>保留一个本地调试入口。</b>可以让设备在按住某个按键开机时
+    开一个临时热点，连上去看状态页。这是最可靠的一招，
+    因为不依赖外网。</li>
+    <li><b>把最近若干条日志存在 Flash 里。</b>出问题时重启后还能读出来。
+    注意要限制条数和写入频率，Flash 有擦写寿命。</li>
+    <li><b>加看门狗。</b>硬件看门狗是防死机的最后一道。
+    主循环里定时喂狗，卡住就自动重启。</li>
+    <li><b>上报设备自检信息。</b>开机时上报固件版本、复位原因、可用内存，
+    这些数据在排查「为什么我的设备半夜重启」这类问题时非常有用。
+    复位原因可以从 SDK 拿到，能区分是掉电、看门狗还是软件主动重启。</li>
+</ul>
+
+<h2>六、一个实用的开发顺序</h2>
+
+<p>做完几个项目之后，比较省事的推进顺序是：</p>
+
+<ol class="steps">
+    <li>先把硬件点通。LED、串口、各个传感器单独验证，确认时钟和引脚没错。</li>
+    <li>再把网络跑通。能连上、能收发、断线能重连。</li>
+    <li>然后接上屏或者其它交互。这时候还没涉及业务逻辑，出问题好定位。</li>
+    <li>最后做业务逻辑，并且从这一步开始就考虑内存和长时间运行。</li>
+    <li>加 OTA、看门狗、日志留存这些「运维」功能。别留到最后，
+    因为分区表这类东西改起来要重新规划 Flash。</li>
+</ol>
+
+<p>这个顺序的核心是<b>每加一层都能单独验证</b>。
+反过来做——先把业务逻辑写完再回头查为什么连不上网——
+会同时面对好几个层面的问题，排查成本高得多。</p>
+
+<div class="note">
+    <b>关于稳定性：</b>很多「不稳定的设备」其实不是芯片的问题，
+    而是没有处理好断线重连、内存增长、异常分支这几个点。
+    这些都不是难事，但需要从第一版代码就留着位置。
+    事后补的代价通常比一开始就写要大。
+</div>
+
+    </div>
+
+    <div class="footer">
+        4444442.xyz · ZYHS
+    </div>
+</body>
+</html>
