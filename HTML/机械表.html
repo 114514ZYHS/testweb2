@@ -1,0 +1,1869 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>全镂空大复杂功能机械表 · 陀飞轮与三问报时实时物理仿真</title>
+<style>
+  :root{
+    --gold:#d8a86a; --gold-hi:#f6e0bb; --line:rgba(216,168,106,.28);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#050404;}
+  body{
+    color:#ecdfc8;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background:radial-gradient(120% 90% at 50% 18%, #191411 0%, #0d0b09 42%, #070606 72%, #030303 100%);
+  }
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;}
+  #stage{position:relative;flex:1 1 auto;min-height:0;}
+  canvas#watch{display:block;width:100%;height:100%;touch-action:none;cursor:default;}
+  #title{position:absolute;left:22px;top:16px;pointer-events:none;user-select:none;text-shadow:0 2px 18px rgba(0,0,0,.95);}
+  #title h1{margin:0;font-size:15px;letter-spacing:.16em;font-weight:600;color:#f0dcbb;}
+  #title h1 b{color:var(--gold);font-weight:700;}
+  #title p{margin:5px 0 0;font-size:11.5px;letter-spacing:.08em;color:#a2927c;}
+  #title p .k{color:#c8a877;}
+  #hud{
+    position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;
+    padding:10px 16px;border-radius:14px;
+    background:linear-gradient(180deg, rgba(38,30,23,.86), rgba(16,13,11,.9));
+    border:1px solid var(--line);
+    box-shadow:0 18px 46px rgba(0,0,0,.72), inset 0 1px 0 rgba(255,225,180,.09);
+    backdrop-filter:blur(9px) saturate(1.1);-webkit-backdrop-filter:blur(9px) saturate(1.1);
+    max-width:min(94vw,900px);
+  }
+  .btn{
+    appearance:none;border:1px solid rgba(216,168,106,.42);
+    background:linear-gradient(180deg,#3a2c20,#1b1410);
+    color:#f2ddba;font:inherit;font-size:12.5px;letter-spacing:.08em;
+    padding:8px 15px;border-radius:9px;cursor:pointer;white-space:nowrap;
+    transition:box-shadow .18s ease, transform .06s ease, border-color .18s ease;
+    box-shadow:inset 0 1px 0 rgba(255,222,175,.13), 0 5px 14px rgba(0,0,0,.45);
+  }
+  .btn:hover{border-color:rgba(246,224,187,.8);box-shadow:inset 0 1px 0 rgba(255,222,175,.2), 0 0 20px rgba(216,168,106,.28);}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:linear-gradient(180deg,#6a4a26,#33210f);border-color:rgba(246,214,160,.62);}
+  .btn.primary.live{background:linear-gradient(180deg,#8a6127,#43290f);border-color:#f6d9a0;box-shadow:0 0 18px rgba(240,190,110,.35);}
+  .sw{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;letter-spacing:.06em;color:#c3b39a;cursor:pointer;user-select:none;white-space:nowrap;}
+  .sw input{
+    appearance:none;width:34px;height:18px;border-radius:10px;position:relative;cursor:pointer;margin:0;
+    background:linear-gradient(180deg,#241b14,#120e0b);border:1px solid rgba(216,168,106,.35);transition:background .2s, border-color .2s;
+  }
+  .sw input::after{
+    content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;
+    background:linear-gradient(180deg,#e8d3ac,#9c7844);transition:transform .2s ease;box-shadow:0 1px 3px rgba(0,0,0,.6);
+  }
+  .sw input:checked{background:linear-gradient(180deg,#6d4f2b,#38240f);border-color:rgba(246,214,160,.7);}
+  .sw input:checked::after{transform:translateX(16px);}
+  #readouts{display:flex;align-items:center;gap:13px;padding-left:14px;border-left:1px solid rgba(216,168,106,.2);}
+  .ro{display:flex;flex-direction:column;line-height:1.25;}
+  .ro b{font-size:13.5px;font-weight:600;color:#f4e3c4;font-variant-numeric:tabular-nums;letter-spacing:.05em;}
+  .ro span{font-size:9.5px;letter-spacing:.13em;color:#8d7c66;}
+  #roStrike{color:#e5c489;}
+  #hint{position:absolute;left:50%;bottom:94px;transform:translateX(-50%);font-size:12px;letter-spacing:.1em;color:#a1907a;pointer-events:none;user-select:none;text-shadow:0 2px 12px #000;}
+  #hint b{color:#e4c793;font-weight:600;}
+  @media (max-width:760px){
+    #title h1{font-size:11.5px;letter-spacing:.1em;} #title p{font-size:9.5px;}
+    #hud{gap:9px;padding:8px 10px;bottom:8px;} .btn{padding:7px 10px;font-size:11.5px;}
+    #readouts{gap:9px;padding-left:9px;} .ro b{font-size:12px;} #hint{display:none;}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="watch"></canvas>
+    <div id="title">
+      <h1>全镂空大复杂功能机械表 · <b>陀飞轮</b> 与 <b>三问报时</b></h1>
+      <p><span class="k">Ref. 5303R 构架</span> · 渐开线齿廓严格啮合 · 21,600 vph · 60 秒飞行陀飞轮 · 双音簧物理建模打簧</p>
+    </div>
+    <div id="hint">拖动表壳左侧的 <b>三问滑块</b>（或按空格 / 点击按钮）启动报时</div>
+    <div id="hud">
+      <button class="btn primary" id="btnRepeat">启动三问报时</button>
+      <label class="sw"><input type="checkbox" id="chkLabels" checked>零件标注</label>
+      <label class="sw"><input type="checkbox" id="chkSound" checked>声音</label>
+      <div id="readouts">
+        <div class="ro"><b id="roClock">--:--:--</b><span>走时 · 实时</span></div>
+        <div class="ro"><b id="roTour">--</b><span>陀飞轮 60s/转</span></div>
+        <div class="ro"><b id="roStrike">就绪</b><span id="roStrikeSub">三问报时</span></div>
+        <div class="ro"><b id="roFps">--</b><span>帧率 FPS</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+(function(){
+/* ==================================================================================
+   全镂空大复杂功能机械表 —— 物理级实时仿真（单文件 / 免安装 / 纯本地离线）
+   · 渐开线齿廓数学生成 + 严格啮合运动学（中心距 d = r1 + r2，ω1·z1 = -ω2·z2）
+   · 60 秒飞行陀飞轮：无卡度 Gyromax 砝码摆轮 3Hz / 宝玑双层游丝 / 瑞士杠杆式擒纵
+   · 表盘侧三问报时：双黑镜面抛光音锤 + 双环形音簧 + Web Audio 模态合成，毫秒级同步
+   · 高级制表打磨：鱼鳞粒纹、日内瓦波纹、高光倒角、烤蓝钢螺丝、红宝石 + 黄金套筒
+   ================================================================================== */
+
+/* @CORE-BEGIN@ */
+/* ----------------------------------------------------------------------------------
+   齿轮核心：纯数学，无 DOM 依赖（可被外部脚本抽取做几何验证）
+   ---------------------------------------------------------------------------------- */
+var TAU = Math.PI * 2, D2R = Math.PI / 180;
+
+/* 表盘极坐标 -> 直角坐标（y 轴向下；0° = 12 点方向，顺时针为正） */
+function dial(r, deg){ var a = deg * D2R; return { x: r * Math.sin(a), y: -r * Math.cos(a) }; }
+
+/* 渐开线函数 inv(a) = tan(a) - a */
+function involuteFN(a){ return Math.tan(a) - a; }
+
+/* 两圆求交（pick = +1 / -1 选择分支） */
+function circleHit(c1, r1, c2, r2, pick){
+  var dx = c2.x - c1.x, dy = c2.y - c1.y;
+  var d = Math.sqrt(dx*dx + dy*dy);
+  if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) return null;
+  var a = (d*d + r1*r1 - r2*r2) / (2*d);
+  var h2 = r1*r1 - a*a, h = h2 > 0 ? Math.sqrt(h2) : 0;
+  var ux = dx/d, uy = dy/d;
+  return { x: c1.x + a*ux + pick*h*(-uy), y: c1.y + a*uy + pick*h*ux };
+}
+
+/*
+   标准渐开线齿廓（滚切展成原理）
+   z 齿数 / m 模数 / opt.shift 变位系数 x / opt.backlash 齿厚减薄量（单位模数，极小侧隙）
+   返回闭合外轮廓点集 [[x,y]...]，齿中心线位于 0°
+*/
+function gearOutlinePoints(z, m, opt){
+  opt = opt || {};
+  var alpha = (opt.alpha == null ? 20 : opt.alpha) * D2R;
+  var ha = (opt.ha == null ? 1.00 : opt.ha);
+  var hf = (opt.hf == null ? 1.25 : opt.hf);
+  var xc = (opt.shift == null ? 0 : opt.shift);
+  var bl = (opt.backlash == null ? 0.045 : opt.backlash);
+  var ns = (opt.samples == null ? 7 : opt.samples);
+
+  var r  = m * z / 2;                    /* 分度圆（节圆） */
+  var rb = r * Math.cos(alpha);          /* 基圆 */
+  var ra = m * (z/2 + ha + xc);          /* 齿顶圆 */
+  var rf = m * (z/2 - hf + xc);          /* 齿根圆 */
+  var invA = involuteFN(alpha);
+  var halfA = Math.PI/(2*z) - bl*m/(2*r);
+  var aTip  = Math.acos(Math.min(1, rb/ra));
+  var aRoot = (rb < rf) ? Math.acos(Math.min(1, rb/rf)) : 0;
+  var thTip  = halfA + invA - involuteFN(aTip);
+  var thRoot = halfA + invA - involuteFN(aRoot);
+  var thBase = halfA + invA;
+
+  var P = [];
+  function push(rr, th){ P.push([rr*Math.cos(th), rr*Math.sin(th)]); }
+  function arc(rr, a0, a1, n){ for (var i = 1; i <= n; i++) push(rr, a0 + (a1 - a0)*i/n); }
+  var step = TAU / z;
+  for (var k = 0; k < z; k++){
+    var base = k * step;
+    var prevPlus = base - step + thRoot;
+    var thisMinus = base - thRoot;
+    if (k === 0) push(rf, prevPlus);
+    arc(rf, prevPlus, thisMinus, 3);                       /* 齿根圆弧 */
+    var flankStart = (rf < rb) ? thBase : thRoot;
+    if (rf < rb) push(rb, base - flankStart);              /* 基圆以下径向段（根切区） */
+    var i, t, a, rr;
+    for (i = 0; i <= ns; i++){                             /* - 侧渐开线 */
+      t = i/ns; a = aRoot + (aTip - aRoot)*t;
+      rr = (a < 1e-6) ? rb : rb/Math.cos(a);
+      push(rr, base - (halfA + invA - involuteFN(a)));
+    }
+    arc(ra, base - thTip, base + thTip, 3);                /* 齿顶圆弧 */
+    for (i = ns; i >= 0; i--){                             /* + 侧渐开线 */
+      t = i/ns; a = aRoot + (aTip - aRoot)*t;
+      rr = (a < 1e-6) ? rb : rb/Math.cos(a);
+      push(rr, base + (halfA + invA - involuteFN(a)));
+    }
+    if (rf < rb) push(rb, base + flankStart);
+  }
+  return P;
+}
+
+/* 齿廓特征圆 */
+function gearMetrics(z, m, opt){
+  opt = opt || {};
+  var alpha = (opt.alpha == null ? 20 : opt.alpha) * D2R;
+  var ha = (opt.ha == null ? 1.00 : opt.ha);
+  var hf = (opt.hf == null ? 1.25 : opt.hf);
+  var xc = (opt.shift == null ? 0 : opt.shift);
+  return { r: m*z/2, rb: m*z/2*Math.cos(alpha), ra: m*(z/2 + ha + xc),
+           rf: m*(z/2 - hf + xc), m: m, z: z, alpha: alpha };
+}
+
+/*
+   啮合运动学不变量
+   外啮合两轮：A 的齿中心线对准连心线 φ（由 A 心指向 B 心）时，B 必须以其齿槽中心对准 φ+π，
+   由此得到守恒量 S = zA·θA + zB·θB = (zA+zB)·φ + π·(zB-1) + 2πk
+   =>  θB = (S - zA·θA) / zB ，自动满足 ωA·zA = -ωB·zB（转速与齿数成反比、转向相反）
+*/
+function meshS(zA, zB, phi, k){
+  return (zA + zB)*phi + Math.PI*(zB - 1) + TAU*(k || 0);
+}
+
+/* ---- 齿面间隙 / 干涉检测（世界坐标多边形） ---- */
+function worldPoly(pts, pos, ang, win, pitch){
+  var c = Math.cos(ang), s = Math.sin(ang), out = [];
+  for (var i = 0; i < pts.length; i++){
+    var x = pts[i][0]*c - pts[i][1]*s + pos.x;
+    var y = pts[i][0]*s + pts[i][1]*c + pos.y;
+    if (Math.abs(x - pitch.x) < win && Math.abs(y - pitch.y) < win) out.push(x, y);
+  }
+  return out;
+}
+function segDist(px, py, x1, y1, x2, y2){
+  var dx = x2 - x1, dy = y2 - y1;
+  var L2 = dx*dx + dy*dy;
+  var t = L2 > 0 ? ((px - x1)*dx + (py - y1)*dy) / L2 : 0;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  var qx = x1 + t*dx - px, qy = y1 + t*dy - py;
+  return Math.sqrt(qx*qx + qy*qy);
+}
+function polyMinDist(A, B){
+  var best = Infinity, i, j, j2, d;
+  for (i = 0; i < A.length; i += 2){
+    for (j = 0; j < B.length; j += 2){
+      j2 = (j + 2) % B.length;
+      d = segDist(A[i], A[i+1], B[j], B[j+1], B[j2], B[j2+1]);
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+function pointInPoly(x, y, P){
+  var inside = false, n = P.length / 2;
+  for (var i = 0, j = n - 1; i < n; j = i++){
+    var xi = P[i*2], yi = P[i*2+1], xj = P[j*2], yj = P[j*2+1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi)*(y - yi)/((yj - yi) || 1e-12) + xi)) inside = !inside;
+  }
+  return inside;
+}
+/* 返回最小齿面间隙：> 0 无干涉；< 0 表示齿廓重叠（穿模） */
+function meshClearance(polyA, posA, angA, polyB, posB, angB, win, pitch){
+  var A = worldPoly(polyA, posA, angA, win, pitch);
+  var B = worldPoly(polyB, posB, angB, win, pitch);
+  if (A.length < 6 || B.length < 6) return NaN;
+  var d = Math.min(polyMinDist(A, B), polyMinDist(B, A));
+  var pen = pointInPoly(A[0], A[1], B) || pointInPoly(B[0], B[1], A);
+  return pen ? -d : d;
+}
+
+/* ----------------------------------------------------------------------------------
+   轮系布局（仿真单位：机芯半径 300，表壳外径 400）
+   ---------------------------------------------------------------------------------- */
+function buildLayout(){
+  var arb = {};
+  function A(id, x, y){ arb[id] = { id:id, x:x, y:y }; }
+
+  A('barrel', 0, -135);                                   /* 条盒轮 · 12 点 */
+  A('center', 0, 0);                                      /* 中心轮 · 表盘中心 */
+  var t3 = dial(90, 205); A('third', t3.x, t3.y);         /* 三轮 */
+  A('tourb', 0, 195);                                     /* 陀飞轮 · 6 点 */
+  var f4 = circleHit(t3, 70, { x:0, y:195 }, 72, 1);      /* 四轮：严格节圆相切交点 */
+  A('fourth', f4.x, f4.y);
+  var mw = dial(24, 150); A('minute', mw.x, mw.y);        /* 分轮（拨针轮系） */
+  A('hour', 0, 0);                                        /* 时轮（与中心同轴套筒） */
+
+  var W = {
+    barrel:        { z: 96, m: 2.5, x:-0.30, arb:'barrel' },
+    centerPinion:  { z: 12, m: 2.5, x: 0.30, arb:'center' },
+    centerWheel:   { z: 64, m: 2.5, x:-0.30, arb:'center' },
+    thirdPinion:   { z:  8, m: 2.5, x: 0.30, arb:'third'  },
+    thirdWheel:    { z: 60, m: 2.0, x:-0.35, arb:'third'  },
+    fourthPinion:  { z: 10, m: 2.0, x: 0.35, arb:'fourth' },
+    fourthWheel:   { z: 50, m: 1.6, x:-0.30, arb:'fourth' },
+    carriageWheel: { z: 40, m: 1.6, x: 0.30, arb:'tourb'  },
+    cannonPinion:  { z: 10, m: 1.2, x: 0.30, arb:'center' },
+    minuteWheel:   { z: 30, m: 1.2, x:-0.30, arb:'minute' },
+    minutePinion:  { z:  8, m: 1.2, x: 0.35, arb:'minute' },
+    hourWheel:     { z: 32, m: 1.2, x:-0.35, arb:'hour'   }
+  };
+  var meshes = [
+    { a:'centerPinion', b:'barrel',        k:0 },
+    { a:'centerWheel',  b:'thirdPinion',   k:0 },
+    { a:'thirdWheel',   b:'fourthPinion',  k:0 },
+    { a:'fourthWheel',  b:'carriageWheel', k:0 },
+    { a:'cannonPinion', b:'minuteWheel',   k:0 },
+    { a:'minutePinion', b:'hourWheel',     k:0 }
+  ];
+  for (var i = 0; i < meshes.length; i++){
+    var ms = meshes[i];
+    var pa = arb[W[ms.a].arb], pb = arb[W[ms.b].arb];
+    ms.phi = Math.atan2(pb.y - pa.y, pb.x - pa.x);
+    ms.d = Math.sqrt((pb.x-pa.x)*(pb.x-pa.x) + (pb.y-pa.y)*(pb.y-pa.y));
+    ms.zA = W[ms.a].z; ms.zB = W[ms.b].z;
+    ms.S = meshS(ms.zA, ms.zB, ms.phi, ms.k);
+    ms.centerSum = W[ms.a].m*ms.zA/2 + W[ms.b].m*ms.zB/2;
+    ms.centerErr = Math.abs(ms.centerSum - ms.d);
+    ms.rA = W[ms.a].m*ms.zA/2; ms.rB = W[ms.b].m*ms.zB/2;
+    ms.pitch = { x: pa.x + (pb.x-pa.x)*(ms.rA/ms.d), y: pa.y + (pb.y-pa.y)*(ms.rA/ms.d) };
+  }
+  return { arbors: arb, W: W, meshes: meshes };
+}
+
+/* 由中心轮角度解算全轮系（θ 弧度；同轴轮共用轴角） */
+function solveTrain(lay, thetaCenter){
+  var th = {};
+  th.center = thetaCenter;
+  for (var i = 0; i < lay.meshes.length; i++){
+    var ms = lay.meshes[i];
+    var zA = lay.W[ms.a].z, zB = lay.W[ms.b].z;
+    th[lay.W[ms.b].arb] = (ms.S - zA * th[lay.W[ms.a].arb]) / zB;
+  }
+  return th;
+}
+/* @CORE-END@ */
+
+/* ==================================================================================
+   0. 通用工具
+   ================================================================================== */
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function smooth(t){ t = clamp(t,0,1); return t*t*(3-2*t); }
+function pathOf(pts){
+  var p = new Path2D();
+  p.moveTo(pts[0][0], pts[0][1]);
+  for (var i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
+  p.closePath();
+  return p;
+}
+/* 圆角矩形点集（中心在原点，顺时针） */
+function rrPoly(w, h, r, seg){
+  seg = seg || 5;
+  var hw = w/2, hh = h/2;
+  r = Math.min(r, hw, hh);
+  var cs = [[hw-r, -hh+r, -90], [hw-r, hh-r, 0], [-hw+r, hh-r, 90], [-hw+r, -hh+r, 180]];
+  var pts = [];
+  for (var i = 0; i < 4; i++){
+    for (var k = 0; k <= seg; k++){
+      var a = (cs[i][2] + k*90/seg) * D2R;
+      pts.push([cs[i][0] + Math.cos(a)*r, cs[i][1] + Math.sin(a)*r]);
+    }
+  }
+  return pts;
+}
+/* 点集变换 -> Path2D */
+function polyPath(pts, tx, ty, ang){
+  var c = Math.cos(ang || 0), s = Math.sin(ang || 0), p = new Path2D();
+  for (var i = 0; i < pts.length; i++){
+    var x = pts[i][0]*c - pts[i][1]*s + (tx||0);
+    var y = pts[i][0]*s + pts[i][1]*c + (ty||0);
+    if (i === 0) p.moveTo(x, y); else p.lineTo(x, y);
+  }
+  p.closePath();
+  return p;
+}
+/* 把点集按 平移+旋转 追加进已有路径（不使用 Path2D.addPath，避免子路径被连线） */
+function addPolyToPath(p, pts, tx, ty, ang){
+  var c = Math.cos(ang || 0), s = Math.sin(ang || 0);
+  for (var i = 0; i < pts.length; i++){
+    var x = pts[i][0]*c - pts[i][1]*s + (tx || 0);
+    var y = pts[i][0]*s + pts[i][1]*c + (ty || 0);
+    if (i === 0) p.moveTo(x, y); else p.lineTo(x, y);
+  }
+  p.closePath();
+}
+/* 环形槽（轮辐镂空开口） */
+function annularSlot(p, r0, r1, a0, a1){
+  p.moveTo(r1*Math.cos(a0), r1*Math.sin(a0));
+  p.arc(0, 0, r1, a0, a1, false);
+  p.lineTo(r0*Math.cos(a1), r0*Math.sin(a1));
+  p.arc(0, 0, r0, a1, a0, true);
+  p.closePath();
+}
+
+/* ==================================================================================
+   1. 材质
+   ================================================================================== */
+var MAT = {
+  gold : { lo:'#43200f', mid:'#8c5426', hi:'#d9a35f', top:'#ffe6bd', deep:'#2c1408' },
+  steel: { lo:'#2b3742', mid:'#6f8496', hi:'#c3d4e2', top:'#f4fbff', deep:'#151d25' },
+  blue : { lo:'#060c1e', mid:'#1d3f86', hi:'#4b83d8', top:'#cfe3ff', deep:'#03060f' }
+};
+function metalGrad(g, x, y, r, mat, bias){
+  bias = bias || 0;
+  var grd = g.createRadialGradient(x - r*0.36, y - r*0.44, r*0.04, x, y, r*1.18);
+  grd.addColorStop(0.00, mat.top);
+  grd.addColorStop(clamp(0.16 + bias, 0, 0.9), mat.hi);
+  grd.addColorStop(clamp(0.52 + bias, 0, 0.95), mat.mid);
+  grd.addColorStop(0.86, mat.lo);
+  grd.addColorStop(1.00, mat.deep);
+  return grd;
+}
+function linGrad(g, x0, y0, x1, y1, stops){
+  var grd = g.createLinearGradient(x0, y0, x1, y1);
+  for (var i = 0; i < stops.length; i++) grd.addColorStop(stops[i][0], stops[i][1]);
+  return grd;
+}
+/* 红宝石轴承 + 黄金套筒（三颗固定小螺丝） */
+function drawJewel(g, x, y, r, chaton, screws){
+  if (chaton){
+    g.beginPath(); g.arc(x, y, r*1.72, 0, TAU);
+    g.fillStyle = metalGrad(g, x, y, r*1.75, MAT.gold, 0.02); g.fill();
+    g.beginPath(); g.arc(x, y, r*1.62, 0, TAU);
+    g.lineWidth = Math.max(0.7, r*0.11); g.strokeStyle = 'rgba(255,228,180,.5)'; g.stroke();
+    g.beginPath(); g.arc(x, y, r*1.72, 0, TAU);
+    g.lineWidth = Math.max(0.6, r*0.08); g.strokeStyle = 'rgba(60,26,6,.75)'; g.stroke();
+  }
+  if (screws !== false){
+    for (var i = 0; i < 3; i++){
+      var a = i*TAU/3 - Math.PI/2 + 0.4;
+      drawScrew(g, x + Math.cos(a)*r*1.36, y + Math.sin(a)*r*1.36, r*0.30, a + Math.PI/2);
+    }
+  }
+  g.beginPath(); g.arc(x, y, r, 0, TAU);
+  var grd = g.createRadialGradient(x - r*0.34, y - r*0.42, r*0.05, x, y, r*1.02);
+  grd.addColorStop(0,'#ff9fb2'); grd.addColorStop(0.30,'#e0466a');
+  grd.addColorStop(0.68,'#96183a'); grd.addColorStop(1,'#4a0618');
+  g.fillStyle = grd; g.fill();
+  g.beginPath(); g.arc(x, y, r*0.30, 0, TAU);
+  g.fillStyle = 'rgba(8,0,4,.9)'; g.fill();
+  g.beginPath(); g.ellipse(x - r*0.40, y - r*0.46, r*0.27, r*0.16, -0.62, 0, TAU);
+  g.fillStyle = 'rgba(255,238,244,.8)'; g.fill();
+}
+/* 烤蓝钢螺丝 */
+function drawScrew(g, x, y, r, ang){
+  g.save(); g.translate(x, y); g.rotate(ang || 0);
+  g.beginPath(); g.arc(0, 0, r*1.16, 0, TAU);
+  g.fillStyle = 'rgba(0,0,0,.55)'; g.fill();
+  g.beginPath(); g.arc(0, 0, r, 0, TAU);
+  var grd = g.createRadialGradient(-r*0.36, -r*0.42, r*0.06, 0, 0, r*1.1);
+  grd.addColorStop(0,'#7ba4e0'); grd.addColorStop(0.34,'#2c53a3');
+  grd.addColorStop(0.72,'#0e1e44'); grd.addColorStop(1,'#04070f');
+  g.fillStyle = grd; g.fill();
+  g.beginPath(); g.arc(0, 0, r*0.88, 0, TAU);
+  g.lineWidth = Math.max(0.5, r*0.13); g.strokeStyle = 'rgba(178,208,255,.32)'; g.stroke();
+  g.beginPath(); g.moveTo(-r*0.76, 0); g.lineTo(r*0.76, 0);
+  g.lineWidth = Math.max(0.7, r*0.30); g.strokeStyle = 'rgba(0,0,0,.72)'; g.stroke();
+  g.lineWidth = Math.max(0.4, r*0.12); g.strokeStyle = 'rgba(206,228,255,.5)'; g.stroke();
+  g.beginPath(); g.arc(0, 0, r*0.80, Math.PI*1.02, Math.PI*1.62);
+  g.lineWidth = Math.max(0.5, r*0.16); g.strokeStyle = 'rgba(226,240,255,.55)'; g.stroke();
+  g.restore();
+}
+/* 黑镜面抛光（音锤头） */
+function blackPolishGrad(g, x0, y0, x1, y1){
+  return linGrad(g, x0, y0, x1, y1, [
+    [0.00,'#05070b'],[0.28,'#151b24'],[0.42,'#8d9dae'],[0.47,'#e9f3ff'],
+    [0.52,'#5d6b7c'],[0.68,'#101620'],[0.86,'#080b11'],[1.00,'#020407']
+  ]);
+}
+
+/* ==================================================================================
+   2. 视图与画布
+   ================================================================================== */
+var cv = document.getElementById('watch');
+var ctx = cv.getContext('2d');
+var VIEW = { cssW:0, cssH:0, dpr:1, scale:1, ox:0, oy:0, s:1 };
+var LAYER_SIZE = 980;
+var layerA = null, layerB = null, layersDirty = true;
+
+function resize(){
+  var rect = cv.parentNode.getBoundingClientRect();
+  var cssW = Math.max(320, rect.width), cssH = Math.max(320, rect.height);
+  var dpr = Math.min(window.devicePixelRatio || 1, 2.25);
+  cv.width = Math.round(cssW*dpr); cv.height = Math.round(cssH*dpr);
+  cv.style.width = cssW + 'px'; cv.style.height = cssH + 'px';
+  VIEW.cssW = cssW; VIEW.cssH = cssH; VIEW.dpr = dpr;
+  VIEW.scale = Math.min(cssW, cssH)/1000;
+  VIEW.ox = (cssW - 1000*VIEW.scale)/2;
+  VIEW.oy = (cssH - 1000*VIEW.scale)/2;
+  VIEW.s = dpr*VIEW.scale;
+  layersDirty = true;
+}
+function toView(px, py){
+  return { x: (px - VIEW.ox)/VIEW.scale - 500, y: (py - VIEW.oy)/VIEW.scale - 500 };
+}
+function makeLayer(){
+  var px = Math.max(64, Math.min(Math.ceil(LAYER_SIZE*VIEW.s), 2600));
+  var c = document.createElement('canvas');
+  c.width = px; c.height = px;
+  var g = c.getContext('2d');
+  g.setTransform(px/LAYER_SIZE, 0, 0, px/LAYER_SIZE, px/2, px/2);
+  return { cv:c, g:g, px:px };
+}
+
+/* ==================================================================================
+   3. 齿轮路径缓存
+   ================================================================================== */
+var LAY = buildLayout();
+var GEAR = {};
+function buildGearArt(){
+  for (var id in LAY.W){
+    var w = LAY.W[id];
+    var mtx = gearMetrics(w.z, w.m, { shift:w.x });
+    var pts = gearOutlinePoints(w.z, w.m, { shift:w.x, samples:(w.z > 40 ? 7 : 6), backlash:0.05 });
+    var p = pathOf(pts);
+    if (w.z > 16){
+      var hub = mtx.rf*0.30, slotR = mtx.rf*0.90;
+      var n = (w.z >= 50 ? 5 : 4), half = Math.PI/n*0.34;
+      for (var i = 0; i < n; i++){
+        annularSlot(p, hub*1.35, slotR, i*TAU/n + half, (i+1)*TAU/n - half);
+      }
+    }
+    GEAR[id] = { path:p, pts:pts, mtx:mtx, r:mtx.r, ra:mtx.ra, rf:mtx.rf,
+                 z:w.z, m:w.m, x:w.x, arb:w.arb, style:(w.z <= 16 ? 'pinion' : 'wheel') };
+  }
+}
+
+/* ==================================================================================
+   4. 陀飞轮 / 擒纵机构几何
+   ================================================================================== */
+var esc = {
+  fixedZ:96, fixedM:1.0, escZ:8, escM:1.0, wheelZ:15, wheelM:1.6,
+  rFixed:48, rEsc:4, armDist:52, ratioRel:12      /* 笼内相对转速 12 转/分 = 每拍半齿 */
+};
+var BAL = { hz:3.0, amp:268*D2R };                /* 21,600 vph = 3Hz，摆幅 ±268° */
+var ESCPOS = dial(esc.armDist, 100);              /* 擒纵轮轴（笼坐标系） */
+var PALLET = (function(){
+  var E = ESCPOS, len = Math.sqrt(E.x*E.x + E.y*E.y);
+  var toC = { x:-E.x/len, y:-E.y/len };
+  var pivotDist = 20, armLen = 12.5, stoneOut = 12.9;
+  var cosT = (pivotDist*pivotDist + armLen*armLen - stoneOut*stoneOut)/(2*pivotDist*armLen);
+  return {
+    x: E.x + toC.x*pivotDist, y: E.y + toC.y*pivotDist,
+    axis: Math.atan2(toC.y, toC.x), stoneAng: Math.acos(clamp(cosT,-1,1)),
+    armLen: armLen, stoneOut: stoneOut, pivotDist: pivotDist
+  };
+})();
+
+/* 实际走时 */
+var WATCH = { sec:0, thetaCenter:0, th:null, cageAng:0 };
+function syncTime(){
+  var d = new Date();
+  var sec = d.getHours()*3600 + d.getMinutes()*60 + d.getSeconds() + d.getMilliseconds()/1000;
+  WATCH.sec = sec;
+  WATCH.thetaCenter = TAU*((sec % 3600)/3600);        /* 中心轮 1 转/小时 */
+  WATCH.th = solveTrain(LAY, WATCH.thetaCenter);
+  WATCH.cageAng = WATCH.th.tourb;                     /* 陀飞轮框架 60 秒/转 */
+}
+
+/* ==================================================================================
+   5. 静态图层预渲染
+   ================================================================================== */
+function paintPerlage(g, R){
+  g.save();
+  g.beginPath(); g.arc(0,0,R,0,TAU); g.clip();
+  var bg = g.createRadialGradient(-R*0.3,-R*0.4,R*0.05, 0,0,R*1.2);
+  bg.addColorStop(0,'#3d2f22'); bg.addColorStop(0.42,'#2b2017');
+  bg.addColorStop(0.78,'#1d150f'); bg.addColorStop(1,'#110c08');
+  g.fillStyle = bg; g.fillRect(-R,-R,2*R,2*R);
+  var step = 15.5, rad = 12.2, row = 0, x, y;
+  for (y = -R - rad; y < R + rad; y += step*0.80){
+    var off = (row % 2) ? step/2 : 0; row++;
+    for (x = -R - rad + off; x < R + rad; x += step){
+      var gg = g.createRadialGradient(x - rad*0.36, y - rad*0.42, rad*0.06, x, y, rad);
+      gg.addColorStop(0.00,'rgba(255,226,186,.145)');
+      gg.addColorStop(0.42,'rgba(255,206,158,.048)');
+      gg.addColorStop(0.78,'rgba(0,0,0,.055)');
+      gg.addColorStop(1.00,'rgba(0,0,0,.14)');
+      g.fillStyle = gg;
+      g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+      g.beginPath(); g.arc(x, y, rad*0.985, 0, TAU);
+      g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,232,196,.05)'; g.stroke();
+    }
+  }
+  for (var i = 0; i < 2400; i++){
+    var ang = Math.random()*TAU, rr = Math.sqrt(Math.random())*R;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,235,205,.03)' : 'rgba(0,0,0,.05)';
+    g.fillRect(Math.cos(ang)*rr, Math.sin(ang)*rr, 1.1, 0.8);
+  }
+  g.restore();
+}
+/* 日内瓦波纹 */
+function paintGeneva(g, path, ang){
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,.75)'; g.shadowBlur = 16; g.shadowOffsetY = 6;
+  g.fillStyle = 'rgba(14,9,6,1)'; g.fill(path);
+  g.restore();
+  g.save();
+  g.clip(path);
+  g.fillStyle = 'rgba(52,36,23,1)'; g.fillRect(-520,-520,1040,1040);
+  g.save();
+  g.rotate(ang);
+  var bandW = 25, span = 780;
+  for (var x = -span; x < span; x += bandW){
+    var grd = g.createLinearGradient(x, 0, x + bandW, 0);
+    grd.addColorStop(0.00,'rgba(0,0,0,.32)');
+    grd.addColorStop(0.16,'rgba(255,232,198,.17)');
+    grd.addColorStop(0.34,'rgba(214,164,110,.11)');
+    grd.addColorStop(0.58,'rgba(120,78,42,.11)');
+    grd.addColorStop(0.84,'rgba(0,0,0,.27)');
+    grd.addColorStop(1.00,'rgba(0,0,0,.36)');
+    g.fillStyle = grd;
+    g.beginPath();
+    var N = 26, i, yy, o;
+    for (i = 0; i <= N; i++){
+      yy = -span/2 + span*i/N; o = Math.sin(yy*0.0135)*7.5;
+      if (i === 0) g.moveTo(x + o, yy); else g.lineTo(x + o, yy);
+    }
+    for (i = N; i >= 0; i--){
+      yy = -span/2 + span*i/N; o = Math.sin(yy*0.0135)*7.5;
+      g.lineTo(x + bandW + o, yy);
+    }
+    g.closePath(); g.fill();
+    g.beginPath();
+    for (i = 0; i <= N; i++){
+      yy = -span/2 + span*i/N; o = Math.sin(yy*0.0135)*7.5;
+      if (i === 0) g.moveTo(x + bandW*0.30 + o, yy); else g.lineTo(x + bandW*0.30 + o, yy);
+    }
+    g.lineWidth = 1.1; g.strokeStyle = 'rgba(255,236,206,.16)'; g.stroke();
+  }
+  g.restore();
+  g.save();
+  g.lineWidth = 9; g.strokeStyle = 'rgba(0,0,0,.42)'; g.stroke(path);
+  g.restore();
+  g.restore();
+  g.save();
+  g.lineWidth = 2.1; g.strokeStyle = 'rgba(255,233,198,.62)'; g.stroke(path);
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,248,232,.85)'; g.stroke(path);
+  g.restore();
+}
+/* 收腰条形夹板（Finger Bridge / Cock）：沿轴线变宽度 + 圆头 */
+function taperedBarPath(x0, y0, x1, y1, w0, w1, bulge){
+  var dx = x1-x0, dy = y1-y0, L = Math.sqrt(dx*dx + dy*dy);
+  var ux = dx/L, uy = dy/L, nx = -uy, ny = ux;
+  var p = new Path2D(), N = 22, i, t, w, x, y;
+  for (i = 0; i <= N; i++){
+    t = i/N; w = w0 + (w1-w0)*t + bulge*Math.sin(Math.PI*t);
+    x = x0 + dx*t + nx*w; y = y0 + dy*t + ny*w;
+    if (i === 0) p.moveTo(x, y); else p.lineTo(x, y);
+  }
+  for (i = 0; i <= 10; i++){
+    var th = Math.PI*i/10;
+    p.lineTo(x1 + w1*(nx*Math.cos(th) + ux*Math.sin(th)),
+             y1 + w1*(ny*Math.cos(th) + uy*Math.sin(th)));
+  }
+  for (i = N; i >= 0; i--){
+    t = i/N; w = w0 + (w1-w0)*t + bulge*Math.sin(Math.PI*t);
+    p.lineTo(x0 + dx*t - nx*w, y0 + dy*t - ny*w);
+  }
+  for (i = 0; i <= 10; i++){
+    var th2 = Math.PI*i/10;
+    p.lineTo(x0 - w0*(nx*Math.cos(th2) + ux*Math.sin(th2)),
+             y0 - w0*(ny*Math.cos(th2) + uy*Math.sin(th2)));
+  }
+  p.closePath();
+  return p;
+}
+/* 主夹板轮廓（含陀飞轮窗口与镂空开口） */
+function plateOpenings(){
+  return [
+    { x:-196, y:-56,  w:104, h:38, a:-0.42 },
+    { x:-152, y:138,  w: 84, h:34, a: 0.52 },
+    { x: 176, y:-166, w: 92, h:36, a: 0.24 },
+    { x: 214, y: 34,  w: 88, h:34, a:-0.72 },
+    { x:-238, y: 186, w: 74, h:32, a: 1.16 },
+    { x: 150, y: 236, w: 80, h:32, a:-0.28 }
+  ];
+}
+function platePath(){
+  var p = new Path2D();
+  p.moveTo(300, 0);  p.arc(0, 0, 300, 0, TAU);
+  p.moveTo(104, 195); p.arc(0, 195, 104, 0, TAU);
+  var ops = plateOpenings();
+  for (var i = 0; i < ops.length; i++){
+    var o = ops[i];
+    addPolyToPath(p, rrPoly(o.w, o.h, o.h/2, 4), o.x, o.y, o.a);
+  }
+  return p;
+}
+/* 桥板轮廓 */
+function bridgePaths(){
+  var list = [], i;
+  /* 条盒夹板 */
+  var b1 = new Path2D();
+  b1.moveTo(-172,-238);
+  b1.bezierCurveTo(-96,-292, 96,-292, 172,-238);
+  b1.bezierCurveTo(206,-214, 214,-168, 206,-142);
+  b1.bezierCurveTo(160,-176, 120,-186, 62,-186);
+  b1.bezierCurveTo(0,-186, -30,-176, -64,-186);
+  b1.bezierCurveTo(-118,-186, -162,-176, -206,-142);
+  b1.bezierCurveTo(-214,-168, -206,-214, -172,-238);
+  b1.closePath();
+  list.push({ id:'barrelBridge', path:b1, ang:-0.34, jewel:{ x:0, y:-135, r:11, chaton:true } });
+  /* 轮系夹板（三轮 + 四轮） */
+  var P3 = LAY.arbors.third, P4 = LAY.arbors.fourth;
+  var d34 = Math.sqrt((P4.x-P3.x)*(P4.x-P3.x) + (P4.y-P3.y)*(P4.y-P3.y));
+  var ex = (P4.x-P3.x)/d34, ey = (P4.y-P3.y)/d34;
+  var b2 = taperedBarPath(P3.x - ex*34, P3.y - ey*34, P4.x + ex*24, P4.y + ey*24,
+                          24, 21, 15);
+  list.push({ id:'trainBridge', path:b2, ang:0.55,
+              jewel:{ x:P3.x, y:P3.y, r:10, chaton:true },
+              jewel2:{ x:P4.x, y:P4.y, r:9.5, chaton:true } });
+  /* 陀飞轮下夹板（4-5 点方向伸向笼心） */
+  var A0 = dial(298, 148), A1 = { x:0, y:195 };
+  var ang = Math.atan2(A1.y-A0.y, A1.x-A0.x);
+  var b3 = taperedBarPath(A0.x, A0.y, A1.x, A1.y, 30, 14, 9);
+  list.push({ id:'tourbCock', path:b3, ang:ang + Math.PI/2, jewel:{ x:0, y:195, r:12, chaton:true } });
+  /* 分轮小夹板 */
+  var P2 = LAY.arbors.minute;
+  var b4 = new Path2D();
+  b4.moveTo(P2.x-34, P2.y+22);
+  b4.bezierCurveTo(P2.x-40, P2.y-18, P2.x-6, P2.y-40, P2.x+26, P2.y-32);
+  b4.bezierCurveTo(P2.x+44, P2.y-26, P2.x+46, P2.y+6, P2.x+30, P2.y+22);
+  b4.bezierCurveTo(P2.x+10, P2.y+40, P2.x-20, P2.y+40, P2.x-34, P2.y+22);
+  b4.closePath();
+  list.push({ id:'minuteCock', path:b4, ang:0.2, jewel:{ x:P2.x, y:P2.y, r:7.5, chaton:true } });
+  return list;
+}
+/* 图层 A：背景 + 鱼鳞纹主夹板 + 表壳内壁 */
+function buildLayerA(){
+  layerA = makeLayer();
+  var g = layerA.g;
+  var bg = g.createRadialGradient(0,0,180, 0,0,486);
+  bg.addColorStop(0,'#0e0b08'); bg.addColorStop(0.55,'#080606'); bg.addColorStop(1,'#020202');
+  g.fillStyle = bg;
+  g.beginPath(); g.arc(0,0,486,0,TAU); g.fill();
+
+  var plate = platePath();
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,.85)'; g.shadowBlur = 26; g.shadowOffsetY = 8;
+  g.fillStyle = '#241a12'; g.fill(plate, 'evenodd');
+  g.restore();
+
+  var perch = makeLayer();
+  paintPerlage(perch.g, 302);
+  g.save();
+  g.clip(plate, 'evenodd');
+  g.drawImage(perch.cv, -LAYER_SIZE/2, -LAYER_SIZE/2, LAYER_SIZE, LAYER_SIZE);
+  var sh = g.createRadialGradient(0,0,236, 0,0,320);
+  sh.addColorStop(0,'rgba(0,0,0,0)'); sh.addColorStop(1,'rgba(0,0,0,.55)');
+  g.fillStyle = sh;
+  g.beginPath(); g.arc(0,0,301,0,TAU); g.fill();
+  g.restore();
+
+  g.beginPath(); g.arc(0,0,300,0,TAU);
+  g.lineWidth = 3; g.strokeStyle = 'rgba(224,178,120,.35)'; g.stroke();
+  g.beginPath(); g.arc(0,0,296,0,TAU);
+  g.lineWidth = 1; g.strokeStyle = 'rgba(255,238,205,.30)'; g.stroke();
+
+  g.beginPath(); g.arc(0,195,104,0,TAU);
+  g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,.6)'; g.stroke();
+  g.beginPath(); g.arc(0,195,102,0,TAU);
+  g.lineWidth = 2.2; g.strokeStyle = 'rgba(255,232,192,.5)'; g.stroke();
+  g.beginPath(); g.arc(0,195,106,0,TAU);
+  g.lineWidth = 1.4; g.strokeStyle = 'rgba(255,244,222,.35)'; g.stroke();
+
+  /* 表壳内壁纵深 */
+  var ring = g.createRadialGradient(0,0,300, 0,0,404);
+  ring.addColorStop(0.00,'rgba(4,3,2,1)');
+  ring.addColorStop(0.26,'rgba(20,13,8,1)');
+  ring.addColorStop(0.58,'rgba(58,35,17,1)');
+  ring.addColorStop(0.80,'rgba(122,79,38,1)');
+  ring.addColorStop(1.00,'rgba(48,28,13,1)');
+  g.beginPath(); g.arc(0,0,404,0,TAU); g.arc(0,0,300,0,TAU,true);
+  g.fillStyle = ring; g.fill();
+  g.save();
+  g.beginPath(); g.arc(0,0,404,0,TAU); g.arc(0,0,300,0,TAU,true); g.clip();
+  for (var i = 0; i < 3; i++){
+    g.save(); g.rotate(-2.3 + i*2.1);
+    g.fillStyle = linGrad(g, -404, 0, 404, 0, [
+      [0.00,'rgba(255,231,196,0)'],[0.40,'rgba(255,231,196,0)'],
+      [0.52,'rgba(255,236,205,.20)'],[0.62,'rgba(255,236,205,0)'],[1.00,'rgba(255,231,196,0)']
+    ]);
+    g.fillRect(-404,-70,808,140);
+    g.restore();
+  }
+  g.restore();
+}
+/* 图层 B：桥板 + 螺丝 + 宝石 + 表壳平面 */
+function buildLayerB(){
+  layerB = makeLayer();
+  var g = layerB.g;
+  var bridges = bridgePaths(), i, j;
+  for (i = 0; i < bridges.length; i++){
+    var br = bridges[i];
+    paintGeneva(g, br.path, br.ang);
+    if (br.jewel){
+      g.save(); g.shadowColor='rgba(0,0,0,.8)'; g.shadowBlur=10; g.shadowOffsetY=2;
+      drawJewel(g, br.jewel.x, br.jewel.y, br.jewel.r, br.jewel.chaton);
+      g.restore();
+    }
+    if (br.jewel2){
+      g.save(); g.shadowColor='rgba(0,0,0,.8)'; g.shadowBlur=10; g.shadowOffsetY=2;
+      drawJewel(g, br.jewel2.x, br.jewel2.y, br.jewel2.r, br.jewel2.chaton);
+      g.restore();
+    }
+  }
+  var screws = [
+    [-150,-238, 9.5, 0.3], [ 150,-238, 9.5,-0.2], [ 204,-150, 8.5, 0.9],
+    [-204,-150, 8.5,-0.6], [  16,-128, 8.0, 0.2],
+    [LAY.arbors.third.x-46, LAY.arbors.third.y+34, 8.6, 1.1],
+    [LAY.arbors.fourth.x+40, LAY.arbors.fourth.y+30, 8.6,-0.7],
+    [LAY.arbors.fourth.x-30, LAY.arbors.fourth.y-44, 8.0, 0.4],
+    [ 44, 268, 9.0, 0.15], [-34, 306, 9.0,-0.4], [ 18, 214, 7.4, 0.0],
+    [LAY.arbors.minute.x+30, LAY.arbors.minute.y+16, 7.0, 0.5],
+    [LAY.arbors.minute.x-30, LAY.arbors.minute.y-12, 7.0,-0.9]
+  ];
+  for (i = 0; i < screws.length; i++) drawScrew(g, screws[i][0], screws[i][1], screws[i][2], screws[i][3]);
+
+  var cg = g.createRadialGradient(-150,-210,40, 0,0,410);
+  cg.addColorStop(0.00,'#7a4a22'); cg.addColorStop(0.62,'#a86b34');
+  cg.addColorStop(0.82,'#c88c4c'); cg.addColorStop(0.93,'#8d5526'); cg.addColorStop(1.00,'#4a2810');
+  g.beginPath(); g.arc(0,0,404,0,TAU); g.arc(0,0,352,0,TAU,true);
+  g.fillStyle = cg; g.fill();
+  g.beginPath(); g.arc(0,0,352,0,TAU);
+  g.lineWidth = 5; g.strokeStyle = 'rgba(20,8,2,.85)'; g.stroke();
+  g.beginPath(); g.arc(0,0,356,0,TAU);
+  g.lineWidth = 1.6; g.strokeStyle = 'rgba(255,226,180,.45)'; g.stroke();
+}
+function buildLayers(){ buildLayerA(); buildLayerB(); }
+
+/* ==================================================================================
+   6. 动态绘制
+   ================================================================================== */
+function drawGearArt(g, id, x, y, ang, opts){
+  opts = opts || {};
+  var G = GEAR[id];
+  g.save();
+  g.translate(x, y); g.rotate(ang);
+  g.fillStyle = metalGrad(g, 0, 0, G.ra*1.02, opts.mat || MAT.steel, opts.bias || 0);
+  g.fill(G.path, 'evenodd');
+  g.lineWidth = Math.max(0.55, G.m*0.16);
+  g.strokeStyle = 'rgba(255,247,232,.55)';
+  g.stroke(G.path);
+  g.save(); g.translate(0.7, 1.0);
+  g.lineWidth = Math.max(0.4, G.m*0.09); g.strokeStyle = 'rgba(0,0,0,.32)';
+  g.stroke(G.path);
+  g.restore();
+  if (G.style === 'wheel'){
+    g.beginPath(); g.arc(0,0,G.rf*0.90,0,TAU);
+    g.lineWidth = Math.max(0.5, G.m*0.10); g.strokeStyle = 'rgba(255,244,226,.35)'; g.stroke();
+    g.beginPath(); g.arc(0,0,G.rf*0.32,0,TAU);
+    g.lineWidth = Math.max(0.6, G.m*0.14); g.strokeStyle = 'rgba(255,244,226,.4)'; g.stroke();
+  }
+  g.restore();
+  if (opts.hub !== false){
+    var hr = Math.max(2.4, G.rf*0.19);
+    g.beginPath(); g.arc(x, y, hr, 0, TAU);
+    g.fillStyle = metalGrad(g, x, y, hr*1.2, MAT.steel, -0.05); g.fill();
+    g.beginPath(); g.arc(x, y, hr*0.45, 0, TAU);
+    g.fillStyle = 'rgba(0,0,0,.72)'; g.fill();
+  }
+}
+/* 主发条（预生成路径，随条盒轮缓慢转动） */
+var SPRING_PATH = (function(){
+  var p = new Path2D(), turns = 8.4, r0 = 19, r1 = 104, N = 760;
+  for (var i = 0; i <= N; i++){
+    var t = i/N, a = t*turns*TAU, r = r0 + (r1 - r0)*t;
+    var x = Math.cos(a)*r, y = Math.sin(a)*r;
+    if (i === 0) p.moveTo(x,y); else p.lineTo(x,y);
+  }
+  return p;
+})();
+function drawBarrel(g, ang){
+  var P = LAY.arbors.barrel, G = GEAR.barrel;
+  g.save();
+  g.translate(P.x, P.y);
+  /* 主发条 */
+  /* 鼓身（实心盘 + 内壁阴影） */
+  g.beginPath(); g.arc(0,0,G.rf,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, G.rf, MAT.gold, 0.06); g.fill();
+  g.beginPath(); g.arc(0,0,G.rf*0.985,0,TAU);
+  g.lineWidth = 2.4; g.strokeStyle = 'rgba(255,226,180,.32)'; g.stroke();
+  var inner = g.createRadialGradient(0,0,60, 0,0,112);
+  inner.addColorStop(0,'rgba(16,10,5,.55)'); inner.addColorStop(0.72,'rgba(16,10,5,.18)');
+  inner.addColorStop(1,'rgba(20,12,6,.6)');
+  g.beginPath(); g.arc(0,0,112,0,TAU); g.fillStyle = inner; g.fill();
+  /* 主发条：卷绕在鼓内 */
+  g.save(); g.rotate(-ang*0.35);
+  g.lineWidth = 4.4; g.lineCap = 'butt';
+  g.strokeStyle = linGrad(g, -104, -104, 104, 104,
+    [[0,'#b9cde4'],[0.32,'#4d6b8c'],[0.70,'#1e2e42'],[1,'#33475e']]);
+  g.stroke(SPRING_PATH);
+  g.lineWidth = 1.2; g.strokeStyle = 'rgba(214,236,255,.55)'; g.stroke(SPRING_PATH);
+  g.restore();
+  g.beginPath(); g.arc(0,0,110,0,TAU);
+  g.lineWidth = 3.0; g.strokeStyle = 'rgba(0,0,0,.42)'; g.stroke();
+  g.beginPath(); g.arc(0,0,113,0,TAU);
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(255,238,205,.30)'; g.stroke();
+  /* 齿圈 */
+  g.save(); g.rotate(ang);
+  g.fillStyle = metalGrad(g, 0, 0, G.ra, MAT.gold, 0.0);
+  g.fill(G.path, 'evenodd');
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,244,222,.5)'; g.stroke(G.path);
+  g.restore();
+  /* 棘轮 */
+  var rRat = 42, zRat = 30, k;
+  g.beginPath();
+  for (k = 0; k < zRat; k++){
+    var a = k*TAU/zRat;
+    g.moveTo(Math.cos(a - TAU/zRat*0.5)*rRat, Math.sin(a - TAU/zRat*0.5)*rRat);
+    g.arc(0,0,rRat, a - TAU/zRat*0.5, a + TAU/zRat*0.20, false);
+    g.lineTo(Math.cos(a + TAU/zRat*0.28)*rRat*0.86, Math.sin(a + TAU/zRat*0.28)*rRat*0.86);
+    g.lineTo(Math.cos(a + TAU/zRat*0.50)*rRat*0.86, Math.sin(a + TAU/zRat*0.50)*rRat*0.86);
+    g.closePath();
+  }
+  g.fillStyle = metalGrad(g, 0, 0, rRat, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.8; g.strokeStyle = 'rgba(255,247,232,.45)'; g.stroke();
+  g.beginPath(); g.arc(0,0,rRat*0.30,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, rRat*0.32, MAT.gold, 0.0); g.fill();
+  /* 棘爪 */
+  g.save(); g.translate(0,-72);
+  g.beginPath();
+  g.moveTo(-4,-16); g.lineTo(28,4); g.lineTo(30,12); g.lineTo(-6,-2); g.closePath();
+  g.fillStyle = metalGrad(g, 6, -6, 34, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,247,232,.5)'; g.stroke();
+  g.restore();
+  drawJewel(g, 0, -72, 6.2, true, false);
+  g.restore();
+}
+/* 擒纵轮（瑞士杠杆式俱乐部齿） */
+var ESCW = (function(){
+  var z = esc.wheelZ, m = esc.wheelM;
+  var rTip = m*(z/2 + 0.85), rRoot = m*(z/2 - 0.95);
+  var p = new Path2D(), step = TAU/z;
+  p.moveTo(rRoot, 0);
+  for (var i = 0; i < z; i++){
+    var a = i*step;
+    p.lineTo(Math.cos(a + step*0.30)*rRoot*1.06, Math.sin(a + step*0.30)*rRoot*1.06);
+    p.lineTo(Math.cos(a + step*0.52)*rTip*0.97, Math.sin(a + step*0.52)*rTip*0.97);
+    p.lineTo(Math.cos(a + step*0.62)*rTip,      Math.sin(a + step*0.62)*rTip);
+    p.lineTo(Math.cos(a + step*0.78)*rTip*0.995,Math.sin(a + step*0.78)*rTip*0.995);
+    p.lineTo(Math.cos(a + step*0.82)*rRoot*1.12,Math.sin(a + step*0.82)*rRoot*1.12);
+    p.lineTo(Math.cos(step*(i+1))*rRoot,        Math.sin(step*(i+1))*rRoot);
+  }
+  p.closePath();
+  return { path:p, rTip:rTip, rRoot:rRoot };
+})();
+var FIXED4 = (function(){
+  var pts = gearOutlinePoints(esc.fixedZ, esc.fixedM, { shift:0, samples:4, backlash:0.10 });
+  var p = pathOf(pts);
+  for (var k = 0; k < 5; k++) annularSlot(p, 17, 41, k*TAU/5 + 0.26, (k+1)*TAU/5 - 0.26);
+  return p;
+})();
+var ESCPIN = (function(){
+  return pathOf(gearOutlinePoints(esc.escZ, esc.escM, { shift:0.35, samples:5, backlash:0.10 }));
+})();
+function drawPalletFork(g, ang){
+  g.save();
+  g.translate(PALLET.x, PALLET.y);
+  g.rotate(PALLET.axis + ang);
+  g.beginPath();
+  g.moveTo(-PALLET.armLen*1.06, -1.5);
+  g.lineTo(-PALLET.armLen*0.10, -3.0);
+  g.lineTo(6.5, -2.4);  g.lineTo(11.5, -5.4); g.lineTo(14.5, -2.6);
+  g.lineTo(9.0, 0);
+  g.lineTo(14.5, 2.6);  g.lineTo(11.5, 5.4);  g.lineTo(6.5, 2.4);
+  g.lineTo(-PALLET.armLen*0.10, 3.0);
+  g.lineTo(-PALLET.armLen*1.06, 1.5);
+  g.closePath();
+  g.fillStyle = metalGrad(g, -4, -4, 20, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,250,235,.65)'; g.stroke();
+  for (var s = -1; s <= 1; s += 2){
+    g.save();
+    g.rotate(s*PALLET.stoneAng);
+    g.translate(-PALLET.armLen, 0);
+    g.beginPath(); rrPoly(6.8, 5.0, 1.2, 3);
+    g.translate(-3.4, -2.5);
+    var jg = linGrad(g, 0, 0, 6.8, 5.0, [[0,'#ff9db0'],[0.45,'#cf3557'],[1,'#5d0920']]);
+    g.beginPath();
+    g.moveTo(0,0); g.lineTo(6.8,0); g.lineTo(6.8,5.0); g.lineTo(0,5.0); g.closePath();
+    g.fillStyle = jg; g.fill();
+    g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,220,230,.6)'; g.stroke();
+    g.restore();
+  }
+  g.restore();
+  g.beginPath(); g.arc(PALLET.x, PALLET.y, 3.1, 0, TAU);
+  g.fillStyle = metalGrad(g, PALLET.x, PALLET.y, 3.4, MAT.steel, 0); g.fill();
+  g.beginPath(); g.arc(PALLET.x, PALLET.y, 1.3, 0, TAU);
+  g.fillStyle = 'rgba(0,0,0,.7)'; g.fill();
+}
+/* 无卡度 Gyromax 砝码摆轮 */
+function drawBalance(g, ang){
+  g.save(); g.rotate(ang);
+  var R = 46, rimW = 7.0, i;
+  g.beginPath(); g.arc(0,0,R,0,TAU); g.arc(0,0,R-rimW,0,TAU,true);
+  var rg = g.createLinearGradient(-R*0.95, -R*0.95, R*0.85, R*0.85);
+  rg.addColorStop(0.00,'#ffffff'); rg.addColorStop(0.18,'#e8f1f8');
+  rg.addColorStop(0.38,'#b3c3d2'); rg.addColorStop(0.60,'#71828f');
+  rg.addColorStop(0.80,'#3d4a56'); rg.addColorStop(0.93,'#7c8d9c');
+  rg.addColorStop(1.00,'#c9d8e4');
+  g.fillStyle = rg; g.fill();
+  g.beginPath(); g.arc(0,0,R-0.9,0,TAU);
+  g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,255,255,.75)'; g.stroke();
+  g.beginPath(); g.arc(0,0,R-rimW+0.9,0,TAU);
+  g.lineWidth = 1.2; g.strokeStyle = 'rgba(255,255,255,.45)'; g.stroke();
+  g.beginPath(); g.arc(0,0,R-rimW*0.5,Math.PI*0.95,Math.PI*1.62);
+  g.lineWidth = 2.2; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,255,255,.6)';
+  g.beginPath(); g.arc(0,0,R,0,TAU); g.stroke();
+  g.beginPath(); g.arc(0,0,R-rimW,0,TAU); g.stroke();
+  for (i = 0; i < 4; i++){
+    g.save(); g.rotate(i*TAU/4 + Math.PI/4);
+    g.beginPath();
+    g.moveTo(0,-4.2); g.lineTo(R-rimW+1.5,-2.6); g.lineTo(R-rimW+1.5, 2.6); g.lineTo(0, 4.2);
+    g.closePath();
+    g.fillStyle = metalGrad(g, 0, 0, R, MAT.steel, -0.04); g.fill();
+    g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,255,255,.45)'; g.stroke();
+    g.restore();
+  }
+  for (i = 0; i < 8; i++){
+    g.save(); g.rotate(i*TAU/8 + Math.PI/8);
+    g.translate(0, -R + 1.2);
+    g.beginPath(); g.rect(-4.6, -3.0, 9.2, 6.0);
+    g.fillStyle = metalGrad(g, 0, -3, 12, MAT.gold, 0.0); g.fill();
+    g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,236,200,.6)'; g.stroke();
+    g.beginPath(); g.moveTo(-2.2,0); g.lineTo(2.2,0);
+    g.lineWidth = 1.0; g.strokeStyle = 'rgba(60,30,8,.75)'; g.stroke();
+    g.restore();
+  }
+  g.beginPath(); g.arc(0,0,10.4,0,TAU);
+  g.fillStyle = metalGrad(g, 0,0, 11.8, MAT.steel, -0.02); g.fill();
+  g.beginPath(); g.arc(0,0,4.6,0,TAU);
+  g.fillStyle = metalGrad(g, 0,0, 5.0, MAT.gold, 0.0); g.fill();
+  g.save(); g.rotate(-ang*0.2);
+  g.beginPath(); g.ellipse(0, 7.0, 5.6, 4.0, 0, 0, TAU);
+  g.fillStyle = metalGrad(g, 0, 7, 7, MAT.steel, 0.0); g.fill();
+  g.beginPath(); g.arc(0, 9.4, 1.5, 0, TAU);
+  g.fillStyle = '#e04a68'; g.fill();
+  g.restore();
+  g.restore();
+}
+/* 宝玑双层游丝：内端随摆轮、外端固定于笼架，角度沿长度线性分配 —— 真实“呼吸” */
+function drawHairspring(g, balAng){
+  var turns = 11.5, r0 = 5.4, r1 = 31.5, N = 620, studA = Math.PI*0.72;
+  g.beginPath();
+  for (var i = 0; i <= N; i++){
+    var t = i/N;
+    var r = r0 + (r1 - r0)*t;
+    var oc = Math.max(0, (t - 0.86)/0.14);
+    var lift = oc*oc*(3-2*oc)*13.0;
+    var a = studA + t*turns*TAU + balAng*(1 - t) + lift/r1;
+    var rr = r + lift*0.55;
+    var x = Math.cos(a)*rr, y = Math.sin(a)*rr;
+    if (i === 0) g.moveTo(x,y); else g.lineTo(x,y);
+  }
+  g.lineWidth = 1.55; g.lineCap = 'round';
+  g.strokeStyle = linGrad(g, -34,-34, 34,34,
+    [[0,'#cfe6ff'],[0.45,'#4f79b6'],[0.75,'#1b3358'],[1,'#7ba0d4']]);
+  g.stroke();
+  g.lineWidth = 0.55; g.strokeStyle = 'rgba(224,240,255,.55)'; g.stroke();
+  g.beginPath(); g.arc(0,0,6.6,0,TAU);
+  g.fillStyle = metalGrad(g, 0,0, 7.4, MAT.gold, 0); g.fill();
+  g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,240,210,.7)'; g.stroke();
+  var sx = Math.cos(studA + turns*TAU)*(r1 + 13.0), sy = Math.sin(studA + turns*TAU)*(r1 + 13.0);
+  g.beginPath(); g.rect(sx-4.4, sy-4.4, 8.8, 8.8);
+  g.fillStyle = metalGrad(g, sx, sy, 7, MAT.steel, 0); g.fill();
+  g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+}
+/* 陀飞轮总成 */
+function drawTourbillon(g, t){
+  var cageR = 95, cage = WATCH.cageAng;
+  var beats = 6*t, n = Math.floor(beats), frac = beats - n;
+  var s = smooth(clamp(frac/0.30, 0, 1));
+  var forkSign = (n % 2 === 0) ? 1 : -1;
+  var escRel = -TAU/30*(n + s);
+  var forkAng = forkSign*(2*s - 1)*9.5*D2R;
+  var balAng = BAL.amp*Math.sin(TAU*BAL.hz*t + 0.35);
+
+  g.save();
+  g.translate(0, 195);
+  var cav = g.createRadialGradient(0,0,20, 0,0,cageR+8);
+  cav.addColorStop(0,'rgba(4,3,2,.96)'); cav.addColorStop(0.7,'rgba(12,8,5,.9)'); cav.addColorStop(1,'rgba(24,15,8,.5)');
+  g.beginPath(); g.arc(0,0,cageR+6,0,TAU); g.fillStyle = cav; g.fill();
+
+  /* 笼轮（随框架） */
+  g.save(); g.rotate(cage);
+  drawGearArt(g, 'carriageWheel', 0, 0, 0, { mat:MAT.steel, hub:false, bias:-0.03 });
+  g.restore();
+  /* 固定四轮（绝对静止，擒纵小齿轮在其上滚动） */
+  g.save();
+  g.fillStyle = metalGrad(g, 0, 0, esc.rFixed, MAT.gold, 0.16);
+  g.globalAlpha = 0.92;
+  g.fill(FIXED4, 'evenodd');
+  g.globalAlpha = 1;
+  g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,232,190,.30)'; g.stroke(FIXED4);
+  g.beginPath(); g.arc(0,0,esc.rFixed,0,TAU);
+  g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,236,200,.28)'; g.stroke();
+  g.restore();
+  /* 笼架下环 + 三臂 */
+  g.save(); g.rotate(cage);
+  var ringG = g.createRadialGradient(-30,-40,10, 0,0,cageR*1.05);
+  ringG.addColorStop(0,'#cfd9e3'); ringG.addColorStop(0.30,'#8e9dab');
+  ringG.addColorStop(0.65,'#4c5a67'); ringG.addColorStop(1,'#1d252d');
+  g.beginPath(); g.arc(0,0,cageR,0,TAU); g.arc(0,0,cageR-10.5,0,TAU,true);
+  g.fillStyle = ringG; g.fill();
+  g.lineWidth = 1.0; g.strokeStyle = 'rgba(240,250,255,.55)';
+  g.beginPath(); g.arc(0,0,cageR,0,TAU); g.stroke();
+  g.beginPath(); g.arc(0,0,cageR-10.5,0,TAU); g.stroke();
+  for (var a = 0; a < 3; a++){
+    g.save(); g.rotate(a*TAU/3 + 0.4);
+    g.beginPath();
+    g.moveTo(13,-4.6); g.lineTo(cageR-9,-2.6); g.lineTo(cageR-9, 2.6); g.lineTo(13, 4.6);
+    g.closePath();
+    g.fillStyle = linGrad(g, 0,-8, 0,8, [[0,'#c9d5e0'],[0.35,'#7d8c9b'],[0.75,'#3d4a56'],[1,'#151c23']]);
+    g.fill();
+    g.lineWidth = 0.7; g.strokeStyle = 'rgba(240,250,255,.45)'; g.stroke();
+    g.restore();
+  }
+  g.restore();
+  /* 擒纵小齿轮 + 擒纵轮 + 擒纵叉（笼内相对运动） */
+  g.save(); g.rotate(cage);
+  g.save();
+  g.translate(ESCPOS.x, ESCPOS.y);
+  g.rotate(escRel);
+  g.fillStyle = metalGrad(g, 0, 0, ESCW.rTip, MAT.steel, -0.05);
+  g.fill(ESCW.path);
+  g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,252,240,.7)'; g.stroke(ESCW.path);
+  g.beginPath(); g.arc(0,0,ESCW.rRoot*0.42,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, ESCW.rRoot*0.5, MAT.steel, -0.05); g.fill();
+  g.beginPath(); g.arc(0,0,2.0,0,TAU); g.fillStyle = 'rgba(0,0,0,.75)'; g.fill();
+  g.save();
+  g.rotate(0);
+  g.fillStyle = metalGrad(g, 0, 0, esc.rEsc*2.6, MAT.steel, 0.0);
+  g.fill(ESCPIN);
+  g.beginPath(); g.arc(0,0,esc.rEsc*1.6,0,TAU); g.fill();
+  g.lineWidth = 0.5; g.strokeStyle = 'rgba(255,252,240,.6)'; g.stroke(ESCPIN);
+  g.restore();
+  g.restore();
+  drawPalletFork(g, forkAng);
+  g.restore();
+  /* 摆轮 */
+  g.save(); g.rotate(cage); drawBalance(g, balAng); g.restore();
+  /* 游丝 */
+  g.save(); g.rotate(cage); drawHairspring(g, balAng); g.restore();
+  /* 笼架上框架 + 宝石 */
+  g.save(); g.rotate(cage);
+  var armG = linGrad(g, 0,-cageR, 0,cageR, [[0,'#e2ecf5'],[0.28,'#93a2b0'],[0.62,'#46535f'],[1,'#171e25']]);
+  for (var up = 0; up < 2; up++){
+    g.save(); g.rotate(up*Math.PI + Math.PI/3);
+    g.beginPath();
+    g.moveTo(12,-6.0);
+    g.bezierCurveTo(cageR*0.42,-7.6, cageR*0.72,-6.4, cageR-6,-3.2);
+    g.lineTo(cageR-6, 3.2);
+    g.bezierCurveTo(cageR*0.72, 6.4, cageR*0.42, 7.6, 12, 6.0);
+    g.closePath();
+    g.fillStyle = armG; g.fill();
+    g.lineWidth = 0.9; g.strokeStyle = 'rgba(240,250,255,.5)'; g.stroke();
+    g.restore();
+  }
+  g.beginPath(); g.arc(0,0,13.5,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, 15, MAT.steel, -0.02); g.fill();
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(245,252,255,.6)'; g.stroke();
+  drawJewel(g, 0, 0, 6.4, true, false);
+  for (var b = 0; b < 3; b++){
+    var ba = b*TAU/3 + 0.4;
+    drawScrew(g, Math.cos(ba)*(cageR-6), Math.sin(ba)*(cageR-6), 5.6, ba);
+  }
+  drawJewel(g, ESCPOS.x, ESCPOS.y, 3.4, false, false);
+  drawJewel(g, PALLET.x, PALLET.y, 3.4, false, false);
+  g.restore();
+  g.restore();
+}
+
+/* ==================================================================================
+   7. 三问报时：音簧 / 音锤 / 蜗形凸轮 / 调速器
+   ================================================================================== */
+var GONG = {
+  low : { R:338, w:5.8, a0: 20, a1:310, hitDeg:296 },
+  high: { R:316, w:5.0, a0: 12, a1:334, hitDeg:320 }
+};
+var HAMMER = [];
+(function initHammers(){
+  function mk(pivDeg, pivR, gongR, sign){
+    var p = dial(pivR, pivDeg);
+    var L = 74, tipL = L;
+    var cosB = (gongR*gongR - pivR*pivR - tipL*tipL)/(2*pivR*tipL);
+    var touch = Math.acos(clamp(cosB, -1, 1));
+    return {
+      pivDeg:pivDeg, pivR:pivR, L:L, x:p.x, y:p.y, sign:sign,
+      radial: Math.atan2(p.y, p.x), touch: touch,
+      rest: touch + 17*D2R, hit: touch - 5*D2R, ang: touch + 17*D2R,
+      hitAt: -1e9, gong: (gongR === GONG.low.R) ? 'low' : 'high'
+    };
+  }
+  HAMMER.push(mk(300, 268, GONG.low.R, -1));
+  HAMMER.push(mk(330, 252, GONG.high.R, -1));
+})();
+var VIB = [];
+var REPEAT = { active:false, events:[], end:-1, seq:null, governor:0, govVel:0 };
+var hmClock = null, hmStrike = null, hmSub = null, hmFps = null, hmTour = null;
+function el(id){ return document.getElementById(id); }
+
+function gongRadius(kind, deg, t){
+  var G = GONG[kind], phi = deg*D2R, r = G.R;
+  for (var i = 0; i < VIB.length; i++){
+    var v = VIB[i];
+    if (v.gong !== kind) continue;
+    var e = t - v.t0;
+    if (e < 0 || e > 2.2) continue;
+    var amp = 2.6*Math.exp(-e/0.34);
+    var sigma = 0.22 + 2.6*e;
+    var d = phi - v.phi;
+    while (d > Math.PI) d -= TAU;
+    while (d < -Math.PI) d += TAU;
+    r += amp*Math.exp(-(d*d)/(2*sigma*sigma))*Math.sin(TAU*26*e - d*7.0);
+  }
+  return r;
+}
+function drawGong(g, kind, t){
+  var G = GONG[kind], a0 = G.a0*D2R, a1 = G.a1*D2R, N = 420, i, a;
+  g.beginPath();
+  for (i = 0; i <= N; i++){
+    a = a0 + (a1 - a0)*i/N;
+    var r = gongRadius(kind, a/D2R, t);
+    var x = Math.cos(a - Math.PI/2)*r, y = Math.sin(a - Math.PI/2)*r;
+    if (i === 0) g.moveTo(x,y); else g.lineTo(x,y);
+  }
+  g.lineWidth = G.w + 4.6; g.lineCap = 'round';
+  g.strokeStyle = 'rgba(0,0,0,.72)'; g.stroke();
+  g.lineWidth = G.w;
+  g.strokeStyle = linGrad(g, -G.R, -G.R, G.R, G.R,
+    [[0,'#ffffff'],[0.20,'#dce8f4'],[0.46,'#93a4b6'],[0.72,'#4a5765'],[1,'#e6f0fa']]);
+  g.stroke();
+  g.lineWidth = G.w*0.36; g.strokeStyle = 'rgba(255,255,255,.72)'; g.stroke();
+  var ex = Math.cos(a0 - Math.PI/2)*G.R, ey = Math.sin(a0 - Math.PI/2)*G.R;
+  g.save();
+  g.translate(ex, ey); g.rotate(a0 - Math.PI/2);
+  g.beginPath(); g.rect(-6, -7.5, 22, 15);
+  g.fillStyle = metalGrad(g, 0, 0, 16, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.8; g.strokeStyle = 'rgba(255,255,255,.5)'; g.stroke();
+  g.restore();
+}
+function drawHammer(g, h){
+  g.save();
+  g.translate(h.x, h.y);
+  g.beginPath(); g.arc(0,0,15.5,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, 17, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 1.0; g.strokeStyle = 'rgba(255,252,240,.5)'; g.stroke();
+  g.rotate(h.radial + h.sign*h.ang);
+  g.beginPath();
+  g.moveTo(-34, -6.0); g.lineTo(h.L - 24, -5.2); g.lineTo(h.L - 24, 5.2); g.lineTo(-34, 7.0);
+  g.lineTo(-27, 0); g.closePath();
+  g.fillStyle = linGrad(g, -34,-7, h.L,7, [[0,'#e6eef7'],[0.30,'#93a3b3'],[0.66,'#46525f'],[1,'#1b232b']]);
+  g.fill();
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(250,255,255,.75)'; g.stroke();
+  g.beginPath(); g.arc(-35, 0.6, 7.4, 0, TAU);
+  g.fillStyle = metalGrad(g, -35, 0, 8.6, MAT.gold, 0.0); g.fill();
+  g.lineWidth = 0.8; g.strokeStyle = 'rgba(255,236,200,.6)'; g.stroke();
+  g.save();
+  g.translate(h.L - 25, 0);
+  g.beginPath(); g.rect(0, -10.5, 25, 21);
+  g.fillStyle = blackPolishGrad(g, 0, -10.5, 25, 10.5); g.fill();
+  g.lineWidth = 1.4; g.strokeStyle = 'rgba(232,244,255,.7)'; g.stroke();
+  g.beginPath(); g.rect(18.5, -8.2, 7.8, 16.4);
+  g.fillStyle = blackPolishGrad(g, 18.5, -8.2, 26.3, 8.2); g.fill();
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(245,252,255,.6)'; g.stroke();
+  g.beginPath(); g.moveTo(0,-10.5); g.lineTo(25,-10.5);
+  g.lineWidth = 1.0; g.strokeStyle = 'rgba(160,195,230,.55)'; g.stroke();
+  g.restore();
+  g.restore();
+  drawJewel(g, h.x, h.y, 6.2, true, false);
+}
+function hammerUpdate(t){
+  for (var i = 0; i < HAMMER.length; i++){
+    var h = HAMMER[i], u = t - h.hitAt;
+    if (u < -0.050) h.ang = h.rest;
+    else if (u < 0.014) h.ang = lerp(h.rest, h.hit, smooth((u + 0.050)/0.064));
+    else if (u < 0.9){
+      var damp = Math.exp(-(u - 0.014)*7.5);
+      h.ang = lerp(h.hit, h.rest, smooth((u - 0.014)/0.886)) + Math.sin(u*TAU*19)*2.0*D2R*damp;
+    } else h.ang = h.rest;
+  }
+}
+/* 报时蜗形凸轮组（时蜗轮 12 级 / 刻蜗轮 4 级 / 分蜗轮四段螺旋） */
+function drawSnails(g){
+  var hw, mw, cw, i;
+  if (!WATCH.th) return;
+  hw = WATCH.th.hour; mw = WATCH.th.minute; cw = WATCH.th.center;
+  g.save();
+  g.save(); g.rotate(hw);
+  var p1 = new Path2D(), steps = 12;
+  for (i = 0; i < steps; i++){
+    var a0 = i*TAU/steps, a1 = (i+1)*TAU/steps;
+    var r0 = Math.max(15.5, 22 + (steps - i - 1)*1.55);
+    var r1 = Math.max(15.5, 22 + (steps - i - 2)*1.55);
+    p1.moveTo(Math.cos(a0)*r0, Math.sin(a0)*r0);
+    p1.arc(0,0,r0,a0,a1,false);
+    p1.lineTo(Math.cos(a1)*r1, Math.sin(a1)*r1);
+    p1.arc(0,0,r1,a1,a0,true);
+    p1.closePath();
+  }
+  g.fillStyle = metalGrad(g, 0, 0, 42, MAT.steel, 0.0);
+  g.fill(p1, 'evenodd');
+  g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,252,240,.55)'; g.stroke(p1);
+  g.restore();
+  g.save(); g.rotate(-mw);
+  var p2 = new Path2D(), q = 4;
+  for (i = 0; i < q; i++){
+    var b0 = i*TAU/q, b1 = (i+1)*TAU/q;
+    var s0 = 15.5 - i*1.2, s1 = Math.max(9.4, 15.5 - (i+1)*1.2);
+    p2.moveTo(Math.cos(b0)*s0, Math.sin(b0)*s0);
+    p2.arc(0,0,s0,b0,b1,false);
+    p2.lineTo(Math.cos(b1)*s1, Math.sin(b1)*s1);
+    p2.arc(0,0,s1,b1,b0,true);
+    p2.closePath();
+  }
+  g.fillStyle = metalGrad(g, 0, 0, 24, MAT.gold, 0.0);
+  g.fill(p2, 'evenodd');
+  g.lineWidth = 0.6; g.strokeStyle = 'rgba(255,240,210,.6)'; g.stroke(p2);
+  g.restore();
+  g.save(); g.rotate(cw);
+  var p3 = new Path2D();
+  for (var seg = 0; seg < 4; seg++){
+    var sa = seg*TAU/4, N = 26;
+    for (var k = 0; k <= N; k++){
+      var tt = k/N, aa = sa + tt*TAU/4, rad = 4.4 + (1 - tt)*3.4;
+      if (seg === 0 && k === 0) p3.moveTo(Math.cos(aa)*rad, Math.sin(aa)*rad);
+      else p3.lineTo(Math.cos(aa)*rad, Math.sin(aa)*rad);
+    }
+    p3.lineTo(Math.cos(sa)*4.4, Math.sin(sa)*4.4);
+  }
+  p3.closePath();
+  g.fillStyle = metalGrad(g, 0, 0, 9, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.5; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+  g.restore();
+  drawJewel(g, 0, 0, 4.6, true, false);
+  g.restore();
+}
+/* 离心调速器 */
+function drawGovernor(g){
+  var p = dial(214, 316);
+  g.save();
+  g.translate(p.x, p.y);
+  g.beginPath(); g.arc(0,0,13,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, 15, MAT.steel, 0.0); g.fill();
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,252,240,.5)'; g.stroke();
+  g.rotate(REPEAT.governor);
+  for (var i = 0; i < 2; i++){
+    g.save(); g.rotate(i*Math.PI);
+    g.beginPath();
+    g.moveTo(0,-2.4); g.bezierCurveTo(14,-12, 26,-10, 30,-2);
+    g.lineTo(30, 2); g.bezierCurveTo(26, 6, 14, 4, 0, 2.4);
+    g.closePath();
+    g.fillStyle = linGrad(g, 0,-12, 30,12, [[0,'#dfe9f2'],[0.4,'#8b9aa9'],[0.75,'#3f4b57'],[1,'#1a222a']]);
+    g.fill();
+    g.lineWidth = 0.6; g.strokeStyle = 'rgba(250,255,255,.45)'; g.stroke();
+    g.restore();
+  }
+  g.beginPath(); g.arc(0,0,3.4,0,TAU);
+  g.fillStyle = metalGrad(g, 0,0,4,MAT.gold,0); g.fill();
+  g.restore();
+  drawJewel(g, p.x, p.y, 5.0, true, false);
+}
+
+/* ==================================================================================
+   8. 指针（中心轮 / 分轮 / 时轮联动，显示系统真实时间）
+   ================================================================================== */
+function drawHand(g, ang, len, tail, w, thick){
+  g.save(); g.rotate(ang);
+  /* 指针指向 -Y 方向：ang = 0 即 12 点，顺时针为正 */
+  var p = new Path2D();
+  p.moveTo(0, tail);
+  p.bezierCurveTo(w*0.55, tail*0.4, w*0.62, -len*0.30, w*0.52, -len*0.72);
+  p.lineTo(w*0.30, -len*0.965);
+  p.lineTo(0, -len);
+  p.lineTo(-w*0.30, -len*0.965);
+  p.lineTo(-w*0.52, -len*0.72);
+  p.bezierCurveTo(-w*0.62, -len*0.30, -w*0.55, tail*0.4, 0, tail);
+  p.closePath();
+  g.fillStyle = metalGrad(g, -len*0.25, -len*0.35, len, MAT.gold, 0.0);
+  g.fill(p);
+  if (thick > 0){ g.lineWidth = thick; g.strokeStyle = 'rgba(255,238,205,.66)'; g.stroke(p); }
+  var q = new Path2D();
+  q.moveTo(0, tail*0.45);
+  q.bezierCurveTo(w*0.22, 0, w*0.24, -len*0.34, w*0.16, -len*0.66);
+  q.lineTo(0, -len*0.74);
+  q.lineTo(-w*0.16, -len*0.66);
+  q.bezierCurveTo(-w*0.24, -len*0.34, -w*0.22, 0, 0, tail*0.45);
+  q.closePath();
+  g.fillStyle = 'rgba(14,9,5,.86)'; g.fill(q);
+  g.lineWidth = 0.7; g.strokeStyle = 'rgba(255,232,196,.35)'; g.stroke(q);
+  g.restore();
+}
+function drawHands(g){
+  var sec = WATCH.sec;
+  var aMin = TAU*((sec % 3600)/3600);
+  var aHour = TAU*((sec % 43200)/43200);
+  g.save();
+  g.translate(3.0, 4.0); g.globalAlpha = 0.34;
+  drawHand(g, aHour, 178, 24, 15.5, 0);
+  drawHand(g, aMin, 270, 30, 12.0, 0);
+  g.globalAlpha = 1;
+  g.restore();
+  drawHand(g, aHour, 178, 24, 15.5, 1.0);
+  drawHand(g, aMin, 270, 30, 12.0, 0.9);
+  g.beginPath(); g.arc(0,0,13,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, 14.5, MAT.gold, 0.0); g.fill();
+  g.lineWidth = 1.0; g.strokeStyle = 'rgba(255,240,210,.6)'; g.stroke();
+  g.beginPath(); g.arc(0,0,7.6,0,TAU);
+  g.fillStyle = metalGrad(g, 0, 0, 8.4, MAT.gold, 0.0); g.fill();
+  drawScrew(g, 0, 0, 5.0, 0.35);
+}
+
+/* ==================================================================================
+   9. 表壳顶面：表圈 / 表耳 / 表冠 / 三问滑块 / 玻璃反光
+   ================================================================================== */
+var slide = { x:-432, y:0, w:34, h:74, pull:0 };
+function drawCaseTop(g){
+  g.save();
+  g.beginPath(); g.arc(0,0,400,0,TAU);
+  g.lineWidth = 30;
+  g.strokeStyle = linGrad(g, -300,-320, 300,340, [
+    [0,'#f7dcb4'],[0.16,'#c98f4e'],[0.38,'#8a5626'],[0.55,'#d9a866'],
+    [0.72,'#7c4a20'],[0.88,'#e7c391'],[1,'#9a6432']
+  ]);
+  g.stroke();
+  g.beginPath(); g.arc(0,0,400,0,TAU);
+  g.lineWidth = 1.6; g.strokeStyle = 'rgba(255,246,228,.55)'; g.stroke();
+  g.beginPath(); g.arc(0,0,414,0,TAU);
+  g.lineWidth = 2.0; g.strokeStyle = 'rgba(58,30,10,.9)'; g.stroke();
+  g.beginPath(); g.arc(0,0,385,0,TAU);
+  g.lineWidth = 2.4; g.strokeStyle = 'rgba(255,240,214,.5)'; g.stroke();
+  for (var i = 0; i < 4; i++){
+    var baseA = (i < 2 ? -22 : 158) + (i % 2)*44;
+    g.save(); g.rotate(baseA*D2R);
+    var lp = new Path2D();
+    lp.moveTo(-38,-396); lp.bezierCurveTo(-40,-440, -30,-466, -14,-470);
+    lp.bezierCurveTo(14,-470, 30,-450, 32,-414); lp.bezierCurveTo(33,-398, 24,-390, 12,-392);
+    lp.closePath();
+    g.fillStyle = linGrad(g, -40,-400, 40,-470,
+      [[0,'#5d3416'],[0.28,'#c78e4c'],[0.52,'#f0d5aa'],[0.78,'#a86c33'],[1,'#4b2a12']]);
+    g.fill(lp);
+    g.lineWidth = 1.3; g.strokeStyle = 'rgba(255,238,208,.45)'; g.stroke(lp);
+    g.restore();
+  }
+  /* 表冠 */
+  g.save();
+  g.translate(418, 0);
+  g.beginPath(); g.rect(0, -25, 30, 50);
+  g.fillStyle = linGrad(g, 0,-25, 30,25, [[0,'#f2d6a8'],[0.4,'#b87c3c'],[0.72,'#6d421c'],[1,'#e3c08c']]);
+  g.fill();
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(255,240,214,.5)'; g.stroke();
+  for (var f = 0; f < 9; f++){
+    g.beginPath(); g.moveTo(4 + f*3.0, -22); g.lineTo(4 + f*3.0, 22);
+    g.lineWidth = 0.9; g.strokeStyle = 'rgba(40,20,6,.45)'; g.stroke();
+  }
+  g.restore();
+  /* 三问滑块 */
+  var sx = slide.x - slide.pull*20;
+  g.save();
+  g.translate(sx, slide.y);
+  g.beginPath(); rrPoly(slide.w + 6, slide.h + 6, 10, 4);
+  g.fillStyle = 'rgba(0,0,0,.6)'; g.fill();
+  g.beginPath(); rrPoly(slide.w, slide.h, 9, 4);
+  g.fillStyle = linGrad(g, -slide.w/2, 0, slide.w/2, 0,
+    [[0,'#5b3a1a'],[0.22,'#d3a463'],[0.44,'#f6e2bd'],[0.68,'#a9743a'],[1,'#4a2d12']]);
+  g.fill();
+  g.lineWidth = 1.1; g.strokeStyle = 'rgba(255,244,222,.55)'; g.stroke();
+  for (var k = 0; k < 6; k++){
+    var yy = -slide.h/2 + 10 + k*10.6;
+    g.beginPath(); g.moveTo(-9, yy); g.lineTo(9, yy);
+    g.lineWidth = 1.6; g.strokeStyle = 'rgba(48,26,8,.5)'; g.stroke();
+    g.beginPath(); g.moveTo(-9, yy+1); g.lineTo(9, yy+1);
+    g.lineWidth = 0.8; g.strokeStyle = 'rgba(255,242,214,.35)'; g.stroke();
+  }
+  g.beginPath(); g.arc(0, 0, 4.2, 0, TAU);
+  g.fillStyle = metalGrad(g, 0,0,5,MAT.gold,0); g.fill();
+  g.restore();
+  /* 玻璃反光 */
+  g.save();
+  g.beginPath(); g.arc(0,0,354,0,TAU); g.clip();
+  g.beginPath(); g.ellipse(-118,-176, 250, 118, -0.62, 0, TAU);
+  var gl = g.createLinearGradient(-300,-260, 60, 60);
+  gl.addColorStop(0,'rgba(255,255,255,.12)');
+  gl.addColorStop(0.45,'rgba(210,232,255,.045)');
+  gl.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle = gl; g.fill();
+  g.beginPath(); g.ellipse(-186,-236, 120, 40, -0.72, 0, TAU);
+  g.fillStyle = 'rgba(255,255,255,.06)'; g.fill();
+  var vg = g.createRadialGradient(0,0,180, 0,0,356);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(0.72,'rgba(0,0,0,0)');
+  vg.addColorStop(1,'rgba(0,0,0,.42)');
+  g.fillStyle = vg; g.beginPath(); g.arc(0,0,354,0,TAU); g.fill();
+  g.restore();
+  g.restore();
+}
+/* 零件标注 */
+var LABELS = [
+  { tx:  0,  ty: 195, lx:-456, ly: 366, ha:'left',  text:'60 秒飞行陀飞轮框架（钛金属镂空）' },
+  { tx:-14,  ty: 214, lx: 126, ly: 400, ha:'left',  text:'无卡度 Gyromax 砝码摆轮 · 3Hz' },
+  { tx: 42,  ty: 166, lx: 300, ly: 296, ha:'left',  text:'宝玑双层游丝（往复呼吸卷放）' },
+  { tx: 52,  ty: 205, lx: 300, ly: 228, ha:'left',  text:'瑞士杠杆式擒纵 · 红宝石瓦石' },
+  { tx:-232, ty:-100, lx:-456, ly:-330, ha:'left',  text:'黑镜面抛光精钢音锤 ×2' },
+  { tx:-336, ty:-140, lx:-456, ly:-268, ha:'left',  text:'环形精钢音簧（低音 / 高音）' },
+  { tx:  0,  ty:-135, lx: 126, ly:-400, ha:'left',  text:'条盒轮 · 96 齿 · 主发条 8 转' },
+  { tx:  0,  ty:   0, lx:-300, ly: 104, ha:'right', text:'中心轮 64 齿 · 1 转/小时' },
+  { tx:-38,  ty:  82, lx:-300, ly: 176, ha:'right', text:'三轮 / 四轮 · 节圆严格相切' },
+  { tx: 176, ty:-166, lx: 300, ly:-330, ha:'left',  text:'日内瓦波纹桥板 + 烤蓝钢螺丝' },
+  { tx:-196, ty: -56, lx:-456, ly:-104, ha:'left',  text:'鱼鳞粒纹（Perlage）主夹板' },
+  { tx:  24, ty:-150, lx: 300, ly:-262, ha:'left',  text:'红宝石轴承 + 黄金套筒' }
+];
+function drawLabels(g){
+  g.save();
+  g.font = '500 12.5px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  g.textAlign = 'left'; g.textBaseline = 'middle';
+  for (var i = 0; i < LABELS.length; i++){
+    var L = LABELS[i];
+    var ax = L.lx, ay = L.ly;
+    g.beginPath();
+    g.moveTo(L.tx, L.ty);
+    var mx = lerp(L.tx, ax, 0.62);
+    g.bezierCurveTo(mx, L.ty, mx, ay, ax, ay);
+    g.setLineDash([5,4]); g.lineWidth = 1;
+    g.strokeStyle = 'rgba(216,168,106,.5)'; g.stroke();
+    g.setLineDash([]);
+    g.beginPath(); g.arc(L.tx, L.ty, 3.2, 0, TAU);
+    g.fillStyle = 'rgba(232,190,126,.9)'; g.fill();
+    g.beginPath(); g.arc(L.tx, L.ty, 5.6, 0, TAU);
+    g.strokeStyle = 'rgba(232,190,126,.45)'; g.stroke();
+    var w = g.measureText(L.text).width;
+    var bx = (L.ha === 'left') ? ax + 8 : ax - w - 16;
+    g.beginPath();
+    g.moveTo(bx + 6, ay - 12);
+    g.lineTo(bx + w + 10, ay - 12);
+    g.quadraticCurveTo(bx + w + 16, ay - 12, bx + w + 16, ay - 6);
+    g.lineTo(bx + w + 16, ay + 6);
+    g.quadraticCurveTo(bx + w + 16, ay + 12, bx + w + 10, ay + 12);
+    g.lineTo(bx + 6, ay + 12);
+    g.quadraticCurveTo(bx, ay + 12, bx, ay + 6);
+    g.lineTo(bx, ay - 6);
+    g.quadraticCurveTo(bx, ay - 12, bx + 6, ay - 12);
+    g.closePath();
+    g.fillStyle = 'rgba(18,13,9,.82)'; g.fill();
+    g.lineWidth = 1; g.strokeStyle = 'rgba(216,168,106,.35)'; g.stroke();
+    g.fillStyle = '#f0dfc0';
+    g.fillText(L.text, bx + 8, ay + 0.5);
+  }
+  g.restore();
+}
+
+/* ==================================================================================
+   10. 三问报时音频：Web Audio 模态合成 + 毫秒级同步
+   ================================================================================== */
+var AUDIO = { ctx:null, master:null, buf:{}, ready:false, muted:false };
+function ensureAudio(){
+  if (AUDIO.ctx){
+    if (AUDIO.ctx.state === 'suspended') AUDIO.ctx.resume();
+    return;
+  }
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  var c = new AC();
+  AUDIO.ctx = c;
+  var master = c.createGain(); master.gain.value = 0.85;
+  var comp = c.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 20; comp.ratio.value = 3.2;
+  comp.attack.value = 0.002; comp.release.value = 0.28;
+  var hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+  master.connect(comp); comp.connect(hp); hp.connect(c.destination);
+  AUDIO.master = master;
+  AUDIO.buf.low  = renderGong(438, 4.2, 1.00);
+  AUDIO.buf.high = renderGong(660, 3.8, 0.92);
+  AUDIO.ready = true;
+}
+/* 自由-自由金属棒非谐分音 1 / 2.756 / 5.404 / 8.933 / 13.34 —— 真实音簧金属共鸣 */
+function smooth01(v){ v = v < 0 ? 0 : (v > 1 ? 1 : v); return v*v*(3 - 2*v); }
+function renderGong(f0, dur, gain){
+  var c = AUDIO.ctx, sr = c.sampleRate, N = Math.floor(sr*dur);
+  var buf = c.createBuffer(2, N, sr);
+  var parts = [
+    { r:1.000, a:1.00, tau:3.30, ph:0.0 },
+    { r:1.004, a:0.62, tau:2.70, ph:1.1 },
+    { r:2.756, a:0.44, tau:1.65, ph:2.3 },
+    { r:2.765, a:0.22, tau:1.35, ph:0.7 },
+    { r:5.404, a:0.24, tau:0.92, ph:3.1 },
+    { r:8.933, a:0.13, tau:0.55, ph:4.4 },
+    { r:13.340,a:0.07, tau:0.34, ph:5.6 },
+    { r:18.100,a:0.04, tau:0.22, ph:2.8 }
+  ];
+  /* 用二阶递推振荡器合成衰减正弦（y[n] = 2r·cosω·y[n-1] - r²·y[n-2]），
+     与逐样本 sin/exp 完全等价，但快一个数量级，避免首次报时卡顿 */
+  for (var ch = 0; ch < 2; ch++){
+    var d = buf.getChannelData(ch);
+    var det = ch === 0 ? 0.0 : 0.0016;
+    var n = parts.length;
+    var y1 = new Float64Array(n), y2 = new Float64Array(n);
+    var c1 = new Float64Array(n), c2 = new Float64Array(n);
+    for (var k = 0; k < n; k++){
+      var P = parts[k];
+      var w = TAU*f0*(P.r + det)/sr;
+      var rf = Math.exp(-1/(P.tau*sr));
+      var phi = P.ph + ch*0.6;
+      y1[k] = P.a*Math.sin(phi);
+      y2[k] = (P.a/rf)*Math.sin(phi - w);
+      c1[k] = 2*rf*Math.cos(w);
+      c2[k] = -rf*rf;
+    }
+    for (var i = 0; i < N; i++){
+      var t = i/sr, s = 0;
+      for (k = 0; k < n; k++){
+        var y = c1[k]*y1[k] + c2[k]*y2[k];
+        y2[k] = y1[k]; y1[k] = y;
+        s += y;
+      }
+      if (t < 0.006){ var e = 1 - t/0.006; s += e*e*(Math.random()*2 - 1)*0.9; }
+      s += 0.10*Math.exp(-t/0.22)*Math.sin(TAU*173*t);
+      var tail = dur - t;                       /* 末尾淡出，杜绝截断爆音 */
+      var fade = tail < 0.32 ? smooth01(tail/0.32) : 1;
+      d[i] = s*Math.min(1, t/0.0016)*fade*0.30*gain;
+    }
+  }
+  return buf;
+}
+function playGong(kind, at){
+  if (!AUDIO.ready || AUDIO.muted) return;
+  var c = AUDIO.ctx;
+  var src = c.createBufferSource();
+  src.buffer = AUDIO.buf[kind];
+  var gn = c.createGain();
+  gn.gain.value = (kind === 'low') ? 0.95 : 0.78;
+  if (c.createStereoPanner){
+    var pan = c.createStereoPanner();
+    pan.pan.value = (kind === 'low') ? -0.22 : 0.20;
+    src.connect(gn); gn.connect(pan); pan.connect(AUDIO.master);
+  } else {
+    src.connect(gn); gn.connect(AUDIO.master);
+  }
+  src.start(at);
+}
+/* 音频时钟 -> 页面时钟（用输出时间戳换算，保证视觉与声音同步） */
+function perfFromAudio(at){
+  var c = AUDIO.ctx;
+  if (!c) return performance.now()/1000;
+  if (c.getOutputTimestamp){
+    var ts = c.getOutputTimestamp();
+    if (ts && ts.contextTime) return ts.performanceTime/1000 + (at - ts.contextTime);
+  }
+  var lat = c.outputLatency || c.baseLatency || 0;
+  return performance.now()/1000 + (at - c.currentTime) + lat;
+}
+/* 三问报时序列：低音报时 / 高低合音报刻 / 高音报分 */
+function buildStrikeSequence(hours, minutes){
+  var h = ((hours + 11) % 12) + 1;
+  var q = Math.floor(minutes/15);
+  var mm = minutes % 15;
+  var ev = [], t = 0, i;
+  for (i = 0; i < h; i++){ ev.push({ t:t, low:true,  high:false, kind:'h' }); t += 0.62; }
+  for (i = 0; i < q; i++){ ev.push({ t:t, low:true,  high:true,  kind:'q' }); t += 0.97; }
+  for (i = 0; i < mm; i++){ ev.push({ t:t, low:false, high:true,  kind:'m' }); t += 0.40; }
+  return { events:ev, duration:t + 3.4, h:h, q:q, mm:mm };
+}
+function startRepeat(){
+  ensureAudio();
+  if (!AUDIO.ctx){ if (hmStrike) hmStrike.textContent = '无音频支持'; return; }
+  if (REPEAT.active) return;
+  var d = new Date();
+  var seq = buildStrikeSequence(d.getHours(), d.getMinutes());
+  REPEAT.seq = seq;
+  var t0 = AUDIO.ctx.currentTime + 0.10;
+  var base = perfFromAudio(t0);
+  REPEAT.events = [];
+  VIB.length = 0;
+  for (var i = 0; i < seq.events.length; i++){
+    var e = seq.events[i];
+    REPEAT.events.push({ time: base + e.t, low:e.low, high:e.high, kind:e.kind, fired:false, vib:false });
+    if (e.low)  playGong('low',  t0 + e.t);
+    if (e.high) playGong('high', t0 + e.t);
+  }
+  REPEAT.active = true;
+  REPEAT.end = base + seq.duration;
+  REPEAT.govVel = 1;
+  var txt = seq.h + ' 时';
+  if (seq.q) txt += ' ' + seq.q + ' 刻';
+  if (seq.mm) txt += ' ' + seq.mm + ' 分';
+  if (hmStrike) hmStrike.textContent = '报时中 · ' + txt;
+  if (hmSub) hmSub.textContent = '低音报时 / 合音报刻 / 高音报分';
+  var btn = el('btnRepeat');
+  if (btn) btn.classList.add('live');
+}
+function updateRepeat(t){
+  var i, e;
+  for (i = 0; i < REPEAT.events.length; i++){
+    e = REPEAT.events[i];
+    if (!e.fired && t >= e.time - 0.050){
+      e.fired = true;
+      if (e.low)  HAMMER[0].hitAt = e.time;
+      if (e.high) HAMMER[1].hitAt = e.time;
+    }
+    if (!e.vib && t >= e.time){
+      e.vib = true;
+      if (e.low)  VIB.push({ gong:'low',  t0:e.time, phi:GONG.low.hitDeg*D2R });
+      if (e.high) VIB.push({ gong:'high', t0:e.time, phi:GONG.high.hitDeg*D2R });
+    }
+  }
+  if (REPEAT.active){
+    REPEAT.governor += 0.62*REPEAT.govVel;
+    if (t > REPEAT.end){
+      REPEAT.active = false;
+      if (hmStrike) hmStrike.textContent = '报时完成';
+      if (hmSub) hmSub.textContent = '三问报时';
+      var btn = el('btnRepeat');
+      if (btn) btn.classList.remove('live');
+    }
+  } else {
+    REPEAT.govVel *= 0.985;
+    REPEAT.governor += 0.62*REPEAT.govVel;
+  }
+  for (i = VIB.length - 1; i >= 0; i--){ if (t - VIB[i].t0 > 2.3) VIB.splice(i,1); }
+  if (VIB.length > 40) VIB.splice(0, VIB.length - 40);
+}
+
+/* ==================================================================================
+   11. 主渲染
+   ================================================================================== */
+var showLabels = true, soundOn = true, fps = 60, lastFrame = performance.now();
+function render(t){
+  var g = ctx, s = VIEW.s;
+  g.setTransform(1,0,0,1,0,0);
+  g.clearRect(0,0,cv.width,cv.height);
+  g.setTransform(s, 0, 0, s, (VIEW.ox + 500*VIEW.scale)*VIEW.dpr, (VIEW.oy + 500*VIEW.scale)*VIEW.dpr);
+
+  var bg = g.createRadialGradient(-90,-190, 60, 0,0, 620);
+  bg.addColorStop(0,'rgba(70,50,32,.30)');
+  bg.addColorStop(0.42,'rgba(30,22,15,.13)');
+  bg.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle = bg;
+  g.fillRect(-520,-520,1040,1040);
+
+  if (layersDirty){ buildLayers(); layersDirty = false; }
+  g.drawImage(layerA.cv, -LAYER_SIZE/2, -LAYER_SIZE/2, LAYER_SIZE, LAYER_SIZE);
+
+  var th = WATCH.th, A = LAY.arbors;
+  drawBarrel(g, th.barrel);
+  drawGearArt(g, 'centerWheel',  A.center.x, A.center.y, th.centerWheel,  { mat:MAT.gold,  bias:0.04 });
+  drawGearArt(g, 'thirdWheel',   A.third.x,  A.third.y,  th.thirdWheel,   { mat:MAT.gold,  bias:0.04 });
+  drawGearArt(g, 'fourthWheel',  A.fourth.x, A.fourth.y, th.fourthWheel,  { mat:MAT.gold,  bias:0.04 });
+  drawGearArt(g, 'centerPinion', A.center.x, A.center.y, th.centerPinion, { mat:MAT.steel });
+  drawGearArt(g, 'thirdPinion',  A.third.x,  A.third.y,  th.thirdPinion,  { mat:MAT.steel });
+  drawGearArt(g, 'fourthPinion', A.fourth.x, A.fourth.y, th.fourthPinion, { mat:MAT.steel });
+  drawGearArt(g, 'cannonPinion', A.center.x, A.center.y, th.cannonPinion, { mat:MAT.steel });
+  drawGearArt(g, 'minuteWheel',  A.minute.x, A.minute.y, th.minuteWheel,  { mat:MAT.steel });
+  drawGearArt(g, 'minutePinion', A.minute.x, A.minute.y, th.minutePinion, { mat:MAT.steel });
+  drawGearArt(g, 'hourWheel',    A.hour.x,   A.hour.y,   th.hourWheel,    { mat:MAT.gold, bias:0.02 });
+
+  g.drawImage(layerB.cv, -LAYER_SIZE/2, -LAYER_SIZE/2, LAYER_SIZE, LAYER_SIZE);
+
+  drawGong(g, 'low', t);
+  drawGong(g, 'high', t);
+  drawTourbillon(g, t);
+  drawSnails(g);
+  drawGovernor(g);
+  for (var hi = 0; hi < HAMMER.length; hi++) drawHammer(g, HAMMER[hi]);
+  drawHands(g);
+  drawCaseTop(g);
+  if (showLabels) drawLabels(g);
+}
+
+/* ==================================================================================
+   12. 交互
+   ================================================================================== */
+function hitSlide(vx, vy){
+  var sx = slide.x - slide.pull*20;
+  return vx > sx - slide.w/2 - 16 && vx < sx + slide.w/2 + 16 &&
+         vy > slide.y - slide.h/2 - 16 && vy < slide.y + slide.h/2 + 16;
+}
+var pointerActive = false, pointerStartX = 0;
+cv.addEventListener('pointerdown', function(ev){
+  var r = cv.getBoundingClientRect();
+  var v = toView(ev.clientX - r.left, ev.clientY - r.top);
+  if (hitSlide(v.x, v.y)){
+    pointerActive = true;
+    pointerStartX = v.x;
+    slide.pull = Math.max(slide.pull, 0.02);
+    if (cv.setPointerCapture) cv.setPointerCapture(ev.pointerId);
+    cv.style.cursor = 'grabbing';
+  }
+});
+cv.addEventListener('pointermove', function(ev){
+  var r = cv.getBoundingClientRect();
+  var v = toView(ev.clientX - r.left, ev.clientY - r.top);
+  if (pointerActive){
+    slide.pull = clamp((pointerStartX - v.x)/22, 0, 1);
+  } else {
+    cv.style.cursor = hitSlide(v.x, v.y) ? 'grab' : 'default';
+  }
+});
+function endPointer(){
+  if (!pointerActive) return;
+  pointerActive = false;
+  startRepeat();
+  cv.style.cursor = 'default';
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+el('btnRepeat').addEventListener('click', function(){ ensureAudio(); startRepeat(); });
+el('chkLabels').addEventListener('change', function(e){ showLabels = e.target.checked; });
+el('chkSound').addEventListener('change', function(e){
+  soundOn = e.target.checked;
+  AUDIO.muted = !soundOn;
+  if (AUDIO.master) AUDIO.master.gain.value = soundOn ? 0.85 : 0.0;
+});
+window.addEventListener('keydown', function(e){
+  if (e.code === 'Space'){ e.preventDefault(); ensureAudio(); startRepeat(); }
+  if (e.key === 'l' || e.key === 'L'){ showLabels = !showLabels; el('chkLabels').checked = showLabels; }
+});
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize, 120); });
+
+/* ==================================================================================
+   13. 启动与自检
+   ================================================================================== */
+buildGearArt();
+resize();
+syncTime();
+hmClock = el('roClock'); hmStrike = el('roStrike'); hmSub = el('roStrikeSub');
+hmFps = el('roFps'); hmTour = el('roTour');
+
+/* 自检：中心距误差 + 齿面最小间隙（负值 = 穿模；过大 = 脱节） */
+function selfTest(){
+  var worstErr = 0, i, report = { 中心距最大误差:0, 齿廓啮合检验:[] };
+  for (i = 0; i < LAY.meshes.length; i++){
+    if (LAY.meshes[i].centerErr > worstErr) worstErr = LAY.meshes[i].centerErr;
+  }
+  report.中心距最大误差 = worstErr.toExponential(3);
+  for (i = 0; i < 4; i++){
+    var ms = LAY.meshes[i], Ga = GEAR[ms.a], Gb = GEAR[ms.b];
+    var pa = LAY.arbors[Ga.arb], pb = LAY.arbors[Gb.arb];
+    var minGap = Infinity, maxGap = -Infinity;
+    for (var k = 0; k < 24; k++){
+      var th = solveTrain(LAY, k/24*TAU/12);
+      var gap = meshClearance(Ga.pts, pa, th[Ga.arb], Gb.pts, pb, th[Gb.arb],
+                              3.6*Math.max(Ga.m, Gb.m), ms.pitch);
+      if (gap < minGap) minGap = gap;
+      if (gap > maxGap) maxGap = gap;
+    }
+    report.齿廓啮合检验.push(ms.a + ' ↔ ' + ms.b + '  z=' + ms.zA + '/' + ms.zB +
+      '  中心距 d=' + ms.d.toFixed(2) + '  r1+r2=' + ms.centerSum.toFixed(2) +
+      '  齿面间隙 ' + minGap.toFixed(3) + ' ~ ' + maxGap.toFixed(3));
+  }
+  window.__WATCH_SELFTEST__ = report;
+  try { console.log('%c[轮系几何自检]', 'color:#d8a86a;font-weight:700', report); } catch(e){}
+}
+selfTest();
+
+function frame(now){
+  requestAnimationFrame(frame);
+  var t = now/1000;
+  var dt = Math.min(0.1, (now - lastFrame)/1000);
+  lastFrame = now;
+  if (dt > 0) fps = fps*0.92 + (1/dt)*0.08;
+
+  syncTime();
+  updateRepeat(t);        /* 先触发敲击时刻，再求音锤姿态 —— 保证与打簧声同帧同步 */
+  hammerUpdate(t);
+  if (!pointerActive){ slide.pull *= 0.84; if (slide.pull < 0.01) slide.pull = 0; }
+
+  render(t);
+
+  if (hmClock){
+    var d = new Date();
+    hmClock.textContent = String(d.getHours()).padStart(2,'0') + ':' +
+      String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+  }
+  if (hmFps) hmFps.textContent = fps.toFixed(0);
+  if (hmTour) hmTour.textContent = '1 转 / 60 s';
+}
+requestAnimationFrame(frame);
+window.__WATCH__ = { LAY:LAY, GEAR:GEAR, WATCH:WATCH, esc:esc, escpos:ESCPOS, pallet:PALLET,
+                    hammer:HAMMER, gong:GONG, vib:VIB, repeat:REPEAT, bal:BAL,
+                    startRepeat:startRepeat, selfTest:selfTest };
+})();
+</script>
+
+</body>
+</html>

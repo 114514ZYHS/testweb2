@@ -1,0 +1,4331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<!--
+  像素 Live2D · 小鲸（whalegirl）—— 单文件版本
+  全部资源（调色板、像素引擎、自编点阵字体、角色美术、房间背景、
+  音乐与音效）均由本文件内的原生 JavaScript/Canvas/WebAudio 生成，
+  不含任何外部文件、第三方库或网络请求，双击即可离线运行。
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>像素 Live2D · 小鲸 whalegirl</title>
+<style>
+/* ============================================================================
+ * style.css  —  页面外壳样式
+ * 颜色一律使用 app.js 从 palette.js 注入的 CSS 变量，不出现硬编码色值。
+ * ==========================================================================*/
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: var(--ink);
+  overflow: hidden;
+}
+
+#app {
+  display: flex; height: 100vh; width: 100vw;
+}
+
+/* 主显示区：左侧 3/4 */
+#stagepane {
+  flex: 3 1 0;
+  min-width: 0;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  background: var(--sky);
+  border-right: 3px solid var(--navyMid);
+  overflow: hidden;
+}
+
+#stage {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+  box-shadow: 0 0 0 3px var(--navyMid), 0 0 0 6px var(--navy), 0 10px 30px rgba(0, 0, 0, .45);
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+
+#hint {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  color: var(--white);
+  font-size: 13px;
+  letter-spacing: 1px;
+  pointer-events: none;
+  transition: opacity .35s ease;
+  image-rendering: pixelated;
+}
+#hint.hide { opacity: 0; }
+
+/* 右边栏：交互 UI 区 */
+#side {
+  flex: 1 1 0;
+  min-width: 258px;
+  max-width: 360px;
+  padding: 12px 12px 24px;
+  background: var(--panel);
+  color: var(--white);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.title { margin: 2px 0 2px; }
+.subtitle { margin-bottom: 7px; opacity: .85; }
+
+.status {
+  border: 2px solid var(--line);
+  background: var(--navyMid);
+  padding: 5px 7px;
+  margin-bottom: 9px;
+}
+.statusrow { line-height: 1.5; }
+
+.sec { margin-bottom: 10px; }
+.sechead {
+  border-bottom: 2px solid var(--line);
+  margin-bottom: 6px;
+  padding-bottom: 2px;
+}
+
+.grid { display: grid; gap: 5px; }
+.g2 { grid-template-columns: repeat(2, 1fr); }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+
+.pxbtn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 3px 2px;
+  background: var(--navy);
+  border: 0;
+  border-top: 2px solid var(--navyHi);
+  border-left: 2px solid var(--navyHi);
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  cursor: pointer;
+  transition: background .08s linear;
+}
+.pxbtn:hover { background: var(--navyHi); }
+.pxbtn:active {
+  border-top-color: var(--ink);
+  border-left-color: var(--ink);
+  border-right-color: var(--navyHi);
+  border-bottom-color: var(--navyHi);
+}
+.pxbtn.on { background: var(--gold); }
+.pxbtn.on:hover { background: var(--gold); }
+.pxbtn.on .pxlabel { filter: none; }
+.pxbtn.off { background: var(--purpleDk); opacity: .85; }
+.pxbtn.off::after { content: ''; }
+
+.pxlabel {
+  image-rendering: pixelated;
+  display: block;
+  pointer-events: none;
+}
+
+.tip { margin-top: 4px; opacity: .7; }
+
+/* 窄屏时改为上下布局 */
+@media (max-width: 860px) {
+  #app { flex-direction: column; }
+  #stagepane { flex: 1 1 auto; border-right: 0; border-bottom: 3px solid var(--navyMid); }
+  #side { max-width: none; min-width: 0; flex: 0 0 auto; max-height: 46vh; }
+}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <section id="stagepane">
+      <canvas id="stage" width="336" height="288"></canvas>
+      <div id="hint">点击画面开启声音</div>
+    </section>
+    <aside id="side"></aside>
+  </div>
+
+  <!-- 引擎：调色板 -> 像素图元 -> 字体 -> 美术 -> 系统 -->
+  <script>
+/* ===================== palette.js ===================== */
+/* ============================================================================
+ * palette.js  —  受限调色板（集中管理，唯一色值来源）
+ * ----------------------------------------------------------------------------
+ * 全工程所有像素只允许使用本表索引。禁止在绘制代码中出现硬编码色值。
+ * 约定：索引 0 为“透明/空”，任何绘制函数遇到 0 都视为不写盘。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX || (global.PIX = {});
+
+  // 名称 -> 色值。顺序即索引。相近功能色聚在一起便于维护。
+  var DEFS = [
+    ['VOID',       '#10121f'], // 0  透明/空 标记（同时作为底色兜底）
+    ['OUTLINE',    '#141a33'], // 1  通用深色描边
+    ['HAIR_LINE',  '#1b2560'], // 2  头发描边
+    ['HAIR_HI',    '#a8c4ff'], // 3  发丝高光
+    ['HAIR_LIT',   '#7c9cf0'], // 4  发丝亮部
+    ['HAIR',       '#5578e0'], // 5  头发基色
+    ['HAIR_MID',   '#3a55bb'], // 6  头发中调
+    ['HAIR_DARK',  '#2a3d92'], // 7  头发暗部
+    ['HAIR_DEEP',  '#1d2b6b'], // 8  头发最深
+    ['SKIN_HI',    '#fff0e6'], // 9  皮肤高光
+    ['SKIN',       '#ffe0d0'], // 10 皮肤基色
+    ['SKIN_SHD',   '#f3c3ae'], // 11 皮肤暗部
+    ['SKIN_LINE',  '#d19484'], // 12 皮肤描边
+    ['WHITE_HI',   '#ffffff'], // 13 纯白
+    ['WHITE',      '#f6f7ff'], // 14 蕾丝白
+    ['WHITE_SHD',  '#dde2f7'], // 15 白色暗部
+    ['WHITE_MID',  '#c2c9ea'], // 16 白色中间调
+    ['WHITE_DEEP', '#9aa2cf'], // 17 白色深调
+    ['NAVY_HI',    '#4a5fbf'], // 18 藏青亮部
+    ['NAVY',       '#303f95'], // 19 藏青基色
+    ['NAVY_MID',   '#232f74'], // 20 藏青中调
+    ['NAVY_DARK',  '#182154'], // 21 藏青暗部
+    ['NAVY_DEEP',  '#10163a'], // 22 藏青最深
+    ['GOLD_HI',    '#ffeeb0'], // 23 金饰高光
+    ['GOLD',       '#f0c258'], // 24 金饰基色
+    ['GOLD_DARK',  '#b07f26'], // 25 金饰暗部
+    ['WHALE_HI',   '#9fe4f7'], // 26 鲸鱼亮部
+    ['WHALE',      '#4fb3e0'], // 27 鲸鱼基色
+    ['WHALE_DARK', '#2a72ad'], // 28 鲸鱼暗部
+    ['EYE_HI',     '#d8f0ff'], // 29 眼高光
+    ['EYE_IRIS',   '#4f8fe0'], // 30 虹膜
+    ['EYE_DEEP',   '#2456a8'], // 31 虹膜深
+    ['EYE_PUPIL',  '#16224d'], // 32 瞳孔
+    ['BLUSH',      '#ffb3b3'], // 33 腮红
+    ['BLUSH_SHD',  '#ef8f95'], // 34 腮红暗
+    ['MOUTH',      '#b8566a'], // 35 口腔
+    ['MOUTH_DK',   '#7d3446'], // 36 口腔深
+    ['SHOE_HI',    '#3a4aa0'], // 37 鞋亮部
+    ['SHOE',       '#26307c'], // 38 鞋基色
+    ['SHOE_DARK',  '#161d4e'], // 39 鞋暗部
+    ['ROOM_WALL',  '#cfd8f5'], // 40 墙面上
+    ['ROOM_WALL2', '#b9c4ee'], // 41 墙面下
+    ['ROOM_FLOOR', '#8f9ede'], // 42 地板上
+    ['ROOM_FLOOR2','#7b8bd0'], // 43 地板下
+    ['ROOM_WOOD',  '#c9b6e6'], // 44 木质/家具浅紫
+    ['PURPLE',     '#8f7ad6'], // 45 紫色主调
+    ['PURPLE_DK',  '#6a54b8'], // 46 紫色暗
+    ['LAMP_GLOW',  '#ffe9a8'], // 47 灯光
+    ['GLASS',      '#addcff'], // 48 玻璃/水
+    ['GLASS_DK',   '#6fb2e8'], // 49 玻璃深
+    ['CURTAIN',    '#eef1ff'], // 50 窗帘亮
+    ['CURTAIN_SHD','#c9d1f0'], // 51 窗帘暗
+    ['SHADOW',     '#b7c0e8'], // 52 投影
+    ['SKY',        '#2a3f8f'], // 53 夜空
+    ['SKY_DEEP',   '#1b2a63'], // 54 夜空深
+    ['POT',        '#c98f6a'], // 55 花盆
+    ['PLANT',      '#6bbf8a'], // 56 植物亮
+    ['PLANT_DK',   '#3f8f66'], // 57 植物暗
+    ['METAL',      '#c8cee8'], // 58 金属亮
+    ['METAL_DK',   '#8e96c4'], // 59 金属暗
+    ['TEAR',       '#9fd8ff'], // 60 泪滴
+    ['SWEAT',      '#bfe8ff'], // 61 汗滴
+    ['UI_PANEL',   '#1b2450'], // 62 面板底
+    ['UI_LINE',    '#7f8fd8']  // 63 面板描边
+  ];
+
+  var PAL = {}, HEX = [], i;
+  for (i = 0; i < DEFS.length; i++) { PAL[DEFS[i][0]] = i; HEX.push(DEFS[i][1]); }
+
+  // ImageData 视图用：小端序 0xAABBGGRR
+  var ABGR = new Uint32Array(HEX.length);
+  for (i = 0; i < HEX.length; i++) {
+    var h = HEX[i];
+    var r = parseInt(h.substr(1, 2), 16), g = parseInt(h.substr(3, 2), 16), b = parseInt(h.substr(5, 2), 16);
+    ABGR[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+  }
+
+  PIX.PAL = PAL;          // 名称 -> 索引
+  PIX.HEX = HEX;          // 索引 -> '#rrggbb'
+  PIX.ABGR = ABGR;        // 索引 -> ImageData 32bit
+  PIX.ABGR32 = ABGR;      // 引擎内部别名
+  PIX.PALETTE_DEFS = DEFS;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== pixel.js ===================== */
+/* ============================================================================
+ * pixel.js  —  索引化像素绘图引擎
+ * ----------------------------------------------------------------------------
+ * 设计决策：
+ *  1) 所有美术资源与合成缓冲都是 Uint8Array 索引位图（0 = 透明），
+ *     绘制过程完全不经过浮点颜色混合，从根本上杜绝抗锯齿 / 半像素。
+ *  2) 只有在最后输出到屏幕时，才通过调色板 LUT 一次性转成 RGBA。
+ *  3) 旋转 / 缩放一律用“逆向映射 + 最近邻取样”，取样点为像素中心。
+ *  4) 透明度用 4x4 有序抖动（Bayer）实现，保持调色板纯色不变。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX || (global.PIX = {});
+
+  var Bayer4 = new Uint8Array([0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]);
+  PIX.Bayer4 = Bayer4;
+
+  /* ------------------------------ Bitmap ------------------------------ */
+  function Bitmap(w, h) {
+    this.w = w; this.h = h;
+    this.d = new Uint8Array(w * h);
+    this._bb = null;             // 惰性计算的紧包围盒
+  }
+  Bitmap.prototype.dirty = function () { this._bb = null; return this; };
+  Bitmap.prototype.get = function (x, y) {
+    x |= 0; y |= 0;
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 0;
+    return this.d[y * this.w + x];
+  };
+  Bitmap.prototype.set = function (x, y, c) {
+    x |= 0; y |= 0;
+    if (!c || x < 0 || y < 0 || x >= this.w || y >= this.h) return;
+    this.d[y * this.w + x] = c;
+  };
+  Bitmap.prototype.clone = function () {
+    var b = new Bitmap(this.w, this.h);
+    b.d.set(this.d);
+    return b;
+  };
+  Bitmap.prototype.clear = function () { this.d.fill(0); this._bb = null; return this; };
+  Bitmap.prototype.fill = function (c) { this.d.fill(c); this._bb = null; return this; };
+
+  /** 不透明像素的紧包围盒；空图返回 null。所有 blit 都靠它跳过空白区域。 */
+  function bbox(bm) {
+    if (bm._bb !== null) return bm._bb;
+    var d = bm.d, w = bm.w, h = bm.h, x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (var y = 0; y < h; y++) {
+      var row = y * w, any = false;
+      for (var x = 0; x < w; x++) if (d[row + x]) { any = true; if (x < x0) x0 = x; if (x > x1) x1 = x; }
+      if (any) { if (y < y0) y0 = y; y1 = y; }
+    }
+    bm._bb = (x1 < 0) ? null : { x0: x0, y0: y0, x1: x1, y1: y1, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    return bm._bb;
+  }
+
+  /* ------------------------------ 基础图元 ------------------------------ */
+
+  function rect(bm, x, y, w, h, c) {
+    if (!c) return;
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+    var x0 = Math.max(0, x), y0 = Math.max(0, y);
+    var x1 = Math.min(bm.w, x + w), y1 = Math.min(bm.h, y + h);
+    if (x1 <= x0 || y1 <= y0) return;
+    for (var yy = y0; yy < y1; yy++) {
+      var row = yy * bm.w;
+      for (var xx = x0; xx < x1; xx++) bm.d[row + xx] = c;
+    }
+    bm._bb = null;
+  }
+
+  function hline(bm, x0, x1, y, c) {
+    if (x1 < x0) { var t = x0; x0 = x1; x1 = t; }
+    rect(bm, x0, y, x1 - x0 + 1, 1, c);
+  }
+  function vline(bm, x, y0, y1, c) {
+    if (y1 < y0) { var t = y0; y0 = y1; y1 = t; }
+    rect(bm, x, y0, 1, y1 - y0 + 1, c);
+  }
+
+  function line(bm, x0, y0, x1, y1, c) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    var dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    var sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy;
+    for (;;) {
+      bm.set(x0, y0, c);
+      if (x0 === x1 && y0 === y1) break;
+      var e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+    bm._bb = null;
+  }
+
+  /** 实心椭圆；中心允许 .5 偏移，半径可为小数。以像素中心做判定。 */
+  function ellipse(bm, cx, cy, rx, ry, c) {
+    if (rx <= 0 || ry <= 0) return;
+    var x0 = Math.max(0, Math.floor(cx - rx)), x1 = Math.min(bm.w - 1, Math.ceil(cx + rx));
+    var y0 = Math.max(0, Math.floor(cy - ry)), y1 = Math.min(bm.h - 1, Math.ceil(cy + ry));
+    var irx = 1 / (rx * rx), iry = 1 / (ry * ry);
+    for (var y = y0; y <= y1; y++) {
+      var dy = y + 0.5 - cy, dy2 = dy * dy * iry, row = y * bm.w;
+      if (dy2 > 1) continue;
+      for (var x = x0; x <= x1; x++) {
+        var dx = x + 0.5 - cx;
+        if (dx * dx * irx + dy2 <= 1) bm.d[row + x] = c;
+      }
+    }
+    bm._bb = null;
+  }
+
+  /** 椭圆环：外椭圆减内椭圆（扫描线直接判定，无临时缓冲） */
+  function ellipseRing(bm, cx, cy, rx, ry, thick, c) {
+    var x0 = Math.max(0, Math.floor(cx - rx)), x1 = Math.min(bm.w - 1, Math.ceil(cx + rx));
+    var y0 = Math.max(0, Math.floor(cy - ry)), y1 = Math.min(bm.h - 1, Math.ceil(cy + ry));
+    var irx = rx - thick, iry = ry - thick;
+    var orx = 1 / (rx * rx), ory = 1 / (ry * ry);
+    var nrx = irx > 0 ? 1 / (irx * irx) : Infinity, nry = iry > 0 ? 1 / (iry * iry) : Infinity;
+    for (var y = y0; y <= y1; y++) {
+      var dy = y + 0.5 - cy, ady = dy * dy, row = y * bm.w;
+      for (var x = x0; x <= x1; x++) {
+        var dx = x + 0.5 - cx, adx = dx * dx;
+        if (adx * orx + ady * ory <= 1 && adx * nrx + ady * nry > 1) bm.d[row + x] = c;
+      }
+    }
+    bm._bb = null;
+    return bm;
+  }
+
+  /** 把 mask 中非 0 处用颜色 c 盖到 bm 上 */
+  function stampMask(bm, mask, c) {
+    var bb = bbox(mask); if (!bb) return;
+    for (var y = bb.y0; y <= bb.y1; y++) {
+      var row = y * mask.w;
+      for (var x = bb.x0; x <= bb.x1; x++) if (mask.d[row + x]) bm.set(x, y, c);
+    }
+  }
+
+  /** 扫描线多边形填充（偶奇规则），pts = [[x,y],...] */
+  function poly(bm, pts, c) {
+    var n = pts.length; if (n < 3) return;
+    var minY = Infinity, maxY = -Infinity, i;
+    for (i = 0; i < n; i++) { if (pts[i][1] < minY) minY = pts[i][1]; if (pts[i][1] > maxY) maxY = pts[i][1]; }
+    var y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(bm.h - 1, Math.ceil(maxY));
+    var xs = [];
+    for (var y = y0; y <= y1; y++) {
+      var yc = y + 0.5, cnt = 0;
+      for (i = 0; i < n; i++) {
+        var a = pts[i], b = pts[(i + 1) % n];
+        var ay = a[1], by = b[1];
+        if ((ay <= yc && by > yc) || (by <= yc && ay > yc)) {
+          xs[cnt++] = a[0] + (yc - ay) / (by - ay) * (b[0] - a[0]);
+        }
+      }
+      xs.length = cnt;
+      xs.sort(function (p, q) { return p - q; });
+      for (i = 0; i + 1 < cnt; i += 2) {
+        var sx = Math.round(xs[i]), ex = Math.round(xs[i + 1]) - 1;
+        if (ex < sx) ex = sx;
+        hline(bm, sx, ex, y, c);
+      }
+    }
+    bm._bb = null;
+  }
+
+  /** 胶囊（粗线段），用于肢体 */
+  function capsule(bm, x0, y0, x1, y1, r, c) {
+    var steps = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    for (var i = 0; i <= steps; i++) {
+      var t = i / steps;
+      ellipse(bm, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r, r, c);
+    }
+  }
+
+  /** 水平镜像（生成左右对称部件） */
+  function mirrorX(src) {
+    var out = new Bitmap(src.w, src.h);
+    for (var y = 0; y < src.h; y++) {
+      var row = y * src.w;
+      for (var x = 0; x < src.w; x++) out.d[row + (src.w - 1 - x)] = src.d[row + x];
+    }
+    return out;
+  }
+
+  /** 给所有不透明像素的外缘补一圈描边（4 邻域），不改变原色块 */
+  function outlineSilhouette(bm, c) {
+    var src = bm.d.slice(), w = bm.w, h = bm.h;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        if (src[y * w + x]) continue;
+        if ((x > 0 && src[y * w + x - 1]) || (x < w - 1 && src[y * w + x + 1]) ||
+            (y > 0 && src[(y - 1) * w + x]) || (y < h - 1 && src[(y + 1) * w + x])) {
+          bm.d[y * w + x] = c;
+        }
+      }
+    }
+    bm._bb = null;
+    return bm;
+  }
+
+  /* ------------------------------ 合成 / 变换 ------------------------------ */
+
+  /**
+   * 把 src 画进 dst。
+   * 变换：dst = T(x,y) · R(angle) · S(scaleX,scaleY) · T(-anchorX,-anchorY)
+   * 即 src 上 (anchorX,anchorY) 这一点会落在 dst 的 (x,y) 上。
+   * 最近邻取样 + 像素中心，硬边；alpha<1 时用 Bayer 抖动做溶解。
+   */
+  function draw(dst, src, o) {
+    o = o || {};
+    var dx = o.x || 0, dy = o.y || 0;
+    var a = o.angle || 0;
+    var sx = (o.scaleX === undefined) ? 1 : o.scaleX;
+    var sy = (o.scaleY === undefined) ? 1 : o.scaleY;
+    var ax = o.anchorX || 0, ay = o.anchorY || 0;
+    var alpha = (o.alpha === undefined) ? 1 : o.alpha;
+    if (alpha <= 0 || sx === 0 || sy === 0) return;
+    var bb = o.box || bbox(src);
+    if (!bb) return;
+    if (bb.x1 < 0 || bb.y1 < 0 || bb.x0 >= src.w || bb.y0 >= src.h) return;
+    var sd = src.d, sw = src.w, sh = src.h, dd = dst.d, dw = dst.w, dh = dst.h;
+
+    // ---- 快速通道：无旋转无缩放（绝大多数部件每帧都走这里）----
+    if (a === 0 && sx === 1 && sy === 1) {
+      // 无旋转无缩放：纯整数平移，仍须扣除锚点
+      var ox = Math.round(dx - ax), oy = Math.round(dy - ay);
+      var fx0 = bb.x0, fx1 = bb.x1, fy0 = bb.y0, fy1 = bb.y1;
+      var tx0 = Math.max(0, fx0 + ox), tx1 = Math.min(dw - 1, fx1 + ox);
+      var ty0 = Math.max(0, fy0 + oy), ty1 = Math.min(dh - 1, fy1 + oy);
+      for (var ty = ty0; ty <= ty1; ty++) {
+        var srow = (ty - oy) * sw, drow = ty * dw;
+        if (alpha < 1) {
+          for (var tx = tx0; tx <= tx1; tx++) {
+            var cc = sd[srow + (tx - ox)]; if (!cc) continue;
+            if (Bayer4[((ty & 3) << 2) | (tx & 3)] >= alpha * 16) continue;
+            dd[drow + tx] = cc;
+          }
+        } else {
+          for (var tx2 = tx0; tx2 <= tx1; tx2++) {
+            var c2 = sd[srow + (tx2 - ox)]; if (!c2) continue;
+            dd[drow + tx2] = c2;
+          }
+        }
+      }
+      return;
+    }
+
+    // ---- 通用通道：变换 4 角求目标包围盒，逐像素逆向取样 ----
+    var ca = Math.cos(a), sa = Math.sin(a);
+    var corners = [[bb.x0, bb.y0], [bb.x1 + 1, bb.y0], [bb.x0, bb.y1 + 1], [bb.x1 + 1, bb.y1 + 1]];
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var k = 0; k < 4; k++) {
+      var ux = (corners[k][0] - ax) * sx, uy = (corners[k][1] - ay) * sy;
+      var px = dx + ux * ca - uy * sa, py = dy + ux * sa + uy * ca;
+      if (px < minX) minX = px; if (px > maxX) maxX = px;
+      if (py < minY) minY = py; if (py > maxY) maxY = py;
+    }
+    var gx0 = Math.max(0, Math.floor(minX)), gx1 = Math.min(dw - 1, Math.ceil(maxX));
+    var gy0 = Math.max(0, Math.floor(minY)), gy1 = Math.min(dh - 1, Math.ceil(maxY));
+    var isx = 1 / sx, isy = 1 / sy;
+    for (var y = gy0; y <= gy1; y++) {
+      var pyc = y + 0.5 - dy, drow2 = y * dw;
+      for (var x = gx0; x <= gx1; x++) {
+        var pxc = x + 0.5 - dx;
+        var rx = pxc * ca + pyc * sa;        // R(-a)
+        var ry = -pxc * sa + pyc * ca;
+        var qx = Math.floor(rx * isx + ax);
+        var qy = Math.floor(ry * isy + ay);
+        if (qx < 0 || qy < 0 || qx >= sw || qy >= sh) continue;
+        var c3 = sd[qy * sw + qx]; if (!c3) continue;
+        if (alpha < 1 && Bayer4[((y & 3) << 2) | (x & 3)] >= alpha * 16) continue;
+        dd[drow2 + x] = c3;
+      }
+    }
+  }
+
+  /**
+   * 逐行横向变形（用于裙摆 / 长发这类“沿结构方向延迟递增”的被动摆动）。
+   * dxAt(y) 返回该行整体水平位移（像素）。
+   */
+  function deformRows(src, out, dxAt) {
+    out.clear();
+    var bb = bbox(src); if (!bb) { out._bb = null; return out; }
+    var ow = out.w, oh = out.h;
+    var minX = Infinity, maxX = -Infinity;
+    for (var y = bb.y0; y <= bb.y1; y++) {
+      var sh = Math.round(dxAt(y));
+      var srow = y * src.w, drow = y * ow;
+      for (var x = bb.x0; x <= bb.x1; x++) {
+        var c = src.d[srow + x]; if (!c) continue;
+        var nx = x + sh;
+        if (nx < 0 || nx >= ow) continue;
+        out.d[drow + nx] = c;
+        if (nx < minX) minX = nx;
+        if (nx > maxX) maxX = nx;
+      }
+    }
+    // 直接给出紧包围盒，避免每帧全画布扫描
+    if (minX > maxX) out._bb = null;
+    else out._bb = { x0: minX, y0: bb.y0, x1: maxX, y1: bb.y1, w: maxX - minX + 1, h: bb.y1 - bb.y0 + 1 };
+    return out;
+  }
+
+  /** 直接贴图（整块不透明覆盖），可选裁剪矩形；部件拼装用 */
+  function stamp(dst, src, dx, dy, clip) {
+    var bb = bbox(src); if (!bb) return;
+    dx = Math.round(dx); dy = Math.round(dy);
+    var x0 = bb.x0, x1 = bb.x1, y0 = bb.y0, y1 = bb.y1;
+    if (clip) {
+      x0 = Math.max(x0, clip.x0 - dx); x1 = Math.min(x1, clip.x1 - dx);
+      y0 = Math.max(y0, clip.y0 - dy); y1 = Math.min(y1, clip.y1 - dy);
+    }
+    var xa = Math.max(0, x0 + dx), xb = Math.min(dst.w - 1, x1 + dx);
+    var ya = Math.max(0, y0 + dy), yb = Math.min(dst.h - 1, y1 + dy);
+    for (var y = ya; y <= yb; y++) {
+      var srow = (y - dy) * src.w, drow = y * dst.w;
+      for (var x = xa; x <= xb; x++) {
+        var c = src.d[srow + (x - dx)];
+        if (c) dst.d[drow + x] = c;
+      }
+    }
+    dst._bb = null;
+  }
+
+  /** 确定性伪随机（避免 Math.random 造成的不可复现美术） */
+  function makeRng(seed) {
+    var s = seed >>> 0;
+    return function () {
+      s ^= s << 13; s >>>= 0;
+      s ^= s >> 17;
+      s ^= s << 5;  s >>>= 0;
+      return s / 4294967296;
+    };
+  }
+
+  /* ------------------------------ 输出 ------------------------------ */
+  /** 索引位图 -> RGBA 字节（调色板 LUT，一次遍历） */
+  function toRGBA(bm, out) {
+    var n = bm.w * bm.h, d = bm.d, lut = PIX.ABGR32;
+    var o32 = out.u32 || (out.u32 = new Uint32Array(out.buffer, out.byteOffset || 0, n));
+    for (var i = 0; i < n; i++) o32[i] = lut[d[i]];
+    return out;
+  }
+
+  PIX.Bitmap = Bitmap;
+  PIX.bbox = bbox;
+  PIX.rect = rect;
+  PIX.hline = hline;
+  PIX.vline = vline;
+  PIX.line = line;
+  PIX.ellipse = ellipse;
+  PIX.ellipseRing = ellipseRing;
+  PIX.poly = poly;
+  PIX.capsule = capsule;
+  PIX.mirrorX = mirrorX;
+  PIX.stampMask = stampMask;
+  PIX.outlineSilhouette = outlineSilhouette;
+  PIX.draw = draw;
+  PIX.deformRows = deformRows;
+  PIX.stamp = stamp;
+  PIX.makeRng = makeRng;
+  PIX.toRGBA = toRGBA;
+  PIX.bmp = function (w, h) { return new Bitmap(w, h); };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== font.js ===================== */
+/* ============================================================================
+ * font.js  —  自编像素字体：英文 5x7 点阵 / 汉字 12x12 点阵
+ * ----------------------------------------------------------------------------
+ * · 拉丁字母、数字、标点：手工点阵，逐字 5x7（'#'=着墨，'.'=空）
+ * · 汉字与全角标点：12x12 点阵，数据由离线工具生成后内嵌于 font-data.js，
+ *   运行期不依赖任何外部字体或文件。
+ * · 混排规则：拉丁字形绘制在 12x12 汉字的第 3~9 行上，使基线对齐。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX || (global.PIX = {});
+
+  // ---------------------------------------------------------------- 5x7 字模
+  var RAW = {
+    'A': '.###./#...#/#...#/#####/#...#/#...#/#...#',
+    'B': '####./#...#/#...#/####./#...#/#...#/####.',
+    'C': '.###./#...#/#..../#..../#..../#...#/.###.',
+    'D': '####./#...#/#...#/#...#/#...#/#...#/####.',
+    'E': '#####/#..../#..../####./#..../#..../#####',
+    'F': '#####/#..../#..../####./#..../#..../#....',
+    'G': '.###./#...#/#..../#.###/#...#/#...#/.###.',
+    'H': '#...#/#...#/#...#/#####/#...#/#...#/#...#',
+    'I': '.###./..#../..#../..#../..#../..#../.###.',
+    'J': '..###/...#./...#./...#./...#./#..#./.##..',
+    'K': '#...#/#..#./#.#../##.../#.#../#..#./#...#',
+    'L': '#..../#..../#..../#..../#..../#..../#####',
+    'M': '#...#/##.##/#.#.#/#.#.#/#...#/#...#/#...#',
+    'N': '#...#/##..#/#.#.#/#.#.#/#..##/#...#/#...#',
+    'O': '.###./#...#/#...#/#...#/#...#/#...#/.###.',
+    'P': '####./#...#/#...#/####./#..../#..../#....',
+    'Q': '.###./#...#/#...#/#...#/#.#.#/#..#./.##.#',
+    'R': '####./#...#/#...#/####./#.#../#..#./#...#',
+    'S': '.####/#..../#..../.###./....#/....#/####.',
+    'T': '#####/..#../..#../..#../..#../..#../..#..',
+    'U': '#...#/#...#/#...#/#...#/#...#/#...#/.###.',
+    'V': '#...#/#...#/#...#/#...#/#...#/.#.#./..#..',
+    'W': '#...#/#...#/#...#/#.#.#/#.#.#/##.##/#...#',
+    'X': '#...#/#...#/.#.#./..#../.#.#./#...#/#...#',
+    'Y': '#...#/#...#/.#.#./..#../..#../..#../..#..',
+    'Z': '#####/....#/...#./..#../.#.../#..../#####',
+    'a': '...../...../.###./....#/.####/#...#/.####',
+    'b': '#..../#..../####./#...#/#...#/#...#/####.',
+    'c': '...../...../.###./#..../#..../#..../.###.',
+    'd': '....#/....#/.####/#...#/#...#/#...#/.####',
+    'e': '...../...../.###./#...#/#####/#..../.###.',
+    'f': '..##./.#.../.#.../####./.#.../.#.../.#...',
+    'g': '...../.####/#...#/#...#/.####/....#/.###.',
+    'h': '#..../#..../####./#...#/#...#/#...#/#...#',
+    'i': '..#../...../.##../..#../..#../..#../.###.',
+    'j': '...#./...../..##./...#./...#./#..#./.##..',
+    'k': '#..../#..../#..#./#.#../##.../#.#../#..#.',
+    'l': '.##../..#../..#../..#../..#../..#../.###.',
+    'm': '...../...../##.#./#.#.#/#.#.#/#...#/#...#',
+    'n': '...../...../####./#...#/#...#/#...#/#...#',
+    'o': '...../...../.###./#...#/#...#/#...#/.###.',
+    'p': '...../####./#...#/#...#/####./#..../#....',
+    'q': '...../.####/#...#/#...#/.####/....#/....#',
+    'r': '...../...../#.##./##.../#..../#..../#....',
+    's': '...../...../.####/#..../.###./....#/####.',
+    't': '.#.../.#.../####./.#.../.#.../.#.../..##.',
+    'u': '...../...../#...#/#...#/#...#/#...#/.####',
+    'v': '...../...../#...#/#...#/#...#/.#.#./..#..',
+    'w': '...../...../#...#/#...#/#.#.#/#.#.#/.#.#.',
+    'x': '...../...../#...#/.#.#./..#../.#.#./#...#',
+    'y': '...../#...#/#...#/#...#/.####/....#/.###.',
+    'z': '...../...../#####/...#./..#../.#.../#####',
+    '0': '.###./#...#/#..##/#.#.#/##..#/#...#/.###.',
+    '1': '..#../.##../..#../..#../..#../..#../.###.',
+    '2': '.###./#...#/....#/...#./..#../.#.../#####',
+    '3': '#####/...#./..##./....#/....#/#...#/.###.',
+    '4': '...#./..##./.#.#./#..#./#####/...#./...#.',
+    '5': '#####/#..../####./....#/....#/#...#/.###.',
+    '6': '..##./.#.../#..../####./#...#/#...#/.###.',
+    '7': '#####/....#/...#./..#../.#.../.#.../.#...',
+    '8': '.###./#...#/#...#/.###./#...#/#...#/.###.',
+    '9': '.###./#...#/#...#/.####/....#/...#./.##..',
+    '.': '...../...../...../...../...../.##../.##..',
+    ',': '...../...../...../...../.##../.##../.#...',
+    '!': '..#../..#../..#../..#../..#../...../..#..',
+    '?': '.###./#...#/....#/..##./..#../...../..#..',
+    ':': '...../..#../..#../...../..#../..#../.....',
+    ';': '...../..#../..#../...../..#../..#../.#...',
+    "'": '..#../..#../...../...../...../...../.....',
+    '"': '.#.#./.#.#./...../...../...../...../.....',
+    '-': '...../...../...../.###./...../...../.....',
+    '_': '...../...../...../...../...../...../#####',
+    '+': '...../..#../..#../#####/..#../..#../.....',
+    '=': '...../...../#####/...../#####/...../.....',
+    '*': '...../#.#.#/.###./#####/.###./#.#.#/.....',
+    '/': '....#/....#/...#./..#../.#.../#..../#....',
+    '\\': '#..../#..../.#.../..#../...#./....#/....#',
+    '(': '...#./..#../.#.../.#.../.#.../..#../...#.',
+    ')': '.#.../..#../...#./...#./...#./..#../.#...',
+    '[': '..###/..#../..#../..#../..#../..#../..###',
+    ']': '###../..#../..#../..#../..#../..#../###..',
+    '<': '...#./..#../.#.../#..../.#.../..#../...#.',
+    '>': '.#.../..#../...#./....#/...#./..#../.#...',
+    '~': '...../...../.##.#/#..#./...../...../.....',
+    '%': '##..#/##..#/...#./..#../.#.../#..##/#..##',
+    '&': '.##../#..#./#..#./.##../#.#.#/#..#./.##.#',
+    '@': '.###./#...#/#.###/#.#.#/#.###/#..../.###.',
+    '#': '.#.#./.#.#./#####/.#.#./#####/.#.#./.#.#.',
+    '^': '..#../.#.#./#...#/...../...../...../.....',
+    '|': '..#../..#../..#../..#../..#../..#../..#..',
+    '$': '..#../.####/#.#../.###./..#.#/####./..#..',
+    ' ': '...../...../...../...../...../...../.....'
+  };
+
+  var GW = 5, GH = 7;
+  var NARROW = { '.': 3, ',': 3, '!': 3, ':': 3, ';': 3, "'": 3, '|': 3, ' ': 4 };
+
+  // 解析成扁平数组，运行期零字符串操作
+  var FONT = {};                    // char -> Uint8Array(35)
+  for (var ch in RAW) {
+    if (!Object.prototype.hasOwnProperty.call(RAW, ch)) continue;
+    var rows = RAW[ch].split('/');
+    var g = new Uint8Array(GW * GH);
+    for (var y = 0; y < GH; y++) {
+      var r = rows[y] || '';
+      for (var x = 0; x < GW; x++) g[y * GW + x] = (r.charAt(x) === '#') ? 1 : 0;
+    }
+    FONT[ch] = g;
+  }
+
+  // ------------------------------------------------------------ 字符分类
+  function isCJK(cp) {
+    return (cp >= 0x2e80 && cp <= 0x9fff) || (cp >= 0xf900 && cp <= 0xfaff) ||
+           (cp >= 0x3000 && cp <= 0x303f) || (cp >= 0xff00 && cp <= 0xffef) ||
+           (cp >= 0xfe30 && cp <= 0xfe4f);
+  }
+  PIX.isCJK = isCJK;
+
+  var CJK_W = 12, CJK_ADV = 13;
+  var LAT_ADV = 6, LAT_YOFF = 3;    // 拉丁字形下移 3 行以对齐汉字基线
+
+  /** 取某字符的点阵数据（汉字来自 CJK 表，返回 12x12 的布尔串） */
+  function cjkGlyph(cp) {
+    var table = PIX.CJK;
+    if (!table) return null;
+    return table[String.fromCharCode(cp)] || null;
+  }
+
+  /** 单个字符的步进宽度 */
+  function advanceOf(cp) {
+    if (isCJK(cp)) return CJK_ADV;
+    var s = String.fromCharCode(cp);
+    if (NARROW[s] !== undefined) return NARROW[s];
+    return LAT_ADV;
+  }
+
+  /** 文本宽度（单行） */
+  function measureLine(str) {
+    var w = 0;
+    for (var i = 0; i < str.length; i++) {
+      var cp = str.codePointAt(i);
+      if (cp > 0xffff) i++;
+      w += advanceOf(cp);
+    }
+    return w;
+  }
+
+  var NO_LINE_START = '，。！？、；：）】」』…—·”’!?,.:;)]}';
+  var NO_LINE_END = '（【「『“‘([{';
+
+  /** 按像素宽度折行；中英混排，避免行首行尾标点 */
+  function wrap(str, maxW) {
+    var lines = [], cur = '', curW = 0, i = 0;
+    while (i < str.length) {
+      var cp = str.codePointAt(i);
+      var len = cp > 0xffff ? 2 : 1;
+      var ch = str.substr(i, len);
+      i += len;
+      if (ch === '\n') { lines.push(cur); cur = ''; curW = 0; continue; }
+      var adv = advanceOf(cp);
+      if (curW + adv > maxW && cur.length) {
+        // 行首禁则：标点跟随上一行
+        if (NO_LINE_START.indexOf(ch) >= 0) {
+          cur += ch; lines.push(cur); cur = ''; curW = 0; continue;
+        }
+        // 行尾禁则：把上一字符挪到下一行
+        var lastCp = cur.length ? cur.codePointAt(cur.length - 1) : 0;
+        if (cur.length > 1 && NO_LINE_END.indexOf(String.fromCharCode(lastCp)) >= 0) {
+          cur = cur.slice(0, -1);
+          lines.push(cur);
+          cur = String.fromCharCode(lastCp) + ch;
+          curW = advanceOf(lastCp) + adv;
+        } else {
+          lines.push(cur); cur = ch; curW = adv;
+        }
+      } else {
+        cur += ch; curW += adv;
+      }
+    }
+    lines.push(cur);
+    return lines;
+  }
+
+  /**
+   * 在索引位图上绘制文本。
+   * opts: { maxWidth, lineHeight, align:'left'|'center'|'right', shadow }
+   * 返回 { w, h, lines }
+   */
+  function drawText(bm, str, x, y, color, opts) {
+    opts = opts || {};
+    var lh = opts.lineHeight || 15;
+    var lines = (opts.maxWidth ? wrap(str, opts.maxWidth) : str.split('\n'));
+    var maxW = 0, li, i;
+    for (li = 0; li < lines.length; li++) maxW = Math.max(maxW, measureLine(lines[li]));
+
+    var ox = x;
+    if (opts.align === 'center') ox = x - Math.round(maxW / 2);
+    else if (opts.align === 'right') ox = x - maxW;
+
+    for (li = 0; li < lines.length; li++) {
+      var line = lines[li], cx = ox, cy = y + li * lh;
+      for (i = 0; i < line.length; i++) {
+        var cp = line.codePointAt(i);
+        if (cp > 0xffff) i++;
+        if (isCJK(cp)) {
+          var bits = cjkGlyph(cp);
+          if (bits) {
+            for (var gy = 0; gy < CJK_W; gy++) {
+              var rowHex = bits.substr(gy * 3, 3);
+              var v = parseInt(rowHex, 16);
+              if (!v) continue;
+              for (var gx = 0; gx < CJK_W; gx++) {
+                if (v & (1 << (CJK_W - 1 - gx))) {
+                  if (opts.shadow) bm.set(cx + gx + 1, cy + gy + 1, opts.shadow);
+                  bm.set(cx + gx, cy + gy, color);
+                }
+              }
+            }
+          } else {
+            // 缺字兜底：空心方块
+            for (var bx = 0; bx < CJK_W; bx++) {
+              bm.set(cx + bx, cy, color); bm.set(cx + bx, cy + CJK_W - 1, color);
+              bm.set(cx, cy + bx, color); bm.set(cx + CJK_W - 1, cy + bx, color);
+            }
+          }
+          cx += CJK_ADV;
+        } else {
+          var g = FONT[String.fromCharCode(cp)];
+          if (g) {
+            for (var ly = 0; ly < GH; ly++) {
+              for (var lx = 0; lx < GW; lx++) {
+                if (g[ly * GW + lx]) {
+                  if (opts.shadow) bm.set(cx + lx + 1, cy + ly + LAT_YOFF + 1, opts.shadow);
+                  bm.set(cx + lx, cy + ly + LAT_YOFF, color);
+                }
+              }
+            }
+          }
+          cx += NARROW[String.fromCharCode(cp)] !== undefined ? NARROW[String.fromCharCode(cp)] : LAT_ADV;
+        }
+      }
+    }
+    bm._bb = null;
+    return { w: maxW, h: lines.length * lh, lines: lines };
+  }
+
+  PIX.Font = {
+    draw: drawText,
+    wrap: wrap,
+    measure: measureLine,
+    lineHeight: 15,
+    glyph5x7: FONT,
+    has: function (ch) { var cp = ch.codePointAt(0); return isCJK(cp) ? !!(PIX.CJK && PIX.CJK[ch]) : !!FONT[ch]; }
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== font-data.js ===================== */
+/* ============================================================================
+ * font-data.js  —  12x12 汉字 / 全角标点点阵数据（离线生成，内嵌，无外部依赖）
+ * ----------------------------------------------------------------------------
+ * 每字 12 行，每行 3 个十六进制字符（12bit，最高位=最左像素）。
+ * 由 _dev/genfont.ps1 从系统中文字形栅格化后导出；运行期不读取任何字体文件。
+ * 共 360 字。
+ * ==========================================================================*/
+(function (global) {
+  "use strict";
+  var PIX = global.PIX || (global.PIX = {});
+  PIX.CJK = {
+"0":"000000700880880880880880880700000000",
+"1":"000000200600200200200200200700000000",
+"2":"000000700880880100200400800f80000000",
+"3":"000000700880080300080080880700000000",
+"4":"000000100300300500900f80100380000000",
+"5":"000000f80800800f00880080880700000000",
+"6":"000000300480800b00c80880880700000000",
+"7":"000000780080100100200200200200000000",
+"8":"000000700880880700880880880700000000",
+"9":"000000700880880980680080900600000000",
+"":"000000000000000000000000000000000000",
+".":"000000000000000000000000000400000000",
+"/":"000040080080100100200200400400800000",
+":":"000000000000200000000000000200000000",
+"、":"0000000000000000001000800c0040000000",
+"。":"000000000000000180240240180000000000",
+"「":"00001c010010010010010010000000000000",
+"」":"000000000080080080080080080080380000",
+"『":"00000007c04405c050050050050050070000",
+"』":"0000e00a00a00a00a00a03a02203e0000000",
+"【":"00007c07807006006006006007007807c000",
+"】":"0003e01e00e00600600600600e01e03e0000",
+"一":"000000000000000000ffe000000000000000",
+"七":"0800800800800fef8008008008008208207e",
+"万":"000ffe1001001001fc104104204204404838",
+"三":"0007fc0000000000003f8000000000000ffe",
+"下":"000ffe0800800a0090088084084080080080",
+"不":"000ffe0200200400d0148244c42040040040",
+"丝":"1082084108a2f3c208410820fbe000000ffe",
+"个":"0400400a0110248c46040040040040040040",
+"主":"0800400007fc0400400407fc040040040ffe",
+"久":"2002003f82084104108200400a0110208c06",
+"么":"0400400880881102104208400881043fe002",
+"乎":"03c7c0040444248040ffe0400400400401c0",
+"乐":"0387c04004404407fc0402482444428421c0",
+"九":"100100100ff011011011011021021241280e",
+"也":"04024024c2743c4e4424424c2402022021fe",
+"了":"0007fc0040080100200200200200200200e0",
+"事":"040ffe2483f80407fc044ffe0447fc0400c0",
+"二":"0000007fc000000000000000000000ffe000",
+"五":"000ffc0800800807f8108108108208208ffe",
+"亮":"040ffe0003f82083f8000ffe8023f0212c0e",
+"人":"0400400400400400a00a0110110208404802",
+"什":"110110210210610afe210210210210210210",
+"仆":"110110210210618a14212212210210210210",
+"今":"0400a0110208c860400007f8008010020040",
+"以":"0084884484484084084885106104280c4302",
+"休":"1101102102fe610a38238254254292210210",
+"会":"0400a0110208df6000000ffe1002087fc004",
+"伸":"1101102fe292692afe2922922fe292210210",
+"体":"2202204205fcc204704a85246224f8420420",
+"作":"14014027e2a0620a3c22022023e220220220",
+"你":"14014027e242694a10254252252292210230",
+"候":"10013c2842fe6a0abc2c82882be288214262",
+"倦":"3242a85fc440ffe4885046fa48849848447c",
+"做":"2902904905deca44945d45545545c8514422",
+"停":"1101fe20027c644a7c2002fe28227c210230",
+"像":"2802f85087fcd245fc4405a44585b44525b0",
+"元":"0007fc000000000ffe11011011021241280e",
+"先":"0402402403fc440040ffe09009011221240e",
+"光":"040444248150040ffe11011011021241280e",
+"全":"0400a0110208c063f80400407fc040040ffe",
+"八":"010110110110110110110108208204404802",
+"六":"080040040000ffe000110108204204402802",
+"关":"2081100007fc040040ffe0400a0110208c06",
+"兴":"084444248208010000ffe000110208404802",
+"其":"208208ffe2083f82083f8208ffe000208404",
+"再":"ffe0407fc4444447fc444444ffe40440441c",
+"击":"0400407fc040040ffe0404444444447fc004",
+"分":"110110208208404bfa088088108108208470",
+"刚":"002fe282a82ac6aaaa92aaaac6a822822866",
+"别":"7e242242a42a7ea10afea12a22a2224229c6",
+"加":"20020021efd225225225225225245245e992",
+"动":"01071001003ef92212412512892fa202204c",
+"十":"040040040040040ffe040040040040040040",
+"千":"00003c7c0040040040ffe040040040040040",
+"厉":"0007fe4004005fc44044047c444484484918",
+"去":"0400400407fc040040ffe0801102087fc004",
+"发":"090888880ffe1001001f82882504208d8306",
+"受":"03efc0484248ffe802bfa2081100e0318c06",
+"可":"000ffe0040047e44244244247e440400401c",
+"向":"080100ffe8028029f29129129129f280280e",
+"吗":"0fce04a44a44a44a7ea02a02efaa0200200c",
+"吧":"000efea92a92a92a92afea80e80a8208207e",
+"听":"00cf7094094097e948948948f48948048088",
+"启":"0400203fe2022023fe2003fe3025025fe902",
+"呀":"000f7e90492494497e90c914f2494408400c",
+"告":"0402403fc440040ffe0007fc4044047fc404",
+"呢":"000f7e94294297e940952954f5895205208e",
+"呼":"00eef0a10a92a54a10afea10e10a10010070",
+"咖":"080080e8ebeaaaaaaaaaaaaaeaa8aa12e26a",
+"咦":"010efea10afea12afea90afee12a160280c6",
+"哇":"010010f7c9109109fe900910f7c9100100fe",
+"哦":"0280cce4aa48bfea48a6abcce48a5a0660c2",
+"哭":"7bc4a44a47bc048044ffe0400a0110208c06",
+"哼":"0101fee00afca84afca00afce08a10010030",
+"唔":"1fee20afca44a44bfea00afce84a840fc084",
+"唱":"07ce44a7ca44a7ca00afea82efea820fe082",
+"啡":"028028eeea28a28aeea28a28eeea28028028",
+"啦":"088e84a80bdea80a92ad2b92e94a840881be",
+"喂":"0fee92afea92afea00bfea90e92a8c0a40c2",
+"喝":"0fce84afca84afca40afeb12e2aa820f2006",
+"嗯":"0fee92afea92aaaac6afea20e94aa212a018",
+"嘛":"0100fee80aa8aa8afeaa8abceea8a80a8128",
+"嘟":"040eeea5aa6abfca8cbeaaaaeeaaac0e80a8",
+"嘴":"06a14cf6abc6a78a88bfea92efea920fe112",
+"嘿":"0fee92ad6a92afea10afea10efea000aa0aa",
+"四":"0007fe49249249249249250e6024027fe402",
+"回":"0007fe4024024f24924924f24024027fe402",
+"困":"ffe842842bfa8428e2952a4a842842ffe802",
+"图":"ffe8829f2b128e2f1e8c2822982862ffe802",
+"圈":"ffe952bfa882ffe912bfad1696a8fa802ffe",
+"在":"080080ffe100110210610a7c2102102102fe",
+"声":"040ffe0407fc0007fc4444447fc404400800",
+"外":"210210210390498494a92112110210410810",
+"多":"0800f8110220d4809033ec441a80300c0f00",
+"大":"040040040040ffe0400a00a0110110208c06",
+"天":"0007fc040040040ffe0400a00a0110208c06",
+"太":"040040040ffe0400a00a0120110290448806",
+"头":"0201200a0420220020ffe040050088304c02",
+"夸":"040ffe0a0318df60007fc1001f8008008030",
+"奋":"040040ffe0a0318c067fc4447fc4447fc404",
+"奏":"0407fc0803f8100ffe2085f48427fc090308",
+"女":"080080080ffe1081082101a00400b0308c04",
+"奶":"20027c224f2452852852e92252224254288c",
+"她":"210210256f5a5725d255295655024254293e",
+"好":"20027c204f884904904fe9105102105108b0",
+"子":"0003f8010020040040ffe0400400400401c0",
+"字":"080040ffe8020003f8010020ffe0400401c0",
+"守":"080040ffe802010010ffe010210110010070",
+"安":"080040ffe882080ffe108208390060198e04",
+"实":"040ffe8021200a0220120ffe040098304c02",
+"害":"040ffe8427fc0407fc040ffe0407fc4047fc",
+"对":"004004f840be08488452451421450448489c",
+"小":"0400400400402482444444428420400401c0",
+"就":"420228fa407efa88a88a8fa8228b2aaaa646",
+"尾":"7fe4027fe40041c5e04385e043c7e042281e",
+"己":"0007fc0040040047fc4004004024024023fe",
+"巴":"0007fc4444444444447fc4004004024023fe",
+"常":"248150ffe8023f82083f80407fc44444c040",
+"帽":"23e222faaaa2a80abeaa2abeaa2bbe22223e",
+"平":"0007fc040444244248040ffe040040040040",
+"开":"0007fc110110110110ffe110110210210410",
+"引":"0047c40440447c44044047c4044044044384",
+"张":"020f24128130f2087e828f28124124132620",
+"形":"004fc4488492482fc44884904824844888b0",
+"待":"11021047c9102fe608afe208248228208238",
+"很":"17c24444497c244644a7c252254248264242",
+"微":"2445549563fa412cea40a4ea4a44b44aa512",
+"心":"0000800400201201045025025029081080f8",
+"忙":"220210300afea40a40a4024024024024027c",
+"快":"2202202fcb24a24a24bfe220250250288306",
+"态":"040040ffe0a0110248c2604052452290a0f8",
+"怎":"2003fe5009fc1001fe10010004452250a8f8",
+"怕":"20821027eb42ac2a42a7e24224224227e242",
+"思":"7fc4444447fc4444447fc04052452290a0f8",
+"息":"0807fc4047fc4047fc4047fc04052450a8fa",
+"悄":"210292254b10afea82afe2822fe282282286",
+"悬":"3f82083f82083f8208ffe2087fc0845548f2",
+"情":"2102fe310a7ca10afea4427c24427c24424c",
+"惊":"2202102feb00a7ca44a4427c210254292230",
+"想":"10013efe213e3a257e92213e04052450a8fa",
+"慢":"27c24437ca44afeaaaafe2002fc2442382c6",
+"懒":"44844e5f2644dfed5a5fa44a4ea54444a452",
+"我":"1a0724122120ffe1201241a8310d3214a306",
+"戳":"ee8aaa668aae458fea48a7ec48c7ea4967e2",
+"户":"0400203fe2022022023fe202200400400800",
+"房":"0207fe4027fe4404207fe4804fc484504a18",
+"手":"03c7c00400407fc040040ffe0400400401c0",
+"才":"0080080087fe018028048088308c08008038",
+"打":"20027e208f88208208388e08208208208638",
+"找":"228224220fbe2602243a4e2821222a246682",
+"拍":"20821027ef4224224237ee4224224227e642",
+"拖":"22022027ef9025625a3f2e5225625024263e",
+"招":"2002fe222f2224228c300e7e24224227e642",
+"拽":"4104104fee924fe4926fec1440841a426cc2",
+"挥":"4004fe482e104fc420650c7c4104fe410c10",
+"掉":"21021ef102fe2822fe382efe2102fe210610",
+"摆":"2fe2aafaa2fe21027c310efe2202442fe602",
+"摇":"20e2f0222f9424027c390e102fe2102926fe",
+"摸":"4485fe448efc4844fc684cfc4205fe448d86",
+"操":"27c24427cf002ee2aa3eee102fe238254692",
+"擎":"490fde4a47d4d487540a27f8040ffe0401c0",
+"效":"210110fd001e4a4454814294108288454822",
+"敌":"190e1021021efa4254214f94894888f948a2",
+"教":"210750290fde224f944949141d4f08114322",
+"数":"110550110fde324594954214f94488314ca2",
+"无":"0007fc040040040ffe0a00a012022242281e",
+"早":"7fc4047fc4044047fc040040ffe040040040",
+"时":"004f0490497e904f04924914914f0490401c",
+"明":"fbe8a28a28befa28a28be8a2fa282204208e",
+"星":"7fc4047fc4047fc0404407fc8403f8040ffe",
+"昨":"040f4097e9a0920f3c92092093ef20920020",
+"是":"3f82083f82083f8000ffe04027c2405408fe",
+"显":"0007fc4047fc4047fc110912514318110ffe",
+"晕":"3f82083f8208ffe8827fc1403f8040ffe040",
+"晚":"020e3ca44a88afee92a92afea28e28a4a086",
+"景":"3f82083f82083f8040ffe2083f80402484c4",
+"暖":"006ef8aa2a54afee10afea20a7cea4b180e6",
+"曲":"0900907fe4924924927fe4924924927fe402",
+"有":"080080ffe1003fc604bfc2043fc20420420c",
+"服":"0007be4a24a27ac4a04be7aa4aa4a44aa9b2",
+"望":"23e122fbe42243e7a20467fc0403f8040ffe",
+"术":"048044040ffe0e0150150248444842040040",
+"机":"200278248f482487486c8a4824824a28a306",
+"来":"0400407fc040248150ffe0e0150248c46040",
+"松":"228228228f44244692710a2022824427c204",
+"板":"206278240f4027e7526d2a54254248294322",
+"柔":"3f8090060ffe122e60000040ffe150248c46",
+"标":"20027c200f002fe610710a54252292210230",
+"样":"2442282fef1021067c710a102fe210210210",
+"梦":"208fbe20871caaa2080801fc6041180e0f00",
+"棒":"2102fe210f7c2206fe744a9227c2102fe210",
+"次":"04084047e0820a4120020250450888104202",
+"欢":"020fa00be8c2584510210210528528844082",
+"歌":"fd0090e9ea92ea4000fc8088e88a94e941a2",
+"步":"04024027c240240ffe0001442484700c0700",
+"气":"2003fe400bfc0007f800800800800a006002",
+"没":"4f82880881068005fc0840882504208d8306",
+"油":"0104102fe0928924920fe0922924928fe082",
+"泡":"0808804fc1042f48944940f428c48288207e",
+"波":"0108105fe1121109fc5441441285109282c6",
+"泣":"0208104001fe0008044840442484488103fe",
+"浪":"0408205fc1041fc9045fc120322514948186",
+"海":"8804fe1002fc8844a43fe1041245fe804018",
+"温":"0f88884f80880f88005fc1543545549543fe",
+"游":"1108907de12011c9c454817e1485489482d8",
+"满":"088bfe4880003fe8507fe2522526aaa02206",
+"漂":"bfe4501fc1549fc4001fc0003fe420924262",
+"点":"04007e0400407fc4044044047fc000524892",
+"热":"220220f78228368e2a25a246682000524892",
+"照":"000f7e922922f4c98097e942f7e000524892",
+"爱":"03efc0484248ffe8827fc1001f8288470b8e",
+"牌":"11052057e54a7fe45247e7205485fe508908",
+"特":"210210a7cf10afe20837ee08248228208238",
+"理":"0fee924924fe492e924fe4104fe610c101fe",
+"生":"0402402403fc4408400403f8040040040ffe",
+"画":"ffe000bfaa4aa4abfaa4aa4abfa802ffe002",
+"痒":"0203fe244a286fe21027c610a102fe410810",
+"白":"0801007fc4044044047fc4044044047fc404",
+"百":"000ffe0400807fc4044047fc4044047fc404",
+"的":"210410f9e8a28c2892f8a88a882882f8288c",
+"皱":"40870897e24af4817c154f54154148f540a2",
+"直":"0407fe0403fc2043fc2043fc2043fc2047fe",
+"看":"03c7c00407fc080ffe2047fca043fc2043fc",
+"真":"0407fc0403f82083f82083f8208ffe110208",
+"眨":"00ef70900910f0897e904f08910920f5088e",
+"眼":"f7c944944f7c944944f7c952954f48964042",
+"着":"110ffe0807f8100ffe2087f8a083f82083f8",
+"睛":"010efea10a7ce10afea44e7ca44a7ce44a4c",
+"睡":"00ce70a10afee54a54bfee54a54afee10a7c",
+"瞌":"010e7ca10afee20a44afee00afeaaaeaa9fe",
+"知":"2002003de512912112ff211229225e452800",
+"示":"0003f8000000ffe0400402482444428420c0",
+"秒":"110e10214252f52252690712a042082302c0",
+"窗":"040ffe9122480807fc4845f47244c45247fc",
+"立":"0800400007fc000008208108110110020ffe",
+"笑":"2103de5288840383c0040ffe0a0110208c06",
+"等":"4207be9480407fc040ffe010ffe210110070",
+"系":"03c7c00801083f00601847fe0422484448c2",
+"素":"040ffe0407fc040ffe1103e00887fc2484c4",
+"紫":"1125d45185d2e8e1103e00887fc0402484c4",
+"红":"20027c410910e10210410f10010310c100fe",
+"级":"2002fc444944e4824e442f62054388c94122",
+"结":"2102104fe910e1027c400f7c044344c7c044",
+"给":"210210428944e8227c400f7c044344c7c044",
+"统":"21020847e910e2424247ef2a028328c4a086",
+"绵":"21027c44497ce4427c410efe092292c96010",
+"置":"7fc4a47fc040ffe0403f8208208248248ffe",
+"美":"2081107fc0407fc040ffe040ffe0a0318c06",
+"羞":"110ffe0407f8080ffe1003f82485f88887fe",
+"翻":"180e36a92212fda6b6a12fb6adaf92a92fb6",
+"考":"0800887f00a0ffe0801fc3005fc804004018",
+"聊":"f9052e54a74a54a56a76a56a5aaf2e128148",
+"背":"124f3812231ed003f82083f82083f8208218",
+"脚":"040e4eaeaa4ae4aaeaa4ae8aaaaaeea08608",
+"脸":"01071052854478257c500724594554548bfe",
+"腰":"000efea28afeeaaafea10efea24a64a186e6",
+"自":"0400807fc4044047fc4044047fc4044047fc",
+"舒":"20053e882714208fbe20af88888888f888b8",
+"舞":"2007feaa87fc2a8ffe2087bc88854827ec08",
+"色":"1003f84088107fc4444447fc4004024023fe",
+"节":"110110ffe110000ffc08408408408c080080",
+"花":"110ffe110000120224628a302202622a221e",
+"蓝":"208ffe20812053e5485040007fc4a44a4ffe",
+"蓬":"110ffe9504f8188c707ae4f84205fc420bfe",
+"蕾":"208ffe2087fc040ffea4a7fc4447fc4447fc",
+"藏":"110ffe114bfea08ef82aaefaa94af42ae4f2",
+"蝴":"24024e2eaf4aa4eaeafaa2ae2aa3eac8a016",
+"蝶":"2142542fef54a5ca40f7e2102fe338c54092",
+"行":"10027c4009002fe608a08208208208208238",
+"衣":"040020ffe080144148330520910148186100",
+"表":"0400407fc0403f8040ffe0a0122314d48186",
+"被":"408208f7e14a24837c654b54254248294322",
+"裙":"8004fce242fe4246fcc406fc54444447c444",
+"要":"000ffe0a07fc4a47fc080ffe1083100e0f1c",
+"见":"0007fc4044444444444444a40a0122222c1e",
+"觉":"484248ffe802bfa2082482482480a0322c1e",
+"角":"2003f04108207fc4447fc4447fc44444480c",
+"认":"410210010010e102102282282a8344244082",
+"让":"410210010010e1c2102102102903102100fe",
+"讲":"4482480481fec484484485fe448648488108",
+"讶":"8005fe004084c844fe40c41452464448411c",
+"设":"478248048048e862002fc2442283102280c6",
+"诉":"41c2e0080080cfe4884884b858c68a488108",
+"试":"80a4080fe008c084e844844844846a6c6402",
+"话":"40e2f0010010dfe4104104fe5826824fe082",
+"说":"4842480000fcc844844844fc54864848a106",
+"请":"8205fe0200fcc205fe4844fc4844fc68448c",
+"调":"8fe4820920bac924fe4824ba4aa6ba48210e",
+"谢":"8845e41241eed245e45347ec4a452462446c",
+"起":"10013c78410413cfa01205225a251e7009fe",
+"超":"10013e792112126fc013e5225e253e7009fe",
+"跃":"00cf70910910f1027e310a10a28b28c44082",
+"跟":"f7c944944f7c244244b7ca52a54b48c64042",
+"跳":"f289289aaf6c228228b6caaaa28b2ac4a086",
+"躬":"2007be4827824be7a04a0fbe28248288218c",
+"转":"410410efc420a20afef4027c304e68218204",
+"软":"220220f3e442644a90f10210328e28244282",
+"轻":"20027cf08410a28f4428237ce102102102fe",
+"辑":"27c244f7c4006fea44f7c24437ce462fc204",
+"边":"4202200200fee2222222224224229c5008fe",
+"过":"4042040040fee0424422422420421c5008fe",
+"还":"4002fe008010e342522922102102105008fe",
+"这":"4202100fe004e442282102282442825008fe",
+"逻":"4fe2aa0aa0fee2023e2c22242182e05008fe",
+"道":"4442fe0200fee822fe2822fe2822fe5008fe",
+"那":"000fde252252fd4254252fd225225c450990",
+"都":"20025e752292fd42147d2c527d245c7d0450",
+"里":"7fc4444447fc4444447fc0407fc040040ffe",
+"金":"0400a0110208df60400407fc040248150ffe",
+"钟":"40840878883e7aa22a22afbe22a288308208",
+"闪":"4fe2020424424424a249250a60a40240240e",
+"闭":"40027e0024224225fa4224624a252246240e",
+"间":"4fe2020025fa50a50a5fa50a50a5fa40240e",
+"陆":"010e10afea10c10bfea10a92c928928fe802",
+"陪":"010f7c900944a28afe90097c944e4487c844",
+"隐":"040e78a88b7cc04a7ca04afcc2095494aa3a",
+"难":"028f2417e9485c857e24827e54854897e040",
+"静":"220fb824879027cf9457e71457c714510530",
+"非":"0a00a0fbe0a00a07bc0a00a0fbe0a00a00a0",
+"面":"000ffe0400807fe4924f24924f24927fe402",
+"鞋":"510f9057c710210ffea80f9027cf902102fe",
+"鞠":"520fbe542712256f92afef9223afd621220c",
+"音":"0407fc208110ffe0007fc4047fc4047fc404",
+"风":"0007f840842862854848848854a62a406802",
+"飘":"f8027cfc4ac4fec054754054fec244ac6682",
+"首":"208110ffe0407fc4047fc4047fc4047fc404",
+"鱼":"1003f0410ffc4444447fc4444447fc000ffe",
+"鲸":"41070897e200fbeaa2fa2abef8802c34ac18",
+"黑":"7fc4445544447fc0407fc040ffe000524892",
+"鼠":"08073c4047bc4047fc44866844866a446662",
+"！":"000300300300300300000000300300000000",
+"（":"000008010010020020020020010010008000",
+"）":"000200100100080080080080100100200000",
+"，":"000000000000000000300300100200000000",
+"：":"000000000000300300000000300300000000",
+"；":"000000000300300000300300100200000000",
+"？":"1802406606600c0180180180000180180000",
+"～":"0000000000003044c8830000000000000000"
+  };
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+  <script>
+/* ===================== art-core.js ===================== */
+/* ============================================================================
+ * art-core.js  —  像素美术造型工具箱
+ * ----------------------------------------------------------------------------
+ * 提供“锥形管 / 扇形 / 荷叶边 / 蝴蝶结 / 鲸鱼”等造型函数，
+ * 全部基于索引位图图元，保证硬边与调色板纯粹。
+ * 所有部件统一绘制在 256x256 画布上（角色资源规格）。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+  var W = 256, H = 256;
+
+  /** 新建一张 256x256 部件画布 */
+  function nb() { return new PIX.Bitmap(W, H); }
+
+  /* ---------------------------------------------------------- 造型变换
+   * 头部整体比例需要小于躯干（参考形象约 1:4 头身）。与其重写上百个坐标，
+   * 这里提供一个“以颈根为原点的等比缩放”上下文：头部各部件绘制时统一经过它，
+   * 于是所有美术仍在 1:1 像素网格上生成，不会产生重采样模糊。 */
+  var XF = null;
+  function setXf(s, px, py) { XF = (s === null || s === undefined) ? null : { s: s, px: px, py: py }; return XF; }
+  function TX(x) { return XF ? XF.px + (x - XF.px) * XF.s : x; }
+  function TY(y) { return XF ? XF.py + (y - XF.py) * XF.s : y; }
+  function TR(r) { return XF ? r * XF.s : r; }
+  function mapPts(pts) {
+    if (!XF) return pts;
+    var o = [];
+    for (var i = 0; i < pts.length; i++) o.push([TX(pts[i][0]), TY(pts[i][1]), TR(pts[i][2])]);
+    return o;
+  }
+
+  /** 锥形管：沿折线画半径渐变的椭圆，生成头发、袖管、尾鳍等有机形状 */
+  function tube(bm, pts, color) {
+    pts = mapPts(pts);
+    var i;
+    for (i = 0; i + 1 < pts.length; i++) {
+      var a = pts[i], b = pts[i + 1];
+      var steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1])));
+      for (var s = 0; s <= steps; s++) {
+        var t = s / steps;
+        var r = a[2] + (b[2] - a[2]) * t;
+        PIX.ellipse(bm, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, r, color);
+      }
+    }
+    var f = pts[0], l = pts[pts.length - 1];
+    PIX.ellipse(bm, f[0], f[1], f[2], f[2], color);
+    PIX.ellipse(bm, l[0], l[1], l[2], l[2], color);
+    return bm;
+  }
+
+  /** 荷叶边：沿路径等距画小圆，形成蕾丝/缎带的波浪缘 */
+  function scallop(bm, pts, r, color, step) {
+    pts = mapPts(pts);
+    r = TR(r);
+    step = step || r + 1;
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var a = pts[i], b = pts[i + 1];
+      var len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      var n = Math.max(1, Math.round(len / step));
+      for (var s = 0; s <= n; s++) {
+        var t = s / n;
+        PIX.ellipse(bm, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, r, color);
+      }
+    }
+    return bm;
+  }
+
+  /** 蝴蝶结：两片三角形翼 + 中心结（用于发饰、领结、腰后缎带） */
+  function bow(bm, cx, cy, w, h, cMain, cDark, cLight) {
+    cx = TX(cx); cy = TY(cy); w = TR(w); h = TR(h);
+    PIX.poly(bm, [[cx - 1, cy], [cx - w, cy - h], [cx - w + 1, cy], [cx - w, cy + h]], cMain);
+    PIX.poly(bm, [[cx + 1, cy], [cx + w, cy - h], [cx + w - 1, cy], [cx + w, cy + h]], cMain);
+    PIX.poly(bm, [[cx - w + 1, cy], [cx - w, cy + h], [cx - 1, cy + 1]], cDark);
+    PIX.poly(bm, [[cx + w - 1, cy], [cx + w, cy + h], [cx + 1, cy + 1]], cDark);
+    if (cLight) {
+      PIX.poly(bm, [[cx - 2, cy - h + 1], [cx - w + 2, cy - h + 2], [cx - w + 3, cy - 1]], cLight);
+      PIX.poly(bm, [[cx + 2, cy - h + 1], [cx + w - 2, cy - h + 2], [cx + w - 3, cy - 1]], cLight);
+    }
+    PIX.ellipse(bm, cx, cy, 2.2, 2.4, cMain);
+    PIX.ellipse(bm, cx - 0.5, cy - 0.5, 1.2, 1.2, cLight || cMain);
+    return bm;
+  }
+
+  /** 鲸鱼徽记（围裙图案）：椭圆身体 + 尾鳍 + 喷水 + 眼睛；独立成图后描边 */
+  var whaleScratch = new PIX.Bitmap(46, 34);
+  function whale(bm, cx, cy, s) {
+    s = s || 1;
+    var t = whaleScratch;
+    t.clear();
+    var ox = 20, oy = 20;                 // 局部坐标原点（容纳尾鳍与喷水）
+    var rx = 11 * s, ry = 6 * s;
+    // 尾鳍（左侧）
+    PIX.poly(t, [[ox - rx + 1, oy], [ox - rx - 6 * s, oy - 6 * s], [ox - rx - 5 * s, oy - 1 * s],
+                 [ox - rx - 7 * s, oy + 5 * s], [ox - rx + 1, oy + 2 * s]], PIX.PAL.WHALE);
+    PIX.poly(t, [[ox - rx + 1, oy - 1], [ox - rx - 5 * s, oy - 5 * s], [ox - rx - 3 * s, oy - 1]], PIX.PAL.WHALE_HI);
+    PIX.ellipse(t, ox, oy, rx, ry, PIX.PAL.WHALE);
+    PIX.ellipse(t, ox + 0.5 * s, oy + 2.5 * s, rx - 2.2 * s, ry - 2.8 * s, PIX.PAL.WHALE_HI);
+    PIX.ellipse(t, ox, oy - 2.5 * s, rx - 2.5 * s, ry - 3.6 * s, PIX.PAL.WHALE_HI);
+    // 嘴线
+    PIX.hline(t, ox + 1, ox + rx - 1, oy + 3.2 * s, PIX.PAL.WHALE_DARK);
+    PIX.hline(t, ox - rx + 3, ox - 2, oy + 4.2 * s, PIX.PAL.WHALE_DARK);
+    // 眼睛与喷水
+    PIX.rect(t, ox + 5 * s, oy - 2, 1, 2, PIX.PAL.EYE_PUPIL);
+    PIX.rect(t, ox + 7 * s, oy - 6 * s, 1, 4, PIX.PAL.GLASS);
+    PIX.rect(t, ox + 5 * s, oy - 8 * s, 1, 3, PIX.PAL.GLASS);
+    PIX.rect(t, ox + 9 * s, oy - 9 * s, 1, 4, PIX.PAL.GLASS);
+    PIX.outlineSilhouette(t, PIX.PAL.WHALE_DARK);
+    PIX.stamp(bm, t, Math.round(cx) - ox, Math.round(cy) - oy);
+    return bm;
+  }
+
+  /** 沿折线画一条亮部发丝（比管更细，用于高光挑丝） */
+  function strandHi(bm, pts, color) {
+    tube(bm, pts, color);
+    return bm;
+  }
+
+  /** 给部件补 1px 深色描边（在轮廓绘制完成后、内部细节之前调用） */
+  function inkIn(bm, color) { return PIX.outlineSilhouette(bm, color); }
+
+  /* 带变换的图元包装：头部绘制一律走这些，保证缩放一致 */
+  function el(bm, cx, cy, rx, ry, c) { PIX.ellipse(bm, TX(cx), TY(cy), TR(rx), TR(ry), c); }
+  function rc(bm, x, y, w, h, c) { PIX.rect(bm, TX(x), TY(y), TR(w), TR(h), c); }
+  function pt(bm, x, y, c) { bm.set(Math.round(TX(x)), Math.round(TY(y)), c); }
+  function ln(bm, x0, y0, x1, y1, c) { PIX.line(bm, TX(x0), TY(y0), TX(x1), TY(y1), c); }
+
+  PIX.Art = {
+    W: W, H: H,
+    nb: nb, tube: tube, scallop: scallop, bow: bow, whale: whale, strandHi: strandHi, inkIn: inkIn,
+    setXf: setXf, TX: TX, TY: TY, TR: TR, el: el, rc: rc, pt: pt, ln: ln,
+    parts: {},      // name -> { bm, joint, order, tags }
+    order: [],
+    def: function (name, opts) {
+      PIX.Art.parts[name] = opts;
+      PIX.Art.order.push(name);
+      return opts;
+    }
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== art-head.js ===================== */
+/* ============================================================================
+ * art-head.js  —  头部部件（脸 / 五官表情 / 刘海 / 后发 / 长鬓 / 头饰 / 呆毛）
+ * ----------------------------------------------------------------------------
+ * · 五官逐帧按参数绘制：可眨眼、可追随视线、可切换表情、可做左右转头。
+ * · 头发等刚形体在加载时一次性生成，之后只做整体变换。
+ * · 所有部件均绘制在 256x256 画布上，锚点 = 其关节在静止姿态下的坐标。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var A = PIX.Art;
+  var P = PIX.PAL;
+  var nb = A.nb;
+
+  // 头部整体缩放：以颈根 (128,118) 为原点。参考形象约 1:4 头身，
+  // 头部各部件按下表比例绘制，躯干保持原始尺寸。
+  var HS = 0.87;
+  function HX(x) { return 128 + (x - 128) * HS; }
+  function HY(y) { return 118 + (y - 118) * HS; }
+
+  /** 逆变换：把“最终想要的坐标”换算回缩放前的源坐标。
+   *  长发悬垂过身体，其长度与宽度不应随头部缩小而改变，故用此写坐标。 */
+  function upPts(pts) {
+    var o = [];
+    for (var i = 0; i < pts.length; i++) {
+      o.push([128 + (pts[i][0] - 128) / HS, 118 + (pts[i][1] - 118) / HS, pts[i][2] / HS]);
+    }
+    return o;
+  }
+
+  // 头部几何基准（rig 与绘制共用，保证锚点一致）
+  var HEAD = {
+    pivot: [128, 118],        // 头部旋转轴（颈根）
+    faceCx: 128,
+    eyeL: [117.5, 94], eyeR: [138.5, 94],
+    eyeRx: 7.5, eyeRy: 9,
+    browY: 84,
+    mouthY: 106,
+    noseY: 100,
+    blushY: 103
+  };
+  A.HEAD = HEAD;
+
+  /* ------------------------------------------------------------------ 脸 */
+  function faceSilhouette(bm) {
+    A.el(bm, 128, 86, 22, 22, P.SKIN);         // 颅
+    A.el(bm, 128, 98, 21, 16, P.SKIN);         // 面颊
+    A.el(bm, 128, 106, 17, 9, P.SKIN);         // 下巴
+    A.el(bm, 128, 84, 19, 15, P.SKIN_HI);      // 额头高光
+    A.rc(bm, 122, 108, 12, 16, P.SKIN);        // 颈
+    A.rc(bm, 122, 110, 12, 3, P.SKIN_SHD);     // 下颌投影
+    A.rc(bm, 122, 115, 12, 8, P.SKIN);
+    A.el(bm, 128, 113, 8, 5, P.SKIN);
+    // 两颊外侧轻微收暗
+    A.rc(bm, 107, 96, 1, 11, P.SKIN_SHD);
+    A.rc(bm, 149, 96, 1, 11, P.SKIN_SHD);
+    // 刘海投影：跟随刘海下缘的弧线，越靠外越低
+    for (var x = 106; x <= 150; x++) {
+      var dx = Math.abs(x - 128);
+      var sy = 77 + 11 * (1 - Math.cos(Math.PI * dx / 44));
+      for (var k = 0; k < 2; k++) A.pt(bm, x, sy + k, P.SKIN_SHD);
+      A.pt(bm, x, sy + 2, P.BLUSH_SHD);
+      A.pt(bm, x, sy + 3, P.BLUSH_SHD);
+    }
+  }
+
+  /* --------------------------------------------------------------- 眼睛 */
+  var eyeScratch = new PIX.Bitmap(36, 36);
+  function drawEyeInto(cx, cy, rx, ry, gaze, style, open) {
+    var bm = eyeScratch;
+    bm.clear();
+    var ox = 18, oy = 18;
+    var gx = gaze[0], gy = gaze[1];
+    if (style === 'closedUp' || open <= 0.02) {
+      // 闭眼弧线：加厚到 3px 并带眼角，保证远看也能分辨
+      for (var x = -rx + 1; x <= rx - 1; x++) {
+        var t = (x + rx) / (2 * rx);
+        var yy = oy - 1 - Math.round(3.1 * Math.sin(Math.PI * t));
+        bm.set(ox + x, yy, P.EYE_PUPIL);
+        bm.set(ox + x, yy + 1, P.EYE_PUPIL);
+        bm.set(ox + x, yy + 2, P.EYE_PUPIL);
+      }
+      bm.set(ox - rx + 1, oy + 1, P.EYE_PUPIL);
+      bm.set(ox - rx + 2, oy + 1, P.EYE_PUPIL);
+      bm.set(ox + rx - 1, oy + 1, P.EYE_PUPIL);
+      bm.set(ox + rx - 2, oy + 1, P.EYE_PUPIL);
+      return true;
+    }
+    if (style === 'closedFlat') {
+      for (var x2 = -rx + 1; x2 <= rx - 1; x2++) {
+        var t2 = (x2 + rx) / (2 * rx);
+        var y2 = oy + Math.round(1.5 * Math.sin(Math.PI * t2));
+        bm.set(ox + x2, y2, P.EYE_PUPIL);
+        if (Math.abs(x2) < rx - 3) bm.set(ox + x2, y2 + 1, P.EYE_PUPIL);
+      }
+      return true;
+    }
+    if (style === 'angry') ry *= 0.8;
+    if (style === 'sleepy') ry *= 0.6;
+    // 眼线外框
+    PIX.ellipse(bm, ox, oy, rx, ry, P.EYE_PUPIL);
+    // 眼白
+    PIX.ellipse(bm, ox, oy + 1.2, rx - 0.8, ry - 1.4, P.WHITE_HI);
+    // 虹膜（几乎填满眼睛，仅眼角留白）
+    var ix = ox + gx * 1.7, iy = oy + 1.0 + gy * 1.7;
+    var irx = rx - 0.9, iry = ry - 1.0;
+    if (style === 'excited') { irx = rx - 0.6; iry = ry - 0.5; }
+    if (style === 'sad') { irx = rx - 2.4; iry = ry - 2.6; }
+    PIX.ellipse(bm, ix, iy, irx, iry, P.EYE_IRIS);
+    PIX.ellipse(bm, ix, iy + iry * 0.58, irx, iry * 0.4, P.EYE_DEEP);
+    PIX.ellipse(bm, ix, iy - iry * 0.55, irx * 0.92, iry * 0.36, P.EYE_HI);
+    if (style === 'star') {
+      PIX.ellipse(bm, ix, iy, 3, 3, P.WHITE_HI);
+      PIX.rect(bm, ix - 0.5, iy - iry + 1, 2, iry * 2 - 2, P.WHITE_HI);
+      PIX.rect(bm, ix - irx + 1, iy - 0.5, irx * 2 - 2, 1, P.WHITE_HI);
+      return false;
+    }
+    if (style === 'dizzy') {
+      PIX.ellipse(bm, ix, iy, irx * 0.45, iry * 0.45, P.EYE_PUPIL);
+      PIX.ellipseRing(bm, ix, iy, irx - 0.5, iry - 0.5, 1, P.WHITE_HI);
+      return false;
+    }
+    // 瞳孔
+    PIX.ellipse(bm, ix, iy + 0.7, 2.1, Math.min(2.8, iry * 0.48), P.EYE_PUPIL);
+    // 高光
+    PIX.ellipse(bm, ix - irx * 0.42, iy - iry * 0.46, 2.1, 2.2, P.WHITE_HI);
+    PIX.ellipse(bm, ix + irx * 0.5, iy + iry * 0.56, 1.2, 1.2, P.WHITE_HI);
+    // 上睫毛：加粗并向外眼角上挑
+    for (var lx = -rx + 1; lx <= rx - 1; lx++) {
+      var lt = (lx + rx) / (2 * rx);
+      var ly = -Math.round((ry - 1.4) * Math.sin(Math.PI * Math.min(1, lt * 1.06)));
+      bm.set(ox + lx, oy + ly, P.EYE_PUPIL);
+      if (lx < rx - 2) bm.set(ox + lx, oy + ly + 1, P.EYE_PUPIL);
+    }
+    bm.set(ox - rx + 1, oy - rx + 3, P.EYE_PUPIL);
+    bm.set(ox - rx, oy - rx + 4, P.EYE_PUPIL);
+    return false;
+  }
+
+  function stampEye(bm, cx, cy, rx, ry, open) {
+    var lim = cy + ry - 2 * ry * Math.max(0, Math.min(1, open));
+    PIX.stamp(bm, eyeScratch, Math.round(cx) - 18, Math.round(cy) - 18,
+      { x0: -999, y0: Math.round(lim), x1: 999, y1: 999 });
+  }
+
+  function drawBrow(bm, cx, cy, dir, tilt, lift) {
+    var w = 9, y0 = cy - lift;
+    for (var i = 0; i < w; i++) {
+      var t = i / (w - 1);
+      var x = cx + (t - 0.5) * w * dir;
+      var y = y0 + (t * tilt * dir) - Math.sin(Math.PI * t) * 0.9;
+      A.pt(bm, x, y, P.HAIR_DARK);
+      A.pt(bm, x, y + 1, P.HAIR_MID);
+    }
+  }
+
+  function drawMouth(bm, shape, open, cx, cy) {
+    var x, t, y;
+    if (shape === 'smile') {
+      for (x = -3; x <= 3; x++) {
+        t = (x + 3) / 6;
+        y = cy + Math.round(1.7 * Math.sin(Math.PI * t));
+        A.pt(bm, cx + x, y, P.MOUTH);
+      }
+      A.pt(bm, cx - 4, cy, P.MOUTH); A.pt(bm, cx + 4, cy, P.MOUTH);
+    } else if (shape === 'grin') {
+      for (x = -5; x <= 5; x++) {
+        t = (x + 5) / 10;
+        y = cy + 1 - Math.round(2.4 * Math.sin(Math.PI * t));
+        A.pt(bm, cx + x, y, P.MOUTH_DK);
+        if (Math.abs(x) < 4) A.pt(bm, cx + x, y + 1, P.MOUTH);
+      }
+    } else if (shape === 'open' || shape === 'o') {
+      var r = shape === 'o' ? 2.8 : 2.4 + open * 2.4;
+      A.el(bm, cx, cy + 1, r * 0.95, r, P.MOUTH_DK);
+      A.el(bm, cx, cy + 1.6, r * 0.6, r * 0.7, P.MOUTH);
+    } else if (shape === 'cat') {
+      for (x = -4; x <= 4; x++) {
+        var s = x <= 0 ? (x + 4) / 4 : (4 - x) / 4;
+        y = cy - Math.round(1.7 * Math.sin(Math.PI * s));
+        A.pt(bm, cx + x, y, P.MOUTH_DK);
+      }
+    } else if (shape === 'pout') {
+      A.rc(bm, cx - 3, cy, 6, 2, P.MOUTH_DK);
+      A.rc(bm, cx - 2, cy - 1, 4, 1, P.MOUTH);
+    } else if (shape === 'wave') {
+      A.pt(bm, cx - 3, cy, P.MOUTH_DK); A.pt(bm, cx - 2, cy + 1, P.MOUTH_DK);
+      A.pt(bm, cx - 1, cy, P.MOUTH_DK); A.pt(bm, cx, cy - 1, P.MOUTH_DK);
+      A.pt(bm, cx + 1, cy, P.MOUTH_DK); A.pt(bm, cx + 2, cy + 1, P.MOUTH_DK);
+      A.pt(bm, cx + 3, cy, P.MOUTH_DK);
+    } else {
+      A.rc(bm, cx - 2, cy, 5, 1, P.MOUTH_DK);
+    }
+  }
+
+  /**
+   * 逐帧绘制面部（清空后重绘）。
+   * st: { eyeStyle, eyeOpen, wink, browTilt, browLift, mouth, mouthOpen,
+   *       blush, tear, sweat, gaze:[x,y], turn }
+   */
+  function drawFace(bm, st) {
+    bm.clear();
+    A.setXf(HS, 128, 118);
+    faceSilhouette(bm);
+    var ex = st.gaze ? st.gaze[0] : 0, ey = st.gaze ? st.gaze[1] : 0;
+    var turn = st.turn || 0;
+    var shift = turn * 3.5;
+    var cy = HEAD.eyeL[1];
+    var lx = HEAD.eyeL[0] + shift, rx2 = HEAD.eyeR[0] + shift;
+    var sqL = 1 - Math.max(0, turn) * 0.24;
+    var sqR = 1 + Math.min(0, turn) * 0.24;
+
+    if (st.blush > 0) {
+      var n = Math.round(st.blush * 10);
+      for (var by = -4; by <= 4; by++) {
+        for (var bx = -6; bx <= 6; bx++) {
+          if ((bx * bx) / 36 + (by * by) / 15 > 1) continue;
+          var p1x = Math.round(HX(109 + shift + bx)), p1y = Math.round(HY(HEAD.blushY + by));
+          if (PIX.Bayer4[((p1y & 3) << 2) | (p1x & 3)] < n) bm.set(p1x, p1y, P.BLUSH);
+          var p2x = Math.round(HX(147 + shift + bx));
+          if (PIX.Bayer4[((p1y & 3) << 2) | (p2x & 3)] < n) bm.set(p2x, p1y, P.BLUSH);
+        }
+      }
+    }
+
+    var styleL = st.eyeStyle, styleR = st.eyeStyle;
+    var openL = st.eyeOpen, openR = st.eyeOpen;
+    if (st.wink === 'L') { styleL = 'closedUp'; openL = 0; }
+    if (st.wink === 'R') { styleR = 'closedUp'; openR = 0; }
+    // 眼睛在局部小图上绘制（不受 XF 影响），半径按头部比例缩放
+    var ryl = Math.max(2, HEAD.eyeRy * HS);
+    var rxl = Math.max(2, HEAD.eyeRx * sqL * HS), rxr = Math.max(2, HEAD.eyeRx * sqR * HS);
+
+    // drawEyeInto 返回 true 表示画的是“闭眼弧线”，此时不能用睁眼度裁剪
+    var closedL = drawEyeInto(lx, cy, rxl, ryl, [ex, ey], styleL, openL);
+    stampEye(bm, HX(lx), HY(cy), rxl, ryl, closedL ? 1 : openL);
+    var closedR = drawEyeInto(rx2, cy, rxr, ryl, [ex, ey], styleR, openR);
+    stampEye(bm, HX(rx2), HY(cy), rxr, ryl, closedR ? 1 : openR);
+
+    drawBrow(bm, lx, HEAD.browY + shift * 0.2, -1, st.browTilt, st.browLift);
+    drawBrow(bm, rx2, HEAD.browY + shift * 0.2, 1, st.browTilt, st.browLift);
+
+    A.pt(bm, 128 + shift + 2, HEAD.noseY, P.SKIN_LINE);
+    A.pt(bm, 128 + shift + 1, HEAD.noseY + 1, P.SKIN_SHD);
+
+    drawMouth(bm, st.mouth, st.mouthOpen, 128 + shift, HEAD.mouthY);
+
+    if (st.sweat > 0) {
+      var sy = 76 - st.sweat * 3;
+      A.el(bm, 152 + shift, sy, 2, 2.8, P.SWEAT);
+      A.el(bm, 152 + shift, sy - 1, 1.6, 1.6, P.WHITE_HI);
+    }
+    if (st.tear > 0) {
+      var th = st.tear * 10;
+      A.el(bm, lx - 3, cy + 9 + th * 0.4, 1.6, 2 + th * 0.5, P.TEAR);
+      A.el(bm, rx2 + 3, cy + 9 + th * 0.4, 1.6, 2 + th * 0.5, P.TEAR);
+    }
+    A.setXf(null);
+    return bm;
+  }
+
+  var faceBmp = nb();
+  A.drawFace = function (st) { return drawFace(faceBmp, st); };
+  A.faceBmp = faceBmp;
+
+  /* ---------------------------------------------------------------- 头发 */
+  function buildHairBack() {
+    var bm = nb();
+    // 后方大发团（垂至腰际，两侧超出身体形成剪影）；坐标即最终尺寸
+    A.tube(bm, upPts([[128, 74, 30], [130, 96, 38], [132, 122, 40], [128, 146, 36], [122, 164, 26], [120, 176, 14]]), P.HAIR_DARK);
+    A.tube(bm, upPts([[107, 90, 9], [100, 116, 11], [95, 140, 11], [93, 160, 8], [95, 172, 4]]), P.HAIR_MID);
+    A.tube(bm, upPts([[149, 90, 9], [156, 116, 11], [161, 140, 11], [163, 160, 8], [161, 172, 4]]), P.HAIR_MID);
+    A.tube(bm, upPts([[120, 100, 8], [117, 128, 9], [114, 152, 8], [114, 170, 5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[136, 100, 8], [139, 128, 9], [142, 152, 8], [142, 170, 5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[124, 86, 5], [120, 110, 6], [117, 132, 6], [115, 152, 5]]), P.HAIR);
+    A.tube(bm, upPts([[140, 86, 5], [144, 110, 6], [147, 132, 6], [149, 152, 5]]), P.HAIR);
+    A.tube(bm, upPts([[130, 78, 4], [132, 98, 5], [134, 122, 4]]), P.HAIR_LIT);
+    // 分股暗线：让大发团有层次，不再是一整块
+    A.tube(bm, upPts([[112, 102, 1.6], [106, 126, 1.6], [102, 150, 1.6], [100, 164, 1]]), P.HAIR_DEEP);
+    A.tube(bm, upPts([[144, 102, 1.6], [150, 126, 1.6], [154, 150, 1.6], [156, 164, 1]]), P.HAIR_DEEP);
+    A.tube(bm, upPts([[120, 112, 1.4], [116, 136, 1.4], [114, 158, 1]]), P.HAIR_DEEP);
+    A.tube(bm, upPts([[136, 112, 1.4], [140, 136, 1.4], [142, 158, 1]]), P.HAIR_DEEP);
+    // 外缘碎发：制造轻微波浪，避免"高坚果"式圆润轮廓
+    A.tube(bm, upPts([[92, 114, 4], [85, 122, 3], [82, 130, 1.5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[164, 114, 4], [171, 122, 3], [174, 130, 1.5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[95, 132, 5], [87, 142, 3], [84, 150, 1.5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[161, 132, 5], [169, 142, 3], [172, 150, 1.5]]), P.HAIR_MID);
+    A.tube(bm, upPts([[96, 146, 5], [88, 158, 4], [83, 168, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[160, 146, 5], [168, 158, 4], [173, 168, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[103, 156, 5], [98, 168, 3], [96, 178, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[153, 156, 5], [158, 168, 3], [160, 178, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[110, 166, 4], [108, 176, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[146, 166, 4], [148, 176, 2]]), P.HAIR_MID);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  function buildBangs() {
+    var bm = nb();
+    A.tube(bm, [[90, 92, 9], [96, 74, 12], [108, 66, 14], [120, 62, 15], [136, 62, 15], [148, 66, 14], [160, 74, 12], [166, 92, 9]], P.HAIR_MID);
+    // 中分刘海发缕（尖端垂到眼睛上缘）
+    A.tube(bm, [[113, 76, 7], [111, 84, 4], [110, 88, 2]], P.HAIR);
+    A.tube(bm, [[124, 79, 6], [122, 86, 3]], P.HAIR_DARK);
+    A.tube(bm, [[134, 79, 6], [136, 86, 3]], P.HAIR);
+    A.tube(bm, [[143, 76, 7], [145, 84, 4], [146, 88, 2]], P.HAIR);
+    // 两侧鬓角（贴脸框）
+    A.tube(bm, [[100, 84, 9], [97, 98, 7], [96, 108, 3]], P.HAIR_DARK);
+    A.tube(bm, [[156, 84, 9], [159, 98, 7], [160, 108, 3]], P.HAIR_DARK);
+    // 顶部高光带
+    A.tube(bm, [[104, 80, 3], [118, 72, 4], [134, 70, 4], [150, 76, 3]], P.HAIR_LIT);
+    A.tube(bm, [[110, 78, 2], [126, 71, 2], [140, 73, 2]], P.HAIR_HI);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  function buildWave(side) {
+    var bm = nb();
+    var s = side;
+    A.tube(bm, upPts([[128 + 31 * s, 88, 12], [128 + 38 * s, 112, 14], [128 + 41 * s, 140, 14],
+                [128 + 38 * s, 162, 10], [128 + 34 * s, 174, 6], [128 + 30 * s, 182, 3]]), P.HAIR_MID);
+    A.tube(bm, upPts([[128 + 26 * s, 94, 8], [128 + 29 * s, 118, 9], [128 + 31 * s, 142, 9], [128 + 31 * s, 164, 5]]), P.HAIR);
+    A.tube(bm, upPts([[128 + 33 * s, 90, 4], [128 + 39 * s, 112, 5], [128 + 42 * s, 138, 4], [128 + 40 * s, 158, 3]]), P.HAIR_LIT);
+    A.tube(bm, upPts([[128 + 35 * s, 118, 5], [128 + 41 * s, 144, 4], [128 + 38 * s, 168, 3]]), P.HAIR_DARK);
+    // 外缘碎发尖，让轮廓呈波浪状
+    A.tube(bm, upPts([[128 + 43 * s, 130, 5], [128 + 47 * s, 146, 3], [128 + 48 * s, 156, 2]]), P.HAIR_MID);
+    A.tube(bm, upPts([[128 + 39 * s, 160, 4], [128 + 41 * s, 172, 2]]), P.HAIR_MID);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  function buildLock(side) {
+    var bm = nb();
+    var s = side;
+    A.tube(bm, [[128 + 24 * s, 78, 8], [128 + 26 * s, 98, 9], [128 + 26 * s, 116, 7],
+                [128 + 25 * s, 132, 4], [128 + 24 * s, 140, 2]], P.HAIR_DARK);
+    A.tube(bm, [[128 + 22 * s, 80, 4], [128 + 24 * s, 98, 4], [128 + 25 * s, 114, 3]], P.HAIR);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  function buildAhoge() {
+    var bm = nb();
+    A.tube(bm, [[130, 76, 3.5], [136, 64, 3], [143, 52, 3], [148, 41, 2.5], [149, 30, 2.5],
+                [145, 19, 2.5], [136, 12, 2.5], [125, 12, 2], [117, 18, 2], [114, 28, 2]], P.HAIR);
+    A.tube(bm, [[139, 58, 1.6], [146, 42, 1.6], [147, 30, 1.6], [141, 20, 1.5], [131, 15, 1]], P.HAIR_LIT);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  /* ---------------------------------------------------------------- 头饰 */
+  function buildHeaddress() {
+    var bm = nb();
+    // 蕾丝发带：沿头顶的弧形
+    A.tube(bm, [[96, 58, 7], [104, 46, 8], [118, 38, 9], [128, 36, 9], [142, 38, 9], [156, 46, 8], [162, 58, 7]], P.WHITE);
+    // 外侧荷叶边（上缘锯齿）
+    A.scallop(bm, [[92, 56], [100, 42], [114, 32], [128, 29], [142, 32], [156, 42], [164, 56]], 3.6, P.WHITE, 6);
+    // 蕾丝暗纹
+    A.tube(bm, [[100, 64, 2.5], [110, 54, 3], [126, 48, 3], [142, 52, 3], [158, 64, 2.5]], P.WHITE_SHD);
+    for (var i = 0; i < 7; i++) {
+      var t = i / 6;
+      var px = Math.round(104 + t * 48);
+      var py = Math.round(48 + Math.abs(t - 0.5) * 18);
+      A.rc(bm, px, py, 2, 2, P.WHITE_MID);
+    }
+    A.inkIn(bm, P.WHITE_DEEP);
+    // 顶部小蝴蝶结
+    A.bow(bm, 128, 32, 6, 4, P.NAVY_HI, P.NAVY_DARK, P.NAVY);
+    A.inkIn(bm, P.NAVY_DEEP);
+    return bm;
+  }
+
+  function buildFin(side) {
+    var bm = nb();
+    var s = side;
+    A.tube(bm, [[128 + 22 * s, 86, 4], [128 + 33 * s, 90, 4], [128 + 42 * s, 97, 2]], P.WHITE);
+    A.tube(bm, [[128 + 23 * s, 90, 4], [128 + 35 * s, 98, 4], [128 + 44 * s, 107, 2]], P.WHITE);
+    A.tube(bm, [[128 + 22 * s, 95, 3], [128 + 31 * s, 106, 3], [128 + 37 * s, 116, 2]], P.WHITE);
+    A.tube(bm, [[128 + 27 * s, 94, 2], [128 + 36 * s, 100, 2], [128 + 42 * s, 106, 1]], P.WHITE_SHD);
+    A.tube(bm, [[128 + 26 * s, 101, 1], [128 + 33 * s, 109, 1]], P.WHITE_SHD);
+    A.inkIn(bm, P.WHITE_DEEP);
+    A.bow(bm, 128 + 21 * s, 85, 5, 4, P.NAVY_HI, P.NAVY_DARK, P.NAVY);
+    A.inkIn(bm, P.NAVY_DEEP);
+    return bm;
+  }
+
+  A.buildHead = function () {
+    // 头部所有部件统一在“颈根等比缩小”的坐标下生成（仍是 1:1 像素网格）
+    A.setXf(HS, 128, 118);
+    A.def('hairBack', { bm: buildHairBack(), joint: 'head', z: 5, wave: { root: HY(74), tip: HY(178), amp: 3.0, links: 5 } });
+    A.def('waveL', { bm: buildWave(-1), joint: 'head', z: 32, wave: { root: HY(86), tip: HY(182), amp: 3.6, links: 4 } });
+    A.def('waveR', { bm: buildWave(1), joint: 'head', z: 32, wave: { root: HY(86), tip: HY(182), amp: 3.6, links: 4 } });
+    A.def('lockL', { bm: buildLock(-1), joint: 'head', z: 56, wave: { root: HY(78), tip: HY(142), amp: 2.4, links: 3 } });
+    A.def('lockR', { bm: buildLock(1), joint: 'head', z: 56, wave: { root: HY(78), tip: HY(142), amp: 2.4, links: 3 } });
+    A.def('bangs', { bm: buildBangs(), joint: 'head', z: 60 });
+    A.def('headdress', { bm: buildHeaddress(), joint: 'head', z: 59 });
+    A.def('finL', { bm: buildFin(-1), joint: 'head', z: 58 });
+    A.def('finR', { bm: buildFin(1), joint: 'head', z: 58 });
+    A.def('ahoge', { bm: buildAhoge(), joint: 'head', z: 57, wave: { root: HY(74), tip: HY(24), amp: 2.0, links: 3 } });
+    A.setXf(null);
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== art-body.js ===================== */
+/* ============================================================================
+ * art-body.js  —  身体部件（连衣裙 / 围裙 / 腰带蝴蝶结 / 手臂 / 腿脚 / 人鱼尾）
+ * ----------------------------------------------------------------------------
+ * 与 art-head.js 相同：部件绘制在 256x256 画布上，锚点 = 关节静止坐标。
+ * 参考形象：藏青女仆裙 + 白色蕾丝围裙（鲸鱼徽记）+ 金色航海装饰 + 人鱼尾。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var A = PIX.Art;
+  var P = PIX.PAL;
+  var nb = A.nb;
+
+  // 躯干几何基准
+  var BODY = {
+    shoulderL: [111, 130], shoulderR: [145, 130],
+    elbowL: [107, 156], elbowR: [149, 156],
+    hipL: [119, 170], hipR: [137, 170],
+    waist: 154,
+    skirtHem: 208
+  };
+  A.BODY = BODY;
+
+  /* ------------------------------------------------------------- 连衣裙 */
+  function buildTorso() {
+    var bm = nb();
+    // 上身主体（肩到腰，腰部略收）
+    PIX.poly(bm, [[106, 126], [150, 126], [148, 140], [146, 152], [144, 158], [112, 158], [110, 152], [108, 140]], P.NAVY_MID);
+    // 侧面暗部
+    PIX.poly(bm, [[106, 126], [112, 126], [112, 158], [112, 158], [110, 152], [108, 140]], P.NAVY_DARK);
+    PIX.poly(bm, [[144, 126], [150, 126], [148, 140], [146, 152], [144, 158]], P.NAVY_DARK);
+    // 亮部
+    PIX.poly(bm, [[116, 130], [128, 128], [128, 156], [116, 156]], P.NAVY);
+    // 胸前白色蕾丝围兜
+    PIX.poly(bm, [[118, 128], [138, 128], [137, 150], [128, 154], [119, 150]], P.WHITE);
+    PIX.poly(bm, [[120, 132], [136, 132], [135, 148], [128, 151], [121, 148]], P.WHITE_HI);
+    A.scallop(bm, [[117, 130], [128, 133], [139, 130]], 2.2, P.WHITE, 4);
+    // 围兜蕾丝边
+    PIX.vline(bm, 118, 132, 149, P.WHITE_SHD);
+    PIX.vline(bm, 138, 132, 149, P.WHITE_SHD);
+    // 金色纽扣
+    for (var i = 0; i < 4; i++) {
+      var by = 134 + i * 5;
+      PIX.rect(bm, 127, by, 2, 2, P.GOLD);
+      bm.set(127, by, P.GOLD_HI);
+    }
+    // 领口蕾丝（荷叶边）
+    A.scallop(bm, [[108, 126], [116, 121], [128, 118.5], [140, 121], [148, 126]], 3.2, P.WHITE, 5);
+    A.scallop(bm, [[110, 123], [118, 117], [128, 114.5], [138, 117], [146, 123]], 2.4, P.WHITE_SHD, 5);
+    // 肩部蕾丝
+    A.scallop(bm, [[104, 133], [109, 127]], 2.8, P.WHITE, 4);
+    A.scallop(bm, [[152, 133], [147, 127]], 2.8, P.WHITE, 4);
+    // 领口蓝色蝴蝶结 + 胸针
+    A.bow(bm, 128, 130, 7, 5, P.NAVY_HI, P.NAVY_DARK, P.NAVY);
+    PIX.ellipse(bm, 128, 133, 2.6, 2.6, P.GOLD);
+    PIX.ellipse(bm, 127.6, 132.6, 1.2, 1.2, P.GOLD_HI);
+    // 腰部金色饰线
+    PIX.rect(bm, 110, 152, 36, 2, P.GOLD_DARK);
+    PIX.rect(bm, 110, 152, 36, 1, P.GOLD);
+    A.inkIn(bm, P.OUTLINE);
+    return bm;
+  }
+
+  function buildSkirt() {
+    var bm = nb();
+    // 裙身（喇叭形）
+    PIX.poly(bm, [[110, 150], [146, 150], [158, 172], [172, 200], [172, 206], [84, 206], [84, 200], [98, 172]], P.NAVY_MID);
+    PIX.ellipse(bm, 128, 205, 44, 8, P.NAVY_MID);
+    // 褶皱分股
+    var folds = [[-38, P.NAVY_DARK], [-26, P.NAVY], [-14, P.NAVY_DARK], [-2, P.NAVY],
+                 [10, P.NAVY_DARK], [22, P.NAVY], [34, P.NAVY_DARK]];
+    for (var i = 0; i < folds.length; i++) {
+      var dx = folds[i][0];
+      PIX.poly(bm, [[128 + dx * 0.28, 152], [128 + dx * 0.28 + 4, 152],
+                    [128 + dx * 1.0 + 6, 202], [128 + dx * 1.0, 202]], folds[i][1]);
+    }
+    // 侧面深色
+    PIX.poly(bm, [[110, 150], [104, 162], [88, 200], [84, 206], [96, 206], [114, 166]], P.NAVY_DARK);
+    PIX.poly(bm, [[146, 150], [152, 162], [168, 200], [172, 206], [160, 206], [142, 166]], P.NAVY_DARK);
+    // 金色饰带
+    PIX.rect(bm, 86, 188, 84, 1, P.GOLD);
+    PIX.rect(bm, 86, 189, 84, 1, P.GOLD_DARK);
+    // 金色纹样（锚 / 贝壳 / 蝴蝶结）
+    A.bow(bm, 100, 182, 6, 4, P.GOLD, P.GOLD_DARK, P.GOLD_HI);
+    A.bow(bm, 156, 182, 6, 4, P.GOLD, P.GOLD_DARK, P.GOLD_HI);
+    PIX.ellipse(bm, 128, 183, 3.4, 3.4, P.GOLD);
+    PIX.ellipse(bm, 128, 183, 1.6, 1.6, P.GOLD_DARK);
+    PIX.rect(bm, 120, 181, 2, 4, P.GOLD);
+    PIX.rect(bm, 134, 181, 2, 4, P.GOLD);
+    // 下摆双层蕾丝
+    A.scallop(bm, [[86, 196], [104, 193], [128, 192], [152, 193], [170, 196]], 4.0, P.WHITE, 6);
+    PIX.poly(bm, [[84, 198], [172, 198], [172, 206], [84, 206]], P.WHITE);
+    A.scallop(bm, [[86, 205], [106, 204], [128, 203], [150, 204], [170, 205]], 4.4, P.WHITE_HI, 7);
+    PIX.rect(bm, 86, 200, 86, 1, P.WHITE_SHD);
+    for (var k = 0; k < 13; k++) {
+      var px = 88 + k * 7;
+      PIX.rect(bm, px, 202, 2, 2, P.WHITE_MID);
+    }
+    A.inkIn(bm, P.OUTLINE);
+    return bm;
+  }
+
+  function buildApron() {
+    var bm = nb();
+    // 主体
+    PIX.poly(bm, [[114, 146], [142, 146], [146, 166], [152, 186], [152, 194],
+                  [142, 202], [114, 202], [104, 194], [104, 186], [110, 166]], P.WHITE);
+    PIX.ellipse(bm, 128, 190, 24, 12, P.WHITE);
+    // 边缘暗部
+    PIX.poly(bm, [[104, 194], [114, 202], [120, 202], [110, 192], [110, 176]], P.WHITE_SHD);
+    PIX.poly(bm, [[152, 194], [142, 202], [136, 202], [146, 192], [146, 176]], P.WHITE_SHD);
+    // 内层
+    PIX.poly(bm, [[118, 150], [138, 150], [141, 168], [146, 186], [145, 194], [111, 194], [110, 186], [115, 168]], P.WHITE_HI);
+    // 荷叶边
+    A.scallop(bm, [[105, 184], [106, 194], [116, 204], [128, 206], [140, 204], [150, 194], [151, 184]], 3.6, P.WHITE, 6);
+    A.scallop(bm, [[113, 146], [128, 150], [143, 146]], 2.4, P.WHITE_SHD, 4);
+    A.inkIn(bm, P.WHITE_DEEP);
+    // 鲸鱼徽记
+    A.whale(bm, 128, 176, 1.05);
+    return bm;
+  }
+
+  function buildRibbon() {
+    var bm = nb();
+    // 腰后大缎带（两侧露出）
+    A.bow(bm, 128, 164, 20, 14, P.WHITE, P.WHITE_SHD, P.WHITE_HI);
+    PIX.poly(bm, [[112, 168], [104, 196], [110, 198], [120, 172]], P.WHITE);
+    PIX.poly(bm, [[144, 168], [152, 196], [146, 198], [136, 172]], P.WHITE);
+    PIX.poly(bm, [[110, 196], [116, 196], [120, 172], [112, 168]], P.WHITE_SHD);
+    PIX.poly(bm, [[146, 196], [140, 196], [136, 172], [144, 168]], P.WHITE_SHD);
+    A.inkIn(bm, P.WHITE_DEEP);
+    return bm;
+  }
+
+  /* --------------------------------------------------------------- 手臂 */
+  function buildUpperArm(side) {
+    var bm = nb();
+    var s = side;
+    var sx = 128 + 17 * s;
+    // 泡泡袖
+    PIX.ellipse(bm, sx, 139, 9.5, 12, P.NAVY_MID);
+    PIX.ellipse(bm, sx - 2.5 * s, 136, 5, 7, P.NAVY);
+    PIX.ellipse(bm, sx + 4 * s, 141, 4.5, 8, P.NAVY);
+    // 袖身
+    A.tube(bm, [[sx, 146, 7], [sx + 1 * s, 152, 6.5], [sx + 2 * s, 157, 6]], P.NAVY_MID);
+    // 袖口蕾丝
+    A.scallop(bm, [[sx - 5 + 1 * s, 152], [sx + 2 * s, 156], [sx + 6 + 1 * s, 152]], 2.6, P.WHITE, 4);
+    // 肩部蕾丝
+    A.scallop(bm, [[sx - 8, 129], [sx, 126], [sx + 8, 129]], 2.6, P.WHITE, 5);
+    A.inkIn(bm, P.OUTLINE);
+    return bm;
+  }
+
+  function buildForeArm(side) {
+    var bm = nb();
+    var s = side;
+    var sx = 128 + 21 * s;
+    // 小臂（袖）
+    A.tube(bm, [[sx, 156, 6.5], [sx + 1 * s, 164, 6], [sx + 2 * s, 170, 5.5]], P.NAVY_MID);
+    PIX.vline(bm, sx - 4, 158, 168, P.NAVY_DARK);
+    // 腕口蕾丝
+    A.scallop(bm, [[sx - 6, 168], [sx + 2 * s, 173], [sx + 7, 168]], 3.2, P.WHITE, 4);
+    PIX.rect(bm, sx - 5, 166, 11, 2, P.WHITE);
+    // 手
+    PIX.ellipse(bm, sx + 4 * s, 184, 5.2, 6.4, P.SKIN);
+    PIX.ellipse(bm, sx + 4 * s, 182, 4.4, 4.8, P.SKIN_HI);
+    PIX.ellipse(bm, sx + 4 * s, 188, 4, 3, P.SKIN_SHD);
+    // 手指分缝
+    bm.set(sx + 4 * s - 2, 187, P.SKIN_SHD);
+    bm.set(sx + 4 * s, 188, P.SKIN_SHD);
+    bm.set(sx + 4 * s + 2, 187, P.SKIN_SHD);
+    A.inkIn(bm, P.OUTLINE);
+    return bm;
+  }
+
+  /* --------------------------------------------------------------- 腿脚 */
+  function buildLeg(side) {
+    var bm = nb();
+    var s = side;
+    var lx = 128 + 9 * s;
+    // 大腿到小腿
+    A.tube(bm, [[lx, 178, 7], [lx + 1 * s, 200, 6], [lx + 2 * s, 216, 5.5], [lx + 2 * s, 228, 5]], P.SKIN);
+    PIX.vline(bm, lx - 5, 180, 224, P.SKIN_SHD);
+    // 短袜（蕾丝边）
+    PIX.rect(bm, lx - 5, 224, 13, 12, P.WHITE);
+    A.scallop(bm, [[lx - 5, 226], [lx + 2 * s, 222], [lx + 7, 226]], 3.0, P.WHITE_HI, 4);
+    PIX.rect(bm, lx - 5, 228, 13, 2, P.WHITE_SHD);
+    // 袜口小蝴蝶结
+    A.bow(bm, lx + 8 * s, 228, 4, 3, P.NAVY_HI, P.NAVY_DARK, P.NAVY);
+    // 皮鞋
+    PIX.ellipse(bm, lx + 1 * s, 242, 9, 8, P.SHOE);
+    PIX.poly(bm, [[lx - 8, 247], [lx + 10, 247], [lx + 10, 250], [lx - 8, 250]], P.SHOE);
+    PIX.ellipse(bm, lx - 2 * s, 246, 7, 4, P.SHOE_HI);
+    PIX.rect(bm, lx - 8, 249, 19, 2, P.SHOE_DARK);
+    PIX.ellipse(bm, lx + 1 * s, 238, 5, 3, P.SHOE_HI);
+    A.bow(bm, lx + 1 * s, 238, 4, 3, P.NAVY_HI, P.NAVY_DARK, P.NAVY);
+    A.inkIn(bm, P.OUTLINE);
+    return bm;
+  }
+
+  /* ------------------------------------------------------------- 人鱼尾 */
+  function buildTail() {
+    var bm = nb();
+    A.tube(bm, [[142, 178, 11], [154, 192, 12], [166, 204, 11], [176, 214, 9], [182, 221, 7]], P.HAIR_MID);
+    A.tube(bm, [[140, 182, 5], [152, 194, 5], [164, 206, 5], [174, 215, 4]], P.HAIR);
+    A.tube(bm, [[146, 186, 4], [156, 197, 4], [166, 207, 3]], P.HAIR_LIT);
+    A.tube(bm, [[148, 196, 4], [160, 208, 4], [172, 216, 3]], P.HAIR_DARK);
+    // 尾鳍（鲸尾状，分两叶）
+    PIX.poly(bm, [[182, 221], [198, 206], [194, 218], [186, 224]], P.HAIR);
+    PIX.poly(bm, [[182, 221], [196, 228], [190, 234], [180, 226]], P.HAIR_DARK);
+    PIX.poly(bm, [[184, 217], [196, 206], [190, 214]], P.HAIR_LIT);
+    PIX.poly(bm, [[184, 224], [194, 227], [188, 230]], P.HAIR_MID);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  /** 人鱼形态：居中的大尾（平时 alpha 为 0，变身时抖动溶入） */
+  function buildTailBig() {
+    var bm = nb();
+    A.tube(bm, [[128, 168, 13], [128, 190, 16], [128, 212, 15], [130, 230, 12], [132, 240, 8]], P.HAIR_MID);
+    A.tube(bm, [[124, 172, 6], [124, 194, 7], [124, 216, 6], [126, 232, 4]], P.HAIR);
+    A.tube(bm, [[120, 178, 4], [120, 200, 4], [121, 220, 3]], P.HAIR_LIT);
+    A.tube(bm, [[134, 186, 4], [136, 210, 4], [136, 230, 3]], P.HAIR_DARK);
+    // 鳞片纹
+    for (var y = 174; y < 232; y += 6) {
+      for (var x = -10; x <= 12; x += 8) {
+        var row = Math.round(x * 0.15);
+        PIX.ellipse(bm, 128 + x + row, y, 2.6, 2.0, P.HAIR_DARK);
+        PIX.ellipse(bm, 128 + x + row, y - 0.6, 2.2, 1.6, P.HAIR);
+      }
+    }
+    // 尾鳍（左右两叶）
+    PIX.poly(bm, [[130, 236], [108, 250], [116, 252], [104, 252], [122, 240], [128, 246]], P.HAIR);
+    PIX.poly(bm, [[130, 236], [152, 250], [144, 252], [156, 252], [138, 240], [132, 246]], P.HAIR);
+    PIX.poly(bm, [[130, 238], [114, 248], [124, 244]], P.HAIR_LIT);
+    PIX.poly(bm, [[130, 238], [146, 248], [136, 244]], P.HAIR_DARK);
+    A.inkIn(bm, P.HAIR_LINE);
+    return bm;
+  }
+
+  A.buildBody = function () {
+    A.def('tailBig', { bm: buildTailBig(), joint: 'hip', z: 4, alpha0: 0 });
+    A.def('tail', { bm: buildTail(), joint: 'hip', z: 6, wave: { root: 168, tip: 218, amp: 2.6, links: 3 } });
+    A.def('ribbon', { bm: buildRibbon(), joint: 'hip', z: 8 });
+    A.def('legL', { bm: buildLeg(-1), joint: 'hipL', z: 10 });
+    A.def('legR', { bm: buildLeg(1), joint: 'hipR', z: 10 });
+    A.def('skirt', { bm: buildSkirt(), joint: 'hip', z: 20, wave: { root: 150, tip: 208, amp: 2.4, links: 4 } });
+    A.def('apron', { bm: buildApron(), joint: 'hip', z: 24, wave: { root: 150, tip: 208, amp: 1.6, links: 3 } });
+    A.def('torso', { bm: buildTorso(), joint: 'torso', z: 30 });
+    A.def('upperArmL', { bm: buildUpperArm(-1), joint: 'armL', z: 34 });
+    A.def('upperArmR', { bm: buildUpperArm(1), joint: 'armR', z: 34 });
+    A.def('foreArmL', { bm: buildForeArm(-1), joint: 'foreL', z: 35 });
+    A.def('foreArmR', { bm: buildForeArm(1), joint: 'foreR', z: 35 });
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== background.js ===================== */
+/* ============================================================================
+ * background.js  —  房间背景（蓝 / 白 / 紫主调），可在运行时开启或关闭
+ * ----------------------------------------------------------------------------
+ * 与角色同为索引位图，尺寸 336x288（舞台逻辑分辨率），整数倍放大显示。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+  var W = 336, H = 288;
+
+  function nb() { return new PIX.Bitmap(W, H); }
+  var Bayer = PIX.Bayer4;
+
+  /** 有序抖动渐变：从 c1 过渡到 c2 */
+  function grad(bm, x, y, w, h, c1, c2, vertical) {
+    for (var j = 0; j < h; j++) {
+      for (var i = 0; i < w; i++) {
+        var t = vertical ? j / Math.max(1, h - 1) : i / Math.max(1, w - 1);
+        var th = Bayer[((y + j) & 3) << 2 | ((x + i) & 3)] / 16;
+        bm.set(x + i, y + j, th < t ? c2 : c1);
+      }
+    }
+    bm._bb = null;
+  }
+
+  function room() {
+    var bm = nb();
+    // ---- 墙面 ----
+    grad(bm, 0, 0, W, 250, P.ROOM_WALL, P.ROOM_WALL2, true);
+    // 墙纸花纹：小圆点阵列
+    for (var y = 8; y < 246; y += 18) {
+      for (var x = 6; x < W; x += 18) {
+        var ox = ((y / 18) | 0) % 2 ? 9 : 0;
+        PIX.ellipse(bm, x + ox, y, 1.6, 1.6, P.WHITE_SHD);
+      }
+    }
+    // ---- 地板 ----
+    grad(bm, 0, 252, W, H - 252, P.ROOM_FLOOR, P.ROOM_FLOOR2, true);
+    // 踢脚线
+    PIX.rect(bm, 0, 246, W, 6, P.ROOM_WOOD);
+    PIX.rect(bm, 0, 246, W, 1, P.WHITE_SHD);
+    PIX.rect(bm, 0, 251, W, 1, P.PURPLE_DK);
+    // 地板缝（透视）
+    for (var i = 0; i < 9; i++) {
+      var fx = i * 44 + 8;
+      PIX.line(bm, fx, 252, fx - 14, H - 1, P.ROOM_FLOOR2);
+    }
+    PIX.hline(bm, 0, W - 1, 262, P.ROOM_FLOOR2);
+    PIX.hline(bm, 0, W - 1, 274, P.ROOM_FLOOR2);
+
+    // ---- 地毯 ----
+    PIX.ellipse(bm, 168, 276, 74, 13, P.PURPLE);
+    PIX.ellipse(bm, 168, 276, 66, 10, P.WHITE);
+    PIX.ellipse(bm, 168, 276, 54, 7, P.PURPLE);
+    PIX.ellipse(bm, 168, 276, 30, 4, P.WHITE_SHD);
+
+    // ---- 窗户（左）----
+    PIX.rect(bm, 4, 74, 60, 96, P.WHITE);
+    PIX.rect(bm, 8, 78, 52, 88, P.SKY);
+    grad(bm, 8, 78, 52, 88, P.SKY, P.PURPLE_DK, true);
+    // 星星与月亮
+    var stars = [[14, 88], [30, 84], [46, 92], [20, 112], [42, 120], [12, 138], [34, 146], [52, 132], [24, 158]];
+    for (var s = 0; s < stars.length; s++) bm.set(stars[s][0], stars[s][1], P.STAR);
+    PIX.ellipse(bm, 46, 100, 7, 7, P.LAMP_GLOW);
+    PIX.ellipse(bm, 50, 97, 6.5, 6.5, P.SKY);
+    // 窗棂
+    PIX.rect(bm, 33, 78, 2, 88, P.WHITE);
+    PIX.rect(bm, 8, 120, 52, 2, P.WHITE);
+    PIX.rect(bm, 4, 170, 60, 6, P.ROOM_WOOD);
+    // 窗帘
+    A_scallopEdge(bm, 0, 66, P.CURTAIN);
+    PIX.rect(bm, 0, 66, 12, 106, P.CURTAIN);
+    PIX.rect(bm, 8, 66, 4, 106, P.CURTAIN_SHD);
+    PIX.rect(bm, 56, 66, 12, 106, P.CURTAIN);
+    PIX.rect(bm, 56, 66, 4, 106, P.CURTAIN_SHD);
+    PIX.rect(bm, 0, 62, 72, 5, P.WHITE_SHD);
+    PIX.rect(bm, 0, 66, 72, 1, P.WHITE_DEEP);
+
+    // ---- 墙上挂画（鲸鱼海报，右上）----
+    PIX.rect(bm, 268, 30, 62, 52, P.WHITE);
+    PIX.rect(bm, 271, 33, 56, 46, P.GLASS);
+    PIX.rect(bm, 271, 55, 56, 24, P.WHALE);
+    PIX.rect(bm, 271, 33, 56, 22, P.WHITE_HI);
+    PIX.ellipse(bm, 296, 60, 15, 8, P.WHALE);
+    PIX.ellipse(bm, 296, 63, 12, 4, P.WHALE_HI);
+    PIX.poly(bm, [[282, 60], [272, 52], [274, 62], [272, 70]], P.WHALE);
+    PIX.rect(bm, 301, 57, 2, 2, P.EYE_PUPIL);
+    PIX.rect(bm, 305, 50, 1, 5, P.GLASS_DK);
+    PIX.rect(bm, 268, 30, 62, 1, P.WHITE_SHD);
+    PIX.rect(bm, 268, 81, 62, 1, P.WHITE_DEEP);
+    PIX.rect(bm, 268, 30, 1, 52, P.WHITE_SHD);
+    PIX.rect(bm, 329, 30, 1, 52, P.WHITE_DEEP);
+
+    // ---- 书架（右下）----
+    PIX.rect(bm, 272, 178, 64, 6, P.ROOM_WOOD);
+    PIX.rect(bm, 272, 178, 64, 1, P.WHITE_SHD);
+    var books = [[276, 18, P.PURPLE], [284, 22, P.NAVY_HI], [291, 16, P.GOLD],
+                 [300, 24, P.PURPLE_DK], [308, 20, P.NAVY], [318, 17, P.WHITE_SHD]];
+    for (var b = 0; b < books.length; b++) {
+      var bx = books[b][0], bh = books[b][1], bc = books[b][2];
+      PIX.rect(bm, bx, 178 - bh, 6, bh, bc);
+      PIX.rect(bm, bx, 178 - bh, 6, 1, P.WHITE_HI);
+      PIX.rect(bm, bx + 2, 178 - bh + 4, 2, 3, P.WHITE_HI);
+    }
+    // 架上的小鲸鱼玩偶
+    PIX.ellipse(bm, 322, 170, 8, 5, P.WHALE);
+    PIX.ellipse(bm, 322, 172, 6, 3, P.WHALE_HI);
+    PIX.rect(bm, 325, 169, 1, 2, P.EYE_PUPIL);
+    PIX.poly(bm, [[315, 170], [309, 164], [311, 172], [309, 177]], P.WHALE);
+
+    // ---- 顶部彩旗 ----
+    var cols = [P.NAVY_HI, P.WHITE, P.PURPLE, P.WHALE, P.GOLD];
+    for (var k = 0; k < 12; k++) {
+      var cx = 12 + k * 29;
+      PIX.poly(bm, [[cx - 8, 6], [cx + 8, 6], [cx, 20]], cols[k % cols.length]);
+    }
+    PIX.rect(bm, 0, 4, W, 2, P.WHITE_SHD);
+
+    return bm;
+  }
+
+  function A_scallopEdge(bm, x, y, c) {
+    PIX.rect(bm, x, y, 72, 4, c);
+  }
+
+  /** 关闭背景时的“摄影棚”底：与房间同色调，但不含陈设 */
+  function plain() {
+    var bm = nb();
+    grad(bm, 0, 0, W, H, P.PURPLE, P.NAVY_DEEP, true);
+    grad(bm, 0, 0, W, 96, P.NAVY_MID, P.PURPLE_DK, false);
+    // 细密网点，弱化大面积平涂
+    for (var y = 0; y < H; y += 2) {
+      for (var x = (y >> 1) & 1; x < W; x += 2) {
+        if (((x * 7 + y * 13) % 11) === 0) bm.set(x, y, P.NAVY_MID);
+      }
+    }
+    // 底部地毯痕迹
+    PIX.ellipse(bm, 168, 278, 78, 12, P.PURPLE_DK);
+    return bm;
+  }
+
+  PIX.Background = {
+    W: W, H: H,
+    build: function () {
+      return { room: room(), plain: plain() };
+    }
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== rig.js ===================== */
+/* ============================================================================
+ * rig.js  —  角色骨架与合成
+ * ----------------------------------------------------------------------------
+ * · 关节层级：root -> hip -> torso -> head / arms；腿挂在 hip 下。
+ * · 通道值（pose）经弹簧平滑，因此任意时刻切换动作都有过渡、可被打断。
+ * · 被动跟随：每个柔性部件持有一条“延迟链”，链上刚度逐级递减，
+ *   于是延迟沿结构方向递增；逐行位移合成后写入变形缓冲再绘制。
+ * · 全部由时间驱动（dt 积分），与刷新率无关。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var A = PIX.Art;
+
+  /* ----------------------------------------------------------- 关节 */
+  var JOINT_DEFS = [
+    ['root', 128, 250, null],
+    ['hip', 128, 168, 'root'],
+    ['torso', 128, 150, 'hip'],
+    ['head', 128, 118, 'torso'],
+    ['hipL', 119, 176, 'hip'],
+    ['hipR', 137, 176, 'hip'],
+    ['armL', 111, 130, 'torso'],
+    ['armR', 145, 130, 'torso'],
+    ['foreL', 107, 156, 'armL'],
+    ['foreR', 149, 156, 'armR']
+  ];
+
+  function Joint(name, rx, ry, parent) {
+    this.name = name; this.rx = rx; this.ry = ry; this.parent = parent;
+    this.ox = 0; this.oy = 0; this.a = 0; this.sx = 1;
+    this.wx = rx; this.wy = ry; this.wa = 0; this.ws = 1;
+    this.px = rx; this.py = ry; this.vx = 0; this.vy = 0;
+  }
+
+  /* --------------------------------------------------- 延迟链（被动跟随） */
+  function Wave(cfg, seed) {
+    var n = cfg.links || 4;
+    this.n = n;
+    this.root = cfg.root;
+    this.tip = cfg.tip;
+    this.amp = cfg.amp === undefined ? 3 : cfg.amp;
+    this.v = new Float32Array(n);
+    this.vel = new Float32Array(n);
+    this.k = new Float32Array(n);
+    // 刚度逐级衰减 => 越靠梢部响应越慢 => 延迟沿结构方向递增
+    for (var i = 0; i < n; i++) this.k[i] = 34 * Math.pow(0.52, i);
+    this.phase = seed * 2.399;
+  }
+  Wave.prototype.update = function (dt, drive, t) {
+    var n = this.n;
+    // 微风：静止时也保持细微摆动，避免“死循环动画”感
+    var breeze = Math.sin(t * 0.85 + this.phase) * 0.55 + Math.sin(t * 1.63 + this.phase * 1.7) * 0.3;
+    var target = drive + breeze * this.amp * 0.55;
+    for (var i = 0; i < n; i++) {
+      var tg = (i === 0) ? target : this.v[i - 1];
+      var k = this.k[i];
+      var c = 2 * Math.sqrt(k) * 0.62;
+      var acc = (tg - this.v[i]) * k - this.vel[i] * c;
+      this.vel[i] += acc * dt;
+      this.v[i] += this.vel[i] * dt;
+      if (!isFinite(this.v[i])) { this.v[i] = 0; this.vel[i] = 0; }
+    }
+  };
+  /** 行位移：根部恒为 0，沿结构方向按链值插值 */
+  Wave.prototype.shiftAt = function (y) {
+    var n = this.n;
+    var t = (y - this.root) / (this.tip - this.root);
+    if (t <= 0) return 0;
+    if (t >= 1) return this.v[n - 1];
+    var f = t * n, i = f | 0, fr = f - i;
+    if (i >= n) return this.v[n - 1];
+    var a = (i === 0) ? 0 : this.v[i - 1];
+    var b = this.v[i];
+    return a + (b - a) * fr;
+  };
+
+  /* ------------------------------------------------------------ 弹簧 */
+  function Spring(v, k) {
+    this.v = v; this.vel = 0; this.k = k || 90;
+  }
+  Spring.prototype.to = function (dt, target) {
+    var c = 2 * Math.sqrt(this.k) * 0.82;
+    var acc = (target - this.v) * this.k - this.vel * c;
+    this.vel += acc * dt;
+    this.v += this.vel * dt;
+    if (!isFinite(this.v)) { this.v = target; this.vel = 0; }
+    return this.v;
+  };
+
+  /* ------------------------------------------------------------- Rig */
+  var Rig = {
+    joints: {},
+    list: [],
+    waves: {},
+    parts: [],
+    scratch: {},
+    // 弹簧通道：动作切换时目标突变，由弹簧完成过渡
+    chan: {},
+    CHANNELS: ['rootX', 'rootY', 'hipX', 'hipA', 'torsoY', 'torsoA', 'headX', 'headY', 'headA',
+               'armL', 'armR', 'foreL', 'foreR', 'legL', 'legR'],
+    CHAN_K: { rootX: 120, rootY: 150, hipX: 110, hipA: 90, torsoY: 120, torsoA: 90,
+              headX: 130, headY: 120, headA: 80, armL: 95, armR: 95, foreL: 110, foreR: 110,
+              legL: 100, legR: 100 },
+
+    init: function () {
+      var i;
+      for (i = 0; i < JOINT_DEFS.length; i++) {
+        var d = JOINT_DEFS[i];
+        Rig.joints[d[0]] = new Joint(d[0], d[1], d[2], d[3]);
+      }
+      for (i = 0; i < Rig.CHANNELS.length; i++) {
+        var c = Rig.CHANNELS[i];
+        Rig.chan[c] = new Spring(0, Rig.CHAN_K[c]);
+      }
+      // 部件表（按 z 排序，face 为逐帧动态部件）
+      var names = A.order.slice();
+      Rig.parts = [];
+      for (i = 0; i < names.length; i++) {
+        var p = A.parts[names[i]];
+        var a0 = (p.alpha0 === undefined) ? 1 : p.alpha0;
+        var item = { name: names[i], bm: p.bm, joint: p.joint, z: p.z, wave: null,
+                     alpha: a0, alpha0: a0, box: p.box || null };
+        if (p.wave) {
+          item.wave = new Wave(p.wave, i + 1);
+          Rig.waves[names[i]] = item.wave;
+          Rig.scratch[names[i]] = new PIX.Bitmap(256, 256);
+        }
+        Rig.parts.push(item);
+      }
+      Rig.parts.push({ name: 'face', bm: A.faceBmp, joint: 'head', z: 55, wave: null,
+                       alpha: 1, alpha0: 1, box: { x0: 96, y0: 58, x1: 160, y1: 128 } });
+      Rig.parts.sort(function (a, b) { return a.z - b.z || (a.name < b.name ? -1 : 1); });
+      return Rig;
+    },
+
+    jointOf: function (name) { return Rig.joints[name] || Rig.joints.root; },
+
+    /** 每帧：先积分弹簧得到通道实际值，再解算关节世界变换 */
+    update: function (dt, target, t, extDrive) {
+      var i, c;
+      for (i = 0; i < Rig.CHANNELS.length; i++) {
+        c = Rig.CHANNELS[i];
+        Rig.chan[c].to(dt, target[c] || 0);
+      }
+      var J = Rig.joints;
+      // 记录上一帧世界坐标用于求速度（驱动被动跟随）
+      for (i = 0; i < JOINT_DEFS.length; i++) {
+        var j = J[JOINT_DEFS[i][0]];
+        j.px = j.wx; j.py = j.wy;
+      }
+      J.root.ox = Rig.chan.rootX.v; J.root.oy = Rig.chan.rootY.v;
+      J.hip.ox = Rig.chan.hipX.v; J.hip.a = Rig.chan.hipA.v;
+      J.torso.oy = Rig.chan.torsoY.v; J.torso.a = Rig.chan.torsoA.v;
+      J.head.ox = Rig.chan.headX.v; J.head.oy = Rig.chan.headY.v; J.head.a = Rig.chan.headA.v;
+      J.armL.a = Rig.chan.armL.v; J.armR.a = Rig.chan.armR.v;
+      J.foreL.a = Rig.chan.foreL.v; J.foreR.a = Rig.chan.foreR.v;
+      J.hipL.a = Rig.chan.legL.v; J.hipR.a = Rig.chan.legR.v;
+
+      // 解算世界变换
+      for (i = 0; i < JOINT_DEFS.length; i++) {
+        var jj = J[JOINT_DEFS[i][0]];
+        if (!jj.parent) {
+          jj.wx = jj.rx + jj.ox; jj.wy = jj.ry + jj.oy; jj.wa = jj.a; jj.ws = jj.sx;
+        } else {
+          var pj = J[jj.parent];
+          var lx = jj.rx - pj.rx + jj.ox, ly = jj.ry - pj.ry + jj.oy;
+          var ca = Math.cos(pj.wa), sa = Math.sin(pj.wa);
+          jj.wx = pj.wx + (lx * pj.ws) * ca - (ly * pj.ws) * sa;
+          jj.wy = pj.wy + (lx * pj.ws) * sa + (ly * pj.ws) * ca;
+          jj.wa = pj.wa + jj.a;
+          jj.ws = pj.ws * jj.sx;
+        }
+        var idx = 1 / Math.max(dt, 1e-4);
+        jj.vx = (jj.wx - jj.px) * idx;
+        jj.vy = (jj.wy - jj.py) * idx;
+      }
+
+      // 被动跟随链：由所属关节的速度驱动（外加拖拽时的外部速度）
+      var wx = (extDrive && extDrive.vx) || 0, wy = (extDrive && extDrive.vy) || 0;
+      for (i = 0; i < Rig.parts.length; i++) {
+        var it = Rig.parts[i];
+        if (!it.wave) continue;
+        var jw = Rig.joints[it.joint];
+        var drive = -(jw.vx * 0.085 + wx * 0.085);
+        if (drive > 6) drive = 6; else if (drive < -6) drive = -6;
+        it.wave.update(dt, drive, t);
+      }
+    },
+
+    /** 把角色合成到 256x256 画布 */
+    compose: function (fb, faceState) {
+      fb.clear();
+      for (var i = 0; i < Rig.parts.length; i++) {
+        var it = Rig.parts[i];
+        var j = Rig.joints[it.joint];
+        var src = it.bm;
+        var box = it.box;
+        if (it.wave) {
+          var sc = Rig.scratch[it.name];
+          PIX.deformRows(it.bm, sc, (function (w) {
+            return function (y) { return w.shiftAt(y); };
+          })(it.wave));
+          src = sc;
+          box = null;
+        }
+        if (it.alpha <= 0) continue;
+        PIX.draw(fb, src, {
+          x: j.wx, y: j.wy, angle: j.wa, scaleX: j.ws,
+          anchorX: j.rx, anchorY: j.ry, alpha: it.alpha, box: box
+        });
+      }
+      return fb;
+    }
+  };
+
+  PIX.Rig = Rig;
+  PIX.Spring = Spring;
+  PIX.Wave = Wave;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== expressions.js ===================== */
+/* ============================================================================
+ * expressions.js  —  表情系统（与动作状态相互独立，可任意组合）
+ * ----------------------------------------------------------------------------
+ * · 离散通道（眼型 / 嘴型）切换即时生效；
+ * · 连续通道（睁眼度 / 眉角 / 腮红 / 泪 / 汗 / 张嘴）用弹簧过渡，切换自然；
+ * · 额外叠加：自主眨眼、视线追随、说话时口型开合。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+
+  // 表情定义：连续量 0~1（browTilt 为弧度方向量）
+  var DEFS = {
+    neutral:  { label: '平静', eyeStyle: 'open',     eyeOpen: 1.00, mouth: 'smile', blush: 0.25, browTilt: 0,     browLift: 0 },
+    smile:    { label: '微笑', eyeStyle: 'open',     eyeOpen: 0.94, mouth: 'grin',  blush: 0.45, browTilt: -0.4,  browLift: 0.6 },
+    happy:    { label: '开心', eyeStyle: 'closedUp', eyeOpen: 0.00, mouth: 'grin',  blush: 0.50, browTilt: -0.6,  browLift: 1.0 },
+    laugh:    { label: '大笑', eyeStyle: 'closedUp', eyeOpen: 0.00, mouth: 'open',  blush: 0.50, browTilt: -0.8,  browLift: 1.2, mouthOpen: 1.0 },
+    wink:     { label: '眨眼', eyeStyle: 'open',     eyeOpen: 1.00, mouth: 'smile', blush: 0.40, wink: 'L', browTilt: -0.3, browLift: 0.5 },
+    star:     { label: '星星眼', eyeStyle: 'star',   eyeOpen: 1.00, mouth: 'grin',  blush: 0.55, browTilt: -0.8,  browLift: 1.4 },
+    excited:  { label: '兴奋', eyeStyle: 'excited',  eyeOpen: 1.05, mouth: 'open',  blush: 0.55, browTilt: -0.9,  browLift: 1.5, mouthOpen: 0.75 },
+    surprise: { label: '惊讶', eyeStyle: 'open',     eyeOpen: 1.10, mouth: 'o',     blush: 0.20, browTilt: -1.6,  browLift: 2.6, mouthOpen: 0.5, sweat: 0.4 },
+    sad:      { label: '难过', eyeStyle: 'sad',      eyeOpen: 0.85, mouth: 'wave',  blush: 0.30, browTilt: -2.6,  browLift: -1.0, tear: 0.35 },
+    cry:      { label: '哭泣', eyeStyle: 'sad',      eyeOpen: 0.70, mouth: 'open',  blush: 0.50, browTilt: -3.0,  browLift: -1.2, tear: 1.0, mouthOpen: 0.5 },
+    angry:    { label: '生气', eyeStyle: 'angry',    eyeOpen: 0.80, mouth: 'pout',  blush: 0.40, browTilt: 2.4,   browLift: -0.6 },
+    pout:     { label: '嘟嘴', eyeStyle: 'open',     eyeOpen: 0.92, mouth: 'pout',  blush: 0.45, browTilt: 0.9,   browLift: -0.3 },
+    shy:      { label: '害羞', eyeStyle: 'open',     eyeOpen: 0.72, mouth: 'wave',  blush: 1.00, browTilt: -1.4,  browLift: -0.4 },
+    sleepy:   { label: '困倦', eyeStyle: 'sleepy',   eyeOpen: 0.45, mouth: 'o',     blush: 0.30, browTilt: -0.8,  browLift: -0.8, mouthOpen: 0.3 },
+    dizzy:    { label: '晕乎', eyeStyle: 'dizzy',    eyeOpen: 1.00, mouth: 'wave',  blush: 0.45, browTilt: -1.0,  browLift: -0.5 },
+    serious:  { label: '认真', eyeStyle: 'open',     eyeOpen: 0.85, mouth: 'flat',  blush: 0.10, browTilt: 1.2,   browLift: -0.5 }
+  };
+
+  var CONT = ['eyeOpen', 'browTilt', 'browLift', 'blush', 'tear', 'sweat', 'mouthOpen'];
+
+  var Face = {
+    defs: DEFS,
+    order: Object.keys(DEFS),
+    cur: 'neutral',
+    base: 'neutral',
+    st: { eyeStyle: 'open', eyeOpen: 1, wink: null, browTilt: 0, browLift: 0,
+          mouth: 'smile', mouthOpen: 0, blush: 0.25, tear: 0, sweat: 0, gaze: [0, 0], turn: 0 },
+    v: {},          // 连续通道当前值
+    vel: {},
+    blinkT: 0,
+    nextBlink: 2.2,
+    gazeX: 0, gazeY: 0,
+    gazeVelX: 0, gazeVelY: 0,
+    talk: 0,        // 说话口型开合输入（0~1）
+
+    init: function () {
+      var d = DEFS.neutral, i;
+      for (i = 0; i < CONT.length; i++) {
+        var c = CONT[i];
+        Face.v[c] = d[c] === undefined ? 0 : d[c];
+        Face.vel[c] = 0;
+      }
+      Face.apply(true);
+      return Face;
+    },
+
+    set: function (name) {
+      if (!DEFS[name]) return;
+      Face.cur = name;
+      Face.apply(false);
+      return Face;
+    },
+
+    /** 把当前表情的离散量写入 st，连续量交给弹簧 */
+    apply: function (instant) {
+      var d = DEFS[Face.cur] || DEFS.neutral;
+      var st = Face.st;
+      st.eyeStyle = d.eyeStyle;
+      st.mouth = d.mouth;
+      st.wink = d.wink || null;
+      if (instant) {
+        for (var i = 0; i < CONT.length; i++) {
+          var c = CONT[i];
+          Face.v[c] = d[c] === undefined ? 0 : d[c];
+          Face.vel[c] = 0;
+        }
+      }
+    },
+
+    /** 由外部（导演 / 交互）设置连续性覆盖，例如说话口型 */
+    setTalk: function (x) { Face.talk = x; },
+
+    update: function (dt, ctx) {
+      ctx = ctx || {};
+      var d = DEFS[Face.cur] || DEFS.neutral, i, c;
+      for (i = 0; i < CONT.length; i++) {
+        c = CONT[i];
+        var tgt = (d[c] === undefined) ? 0 : d[c];
+        if (c === 'mouthOpen' && Face.talk > 0) tgt = Math.max(tgt, Face.talk);
+        var k = c === 'eyeOpen' ? 260 : (c === 'mouthOpen' ? 320 : 110);
+        var damp = 2 * Math.sqrt(k) * 0.85;
+        var acc = (tgt - Face.v[c]) * k - Face.vel[c] * damp;
+        Face.vel[c] += acc * dt;
+        Face.v[c] += Face.vel[c] * dt;
+        if (!isFinite(Face.v[c])) { Face.v[c] = tgt; Face.vel[c] = 0; }
+      }
+
+      // 自主眨眼：随机间隔，眨眼用 |sin| 曲线保证时间驱动
+      Face.blinkT += dt;
+      if (Face.blinkT > Face.nextBlink) {
+        Face.blinkT = 0;
+        Face.nextBlink = 2.4 + ((Face.blinkSeed = (Face.blinkSeed || 1.7) * 1.61 % 1) ) * 3.6;
+        Face.blinkPhase = 0;
+      }
+      var blinkMul = 1;
+      if (Face.blinkPhase !== undefined && Face.blinkPhase < 0.19) {
+        Face.blinkPhase += dt;
+        blinkMul = 1 - Math.sin(Math.PI * Math.min(1, Face.blinkPhase / 0.19));
+      }
+
+      // 视线：向目标缓慢靠近（带惯性）
+      var gx = ctx.gazeX || 0, gy = ctx.gazeY || 0;
+      Face.gazeVelX += (gx - Face.gazeX) * 90 * dt;
+      Face.gazeVelX *= Math.pow(0.0016, dt);
+      Face.gazeX += Face.gazeVelX * dt;
+      Face.gazeVelY += (gy - Face.gazeY) * 90 * dt;
+      Face.gazeVelY *= Math.pow(0.0016, dt);
+      Face.gazeY += Face.gazeVelY * dt;
+      if (Face.gazeX > 1) Face.gazeX = 1; else if (Face.gazeX < -1) Face.gazeX = -1;
+      if (Face.gazeY > 1) Face.gazeY = 1; else if (Face.gazeY < -1) Face.gazeY = -1;
+
+      var st = Face.st;
+      for (i = 0; i < CONT.length; i++) st[CONT[i]] = Face.v[CONT[i]];
+      st.eyeOpen = Math.max(0, Math.min(1.2, Face.v.eyeOpen * blinkMul));
+      st.gaze = [Face.gazeX, Face.gazeY];
+      st.turn = ctx.turn || 0;
+      return st;
+    }
+  };
+
+  PIX.Face = Face;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== actions.js ===================== */
+/* ============================================================================
+ * actions.js  —  动作状态机
+ * ----------------------------------------------------------------------------
+ * · 每个动作是一个“以自身时间为自变量”的姿态函数：pose(t, u, out)，
+ *   因此与刷新率无关，且随时可被切换 / 打断。
+ * · 切换动作只改变目标值，实际姿态由 rig 的弹簧收敛 —— 天然带过渡。
+ * · 动作还可输出整体缩放（立牌翻转 / 挤压拉伸）与部件 alpha（抖动淡入淡出）。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+
+  var E = {
+    lin: function (t) { return t; },
+    in: function (t) { return t * t * t; },
+    out: function (t) { return 1 - Math.pow(1 - t, 3); },
+    inOut: function (t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; },
+    outBack: function (t) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
+    outElastic: function (t) {
+      if (t <= 0) return 0; if (t >= 1) return 1;
+      var c4 = (2 * Math.PI) / 3;
+      return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+    },
+    clamp01: function (t) { return t < 0 ? 0 : (t > 1 ? 1 : t); },
+    /** 区间渐入渐出窗口：a 前渐入，b 后渐出 */
+    win: function (u, a, b, fadeIn, fadeOut) {
+      var k = 1;
+      if (u < a + fadeIn) k = Math.min(k, E.inOut(E.clamp01((u - a) / fadeIn)));
+      if (u > b - fadeOut) k = Math.min(k, E.inOut(E.clamp01((b - u) / fadeOut)));
+      return k;
+    }
+  };
+
+  function reset(o) {
+    o.rootX = 0; o.rootY = 0; o.hipX = 0; o.hipA = 0; o.torsoY = 0; o.torsoA = 0;
+    o.headX = 0; o.headY = 0; o.headA = 0;
+    o.armL = 0; o.armR = 0; o.foreL = 0; o.foreR = 0; o.legL = 0; o.legR = 0;
+    o.scaleX = 1; o.scaleY = 1; o.mouthOpen = -1;
+    o.alphas = null; o.fx = null;
+  }
+
+  // 站立时的呼吸与微动：多重非整数比正弦叠加，永不精确循环
+  function idleBase(t, o) {
+    o.rootY = Math.sin(t * 1.35) * 1.1 + Math.sin(t * 0.53 + 1.2) * 0.6;
+    o.torsoY = -0.6 + Math.sin(t * 1.35 + 0.4) * 0.7;
+    o.hipX = Math.sin(t * 0.42) * 1.4;
+    o.hipA = Math.sin(t * 0.42 + 0.3) * 0.018;
+    o.headA = Math.sin(t * 0.61 + 0.8) * 0.028 + Math.sin(t * 1.7) * 0.008;
+    o.headX = Math.sin(t * 0.33) * 1.2;
+    o.headY = Math.sin(t * 1.35 + 0.2) * 0.5;
+    o.armL = 0.03 + Math.sin(t * 0.47) * 0.06;
+    o.armR = -0.03 + Math.sin(t * 0.47 + 0.9) * 0.06;
+    o.foreL = 0.04 + Math.sin(t * 0.61) * 0.03;
+    o.foreR = -0.04 - Math.sin(t * 0.61 + 1.1) * 0.03;
+  }
+
+  var DEFS = {
+    idle: {
+      label: '待机', dur: 0, loop: true,
+      pose: function (t, u, o) { idleBase(t, o); }
+    },
+    wave: {
+      label: '挥手', dur: 2.8,
+      pose: function (t, u, o) {
+        idleBase(t, o);
+        var k = E.win(u, 0, 1, 0.2, 0.18);
+        o.armR = -2.15 * k + (1 - k) * (-0.03);
+        o.foreR = k * (-0.42 + Math.sin(t * 15) * 0.42);
+        o.armL = 0.03 + k * 0.12;
+        o.headA = -0.07 * k;
+        o.hipX = -1.4 * k;
+      }
+    },
+    jump: {
+      label: '跳跃', dur: 1.5,
+      pose: function (t, u, o) {
+        var crouch = u < 0.18 ? E.inOut(u / 0.18) : (u < 0.30 ? 1 - E.inOut((u - 0.18) / 0.12) : 0);
+        var air = (u >= 0.30 && u < 0.72) ? Math.sin(Math.PI * (u - 0.30) / 0.42) : 0;
+        var land = u >= 0.72 ? Math.sin(Math.PI * E.clamp01((u - 0.72) / 0.16)) * 0.8 : 0;
+        o.rootY = crouch * 6 - air * 30 + land * 4;
+        o.legL = crouch * 0.10; o.legR = crouch * 0.10;
+        o.scaleY = 1 - crouch * 0.13 + air * 0.07 - land * 0.12;
+        o.scaleX = 1 + crouch * 0.11 - air * 0.04 + land * 0.10;
+        o.armL = 0.7 * crouch + 2.3 * air;
+        o.armR = -0.7 * crouch - 2.3 * air;
+        o.headY = crouch * 2 - air * 1.5;
+      }
+    },
+    spin: {
+      label: '立牌翻转', dur: 2.3,
+      pose: function (t, u, o) {
+        var p = E.inOut(u);
+        o.scaleX = Math.cos(p * Math.PI * 2);
+        o.scaleY = 1 - Math.abs(Math.sin(p * Math.PI)) * 0.05;
+        o.rootY = -Math.sin(p * Math.PI) * 6;
+        o.headA = Math.sin(t * 4) * 0.05 * Math.sin(p * Math.PI);
+        o.armL = 0.25; o.armR = -0.25;
+      }
+    },
+    dance: {
+      label: '跳舞', dur: 5.0,
+      pose: function (t, u, o) {
+        var b = t * 5.4, k = E.win(u, 0, 1, 0.12, 0.12);
+        o.rootY = -Math.abs(Math.sin(b)) * 3.2 * k;
+        o.hipX = Math.sin(b * 0.5) * 4 * k;
+        o.hipA = Math.sin(b * 0.5) * 0.07 * k;
+        o.headA = Math.sin(b * 0.5 + 1) * 0.10 * k;
+        o.headX = Math.sin(b) * 1.2 * k;
+        o.armL = (1.0 + Math.sin(b) * 0.55) * k;
+        o.armR = -(1.0 + Math.sin(b + 3.14) * 0.55) * k;
+        o.foreL = Math.sin(b) * 0.5 * k;
+        o.foreR = -Math.sin(b) * 0.5 * k;
+        o.legL = Math.sin(b * 0.5) * 0.05 * k;
+        o.legR = -Math.sin(b * 0.5) * 0.05 * k;
+      }
+    },
+    cheer: {
+      label: '欢呼', dur: 2.6,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0, 1, 0.16, 0.2);
+        var b = t * 8;
+        o.armL = 2.35 * k + Math.sin(b) * 0.14 * k;
+        o.armR = -2.35 * k - Math.sin(b) * 0.14 * k;
+        o.foreL = -0.15 * k; o.foreR = 0.15 * k;
+        o.rootY = -Math.abs(Math.sin(b * 0.5)) * 4 * k;
+        o.headY = -1.5 * k;
+        o.scaleY = 1 + 0.04 * k;
+      }
+    },
+    nod: {
+      label: '点头', dur: 1.5,
+      pose: function (t, u, o) {
+        idleBase(t, o);
+        var k = E.win(u, 0, 1, 0.1, 0.15);
+        o.headY = Math.sin(u * Math.PI * 4) * 3.4 * k;
+        o.headA = Math.sin(u * Math.PI * 4 + 0.5) * 0.03 * k;
+      }
+    },
+    shake: {
+      label: '摇头', dur: 1.5,
+      pose: function (t, u, o) {
+        idleBase(t, o);
+        var k = E.win(u, 0, 1, 0.1, 0.15);
+        o.headX = Math.sin(u * Math.PI * 4) * 3.2 * k;
+        o.headA = Math.sin(u * Math.PI * 4) * 0.05 * k;
+      }
+    },
+    stretch: {
+      label: '伸懒腰', dur: 3.2,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0, 1, 0.18, 0.2);
+        var b = Math.sin(E.clamp01((u - 0.1) / 0.7) * Math.PI);
+        o.armL = (0.6 + 2.0 * b) * k;
+        o.armR = -(0.6 + 2.0 * b) * k;
+        o.foreL = -0.3 * k; o.foreR = 0.3 * k;
+        o.torsoY = -2.5 * b * k;
+        o.headY = -2 * b * k;
+        o.headA = Math.sin(t * 0.7) * 0.03;
+        o.rootY = -1.5 * b * k;
+        o.mouthOpen = b * k * 0.8;
+        o.scaleY = 1 + 0.03 * b * k;
+      }
+    },
+    sleepy: {
+      label: '打瞌睡', dur: 6.0,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0, 1, 0.2, 0.22);
+        var b = Math.sin(t * 1.05);
+        o.headY = (2.6 + b * 1.6) * k;
+        o.headA = (0.07 + b * 0.03) * k;
+        o.torsoY = (1.2 + b * 0.8) * k;
+        o.rootY = b * 1.2 * k;
+        o.hipX = b * 1.4 * k;
+        o.armL = 0.05 * k; o.armR = -0.05 * k;
+        if (u > 0.35 && u < 0.42) o.fx = 'zzz';
+      }
+    },
+    shy: {
+      label: '害羞', dur: 3.6,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0, 1, 0.18, 0.22);
+        var b = Math.sin(t * 2.2);
+        o.armL = (1.35 + b * 0.08) * k;
+        o.armR = -(1.35 - b * 0.08) * k;
+        o.foreL = -1.75 * k; o.foreR = 1.75 * k;
+        o.headY = 1.6 * k;
+        o.headA = -0.06 * k + b * 0.02 * k;
+        o.hipX = b * 2.2 * k;
+        o.torsoA = b * 0.03 * k;
+      }
+    },
+    think: {
+      label: '思考', dur: 3.4,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0, 1, 0.16, 0.2);
+        o.armR = -1.95 * k;
+        o.foreR = 1.55 * k;
+        o.headA = -0.09 * k;
+        o.headX = 2 * k;
+        o.headY = 0.8 * k;
+        o.hipX = 1.2 * k;
+        o.rootY = Math.sin(t * 1.2) * 0.8;
+      }
+    },
+    mermaid: {
+      label: '人鱼形态', dur: 5.0,
+      pose: function (t, u, o) {
+        var k = E.inOut(E.clamp01(u < 0.25 ? u / 0.25 : (u > 0.78 ? (1 - u) / 0.22 : 1)));
+        var b = Math.sin(t * 1.8);
+        o.alphas = {
+          skirt: 1 - k, apron: 1 - k, legL: 1 - k, legR: 1 - k, ribbon: 1 - k, tailBig: k, tail: 1 - k
+        };
+        o.rootY = -b * 2.5 * k;
+        o.hipA = b * 0.06 * k;
+        o.headA = b * 0.05 * k;
+        o.armL = (0.25 + b * 0.12) * k;
+        o.armR = -(0.25 + b * 0.12) * k;
+        o.foreL = -0.5 * k; o.foreR = 0.5 * k;
+      }
+    },
+    bow: {
+      label: '鞠躬', dur: 2.2,
+      pose: function (t, u, o) {
+        var k = E.win(u, 0.05, 0.95, 0.25, 0.25);
+        o.rootY = 4 * k;
+        o.headY = 5 * k;
+        o.torsoY = 4 * k;
+        o.scaleY = 1 - 0.09 * k;
+        o.scaleX = 1 + 0.06 * k;
+        o.armL = 0.22 * k; o.armR = -0.22 * k;
+        o.foreL = -0.5 * k; o.foreR = 0.5 * k;
+      }
+    },
+    turnhead: {
+      label: '张望', dur: 3.2,
+      pose: function (t, u, o) {
+        idleBase(t, o);
+        var k = E.win(u, 0, 1, 0.12, 0.15);
+        o.headX = Math.sin(u * Math.PI * 2.2) * 4 * k;
+        o.headA = Math.sin(u * Math.PI * 2.2 + 0.6) * 0.06 * k;
+      }
+    },
+    startle: {
+      label: '受惊', dur: 1.1,
+      pose: function (t, u, o) {
+        var k = E.outElastic(E.clamp01(u / 0.35)) * (u > 0.75 ? E.clamp01((1 - u) / 0.25) : 1);
+        o.rootY = -6 * k;
+        o.scaleY = 1 + 0.10 * k;
+        o.scaleX = 1 - 0.06 * k;
+        o.headY = -2 * k;
+        o.armL = 0.9 * k; o.armR = -0.9 * k;
+        o.foreL = -0.7 * k; o.foreR = 0.7 * k;
+      }
+    },
+    poke: {
+      label: '被戳', dur: 1.4,
+      pose: function (t, u, o) {
+        var k = E.outElastic(E.clamp01(u / 0.4)) * (u > 0.7 ? E.clamp01((1 - u) / 0.3) : 1);
+        o.rootY = 3 * k;
+        o.scaleY = 1 - 0.10 * k;
+        o.scaleX = 1 + 0.08 * k;
+        o.headY = 3 * k;
+        o.headA = Math.sin(t * 20) * 0.03 * k;
+        o.armL = 0.35 * k; o.armR = -0.35 * k;
+      }
+    }
+  };
+
+  var Actions = {
+    defs: DEFS,
+    order: ['idle', 'wave', 'jump', 'spin', 'dance', 'cheer', 'stretch', 'nod', 'shake',
+            'turnhead', 'think', 'shy', 'sleepy', 'mermaid', 'bow', 'startle', 'poke'],
+    cur: 'idle',
+    t: 0,
+    out: {},
+    ended: false,
+    onEnd: null,
+
+    init: function () {
+      reset(Actions.out);
+      return Actions;
+    },
+
+    play: function (name, opts) {
+      if (!DEFS[name]) return;
+      if (name === Actions.cur && !(opts && opts.restart)) {
+        if (DEFS[name].loop) return;
+      }
+      Actions.cur = name;
+      Actions.t = 0;
+      Actions.ended = false;
+      return Actions;
+    },
+
+    /** 每帧推进；返回当前动作输出（pose 目标 + 缩放 + 部件 alpha） */
+    update: function (dt) {
+      var d = DEFS[Actions.cur] || DEFS.idle;
+      var o = Actions.out;
+      reset(o);
+      if (d.loop) {
+        Actions.t += dt;
+        d.pose(Actions.t, 0, o);
+      } else {
+        Actions.t += dt;
+        var u = d.dur > 0 ? Math.min(1, Actions.t / d.dur) : 1;
+        d.pose(Actions.t, u, o);
+        if (u >= 1 && !Actions.ended) {
+          Actions.ended = true;
+          if (Actions.onEnd) Actions.onEnd(Actions.cur);
+        }
+      }
+      return o;
+    },
+
+    progress: function () {
+      var d = DEFS[Actions.cur];
+      if (!d || d.loop) return 0;
+      return Math.min(1, Actions.t / d.dur);
+    }
+  };
+
+  PIX.Actions = Actions;
+  PIX.Ease = E;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== speech.js ===================== */
+/* ============================================================================
+ * speech.js  —  气泡对话系统
+ * ----------------------------------------------------------------------------
+ * · 队列化：同一时刻只显示一条，其余排队；高优先级可打断。
+ * · 逐字弹出（按时间累积，非帧计数），每个字触发一次“弹出音”。
+ * · 气泡绘制在角色之前（下层），因此永远不会遮挡角色本身。
+ * · 出现 / 消失均为抖动溶解 + 轻微位移，风格统一。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+  var F = PIX.Font;
+
+  var MAXW = 178;          // 文本换行宽度
+  var PAD_X = 8, PAD_Y = 7;
+
+  var Speech = {
+    queue: [],
+    cur: null,             // { text, shown, hold, t, fade, style, blip }
+    t: 0,
+    speed: 26,             // 字/秒
+    onBlip: null,
+    onChar: null,
+    visible: true,
+    // 气泡当前几何（渲染与外部查询共用）
+    box: { x: 0, y: 0, w: 0, h: 0 },
+    anchor: [168, 70],
+    scratch: null,
+
+    init: function () {
+      Speech.scratch = new PIX.Bitmap(256, 96);
+      return Speech;
+    },
+
+    push: function (text, opts) {
+      opts = opts || {};
+      var msg = {
+        text: text,
+        shown: 0,
+        hold: opts.hold === undefined ? 1.9 : opts.hold,
+        style: opts.style || 'say',
+        blip: opts.blip === undefined ? true : opts.blip,
+        prio: opts.prio || 0,
+        lines: null,
+        w: 0, h: 0
+      };
+      if (opts.prio >= 2) {                        // 高优先级：打断当前
+        Speech.cur = msg;
+        Speech.queue.length = 0;
+      } else if (!Speech.cur) {
+        Speech.cur = msg;
+      } else if (Speech.queue.length < 6) {
+        Speech.queue.push(msg);
+      }
+      return msg;
+    },
+
+    clear: function () {
+      Speech.queue.length = 0;
+      Speech.cur = null;
+    },
+
+    busy: function () { return !!Speech.cur; },
+
+    update: function (dt) {
+      var c = Speech.cur;
+      if (!c) {
+        if (Speech.queue.length) { Speech.cur = Speech.queue.shift(); }
+        return;
+      }
+      c.t = (c.t || 0) + dt;
+      // 逐字弹出
+      var target = Math.min(c.text.length, Math.floor(c.t * Speech.speed));
+      while (c.shown < target) {
+        var ch = c.text.charAt(c.shown);
+        c.shown++;
+        if (ch !== ' ' && Speech.onBlip) Speech.onBlip(ch, c);
+      }
+      var full = c.shown >= c.text.length;
+      if (full) {
+        c.holdT = (c.holdT || 0) + dt;
+      }
+      c.fade = Math.min(1, c.t / 0.16);
+      if (full && c.holdT > c.hold) {
+        c.out = (c.out || 0) + dt;
+        if (c.out > 0.18) {
+          Speech.cur = Speech.queue.length ? Speech.queue.shift() : null;
+        }
+      }
+    },
+
+    /** 计算气泡尺寸与位置（锚点为角色头顶） */
+    layout: function () {
+      var c = Speech.cur;
+      if (!c) return null;
+      var text = c.text.slice(0, c.shown);
+      if (!c.lines) {
+        c.lines = F.wrap(c.text, MAXW);
+        var mw = 0;
+        for (var i = 0; i < c.lines.length; i++) mw = Math.max(mw, F.measure(c.lines[i]));
+        c.w = mw + PAD_X * 2 + 4;
+        c.h = c.lines.length * F.lineHeight + PAD_Y * 2;
+      }
+      var W = PIX.Background.W, H = PIX.Background.H;
+      var bx = Math.round(this.anchor[0] - c.w / 2);
+      var by = Math.round(this.anchor[1] - c.h - 14);
+      if (bx < 4) bx = 4;
+      if (bx + c.w > W - 4) bx = W - 4 - c.w;
+      if (by < 6) by = 6;
+      if (by + c.h > H - 6) by = H - 6 - c.h;
+      this.box = { x: bx, y: by, w: c.w, h: c.h };
+      return this.box;
+    },
+
+    /** 绘制到舞台缓冲（在角色之前调用，保证不遮挡角色） */
+    render: function (fb) {
+      var c = Speech.cur;
+      if (!c || !Speech.visible) return;
+      var box = this.layout();
+      if (!box) return;
+      var sc = Speech.scratch;
+      sc.clear();
+      var x = box.x, y = box.y, w = box.w, h = box.h;
+      // 圆角像素框 + 尾巴
+      var txt = c.shown < c.text.length ? c.text.slice(0, c.shown) : c.text;
+      PIX.rect(sc, x + 2, y, w - 4, h, P.WHITE);
+      PIX.rect(sc, x, y + 2, w, h - 4, P.WHITE);
+      sc.set(x + 1, y + 1, P.WHITE); sc.set(x + w - 2, y + 1, P.WHITE);
+      sc.set(x + 1, y + h - 2, P.WHITE); sc.set(x + w - 2, y + h - 2, P.WHITE);
+      // 内层高光与暗部
+      PIX.rect(sc, x + 3, y + 2, w - 6, 2, P.WHITE_HI);
+      PIX.rect(sc, x + 2, y + h - 4, w - 4, 2, P.WHITE_SHD);
+      // 尾巴（指向角色头顶）
+      var tx = Math.max(x + 10, Math.min(x + w - 10, this.anchor[0]));
+      for (var i = 0; i < 9; i++) {
+        var ww = 8 - i;
+        PIX.rect(sc, tx - (ww >> 1), y + h + i, ww, 1, P.WHITE);
+      }
+      PIX.rect(sc, tx - 4, y + h, 8, 2, P.WHITE);
+      // 边框
+      PIX.outlineSilhouette(sc, P.NAVY_DARK);
+      // 文本
+      F.draw(sc, txt, x + PAD_X + 2, y + PAD_Y, P.NAVY_DEEP, { maxWidth: MAXW, lineHeight: F.lineHeight });
+      // 光标
+      if (c.shown < c.text.length && (c.t * 6) % 2 < 1) {
+        var lastLine = F.wrap(txt, MAXW);
+        var lw = F.measure(lastLine[lastLine.length - 1]);
+        PIX.rect(sc, x + PAD_X + 2 + lw + 1, y + PAD_Y + (lastLine.length - 1) * F.lineHeight, 4, 2, P.NAVY);
+      }
+      var a = Math.min(c.fade, c.out ? Math.max(0, 1 - c.out / 0.18) : 1);
+      PIX.draw(fb, sc, { x: 0, y: 0, alpha: a, box: { x0: x - 2, y0: y - 2, x1: x + w + 2, y1: y + h + 12 } });
+    }
+  };
+
+  PIX.Speech = Speech;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== director.js ===================== */
+/* ============================================================================
+ * director.js  —  行为导演：自主活动 / 交互反应 / 台词
+ * ----------------------------------------------------------------------------
+ * · 微动作：每 2~5s 一次小幅头部或重心变化，让待机永远“活着”。
+ * · 自主行为：每 10~20s 切换一次动作（可附带表情与台词），不循环播放。
+ * · 交互反应：悬停 / 点击 / 拖拽 / 放下 / 冷落，各有差异化反馈。
+ * · 频繁乱序操作下由状态机兜底，不会丢状态（动作结束自动回待机）。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var A = PIX.Actions, F = PIX.Face, S = PIX.Speech;
+
+  // ------------------------------------------------------------- 台词表
+  var LINES = {
+    idle: [
+      '海边的风，今天也很温柔呢。',
+      '要一起数星星吗？',
+      '鲸鱼在梦里也会唱歌哦。',
+      '唔……裙摆好像有点皱了。',
+      '今天也要元气满满！',
+      '你在忙吗？我在这里陪着你。',
+      '悄悄告诉你，我的尾巴会发光。',
+      '呼——有点想喝热可可了。',
+      '咦，刚才是不是有泡泡飘过去了？',
+      '海浪的声音，听着就让人安心。'
+    ],
+    greet: ['你好呀，我是小鲸！', '呀，你回来啦。'],
+    hover: ['……？', '嗯？', '怎么啦？'],
+    poke: ['呀！', '唔……戳我做什么？', '好痒的！', '再戳我就要生气了哦。', '有、有什么事吗？'],
+    pokeAngry: ['我真的要生气啦！', '哼！不理你了。', '再戳一下试试看！'],
+    drag: ['哇——要掉下去了！', '轻、轻一点呀～', '晕头转向的……'],
+    drop: ['呼，安全着陆。', '下次先说一声嘛。'],
+    neglect: ['喂，你还在吗？', '好安静呀……', '我一直在等你哦。', '一个人有点无聊呢。'],
+    stage: ['那边吗？', '看什么呢？', '嗯……那边有什么吗？'],
+    act: {
+      wave: '你好呀！',
+      jump: '一、二、跳！',
+      dance: '跟着节奏摇摆起来～',
+      cheer: '加油加油！',
+      spin: '转个圈给你看！',
+      stretch: '伸个懒腰，好舒服。',
+      nod: '嗯嗯，我知道了。',
+      shake: '不行不行，那样不好。',
+      sleepy: '呼……好困……',
+      shy: '别、别一直看着我啦……',
+      think: '让我想一想……',
+      mermaid: '看，我的尾巴！',
+      bow: '请多关照！',
+      turnhead: '咦，那边有什么？'
+    }
+  };
+
+  // 自主行为权重表（不含 idle 与交互专用动作）
+  var AUTO = ['wave', 'jump', 'dance', 'cheer', 'spin', 'stretch', 'nod', 'shake',
+              'turnhead', 'think', 'shy', 'sleepy', 'mermaid', 'bow'];
+  var AUTO_EXPR = {
+    wave: ['smile', 'happy', 'wink'],
+    jump: ['excited', 'surprise', 'happy'],
+    dance: ['happy', 'laugh', 'star'],
+    cheer: ['excited', 'star', 'laugh'],
+    spin: ['wink', 'smile', 'star'],
+    stretch: ['sleepy', 'happy'],
+    nod: ['smile', 'serious'],
+    shake: ['pout', 'serious'],
+    turnhead: ['neutral', 'surprise'],
+    think: ['serious', 'neutral'],
+    shy: ['shy', 'pout'],
+    sleepy: ['sleepy', 'neutral'],
+    mermaid: ['smile', 'star'],
+    bow: ['smile', 'shy'],
+    idle: ['neutral', 'smile']
+  };
+
+  var Director = {
+    action: 'idle',
+    expr: 'neutral',
+    autoT: 0,
+    nextAuto: 11,
+    microT: 0,
+    nextMicro: 2.6,
+    gesture: null,
+    gestureT: 0,
+    inputIdle: 0,
+    pokeCount: 0,
+    pokeT: 0,
+    greeting: false,
+    rand: null,
+    autoEnabled: true,
+    lastAction: 'idle',
+    holdExpr: 0,
+
+    init: function (seed) {
+      Director.rand = PIX.makeRng(seed || 20240919);
+      A.onEnd = function () {
+        if (Director.action !== 'idle') {
+          Director.action = 'idle';
+          A.play('idle');
+        }
+      };
+      return Director;
+    },
+
+    rnd: function (a, b) { return a + Director.rand() * (b - a); },
+    pick: function (arr) { return arr[(Director.rand() * arr.length) | 0]; },
+
+    say: function (text, opts) { S.push(text, opts); },
+
+    setAction: function (name, opts) {
+      opts = opts || {};
+      if (!A.defs[name]) return;
+      Director.action = name;
+      A.play(name, { restart: !!opts.restart });
+      if (opts.line) Director.say(opts.line, opts.speech || { prio: opts.prio || 1 });
+      if (opts.expr) Director.setExpr(opts.expr, opts);
+    },
+
+    setExpr: function (name, opts) {
+      if (!F.defs[name]) return;
+      Director.expr = name;
+      F.set(name);
+      opts = opts || {};
+      Director.holdExpr = opts.hold || 0;
+    },
+
+    /** 交互反应入口 */
+    react: function (kind, data) {
+      data = data || {};
+      Director.inputIdle = 0;
+      switch (kind) {
+        case 'hover':
+          if (Director.action === 'idle' && !Director.greeting) {
+            Director.greeting = true;
+            Director.setExpr('smile', { hold: 2.4 });
+            if (Director.rand() < 0.28) Director.say(Director.pick(LINES.hover), { prio: 1, hold: 1.2 });
+          }
+          break;
+        case 'poke': {
+          Director.pokeT = 0;
+          Director.pokeCount++;
+          if (Director.pokeCount >= 4) {
+            Director.setAction('shake', { line: Director.pick(LINES.pokeAngry), speech: { prio: 2 }, expr: 'angry' });
+            Director.pokeCount = 0;
+            if (PIX.Audio) PIX.Audio.sfx('dizzy');
+          } else {
+            Director.setAction('poke', { line: Director.pick(LINES.poke), speech: { prio: 2 },
+                                         expr: Director.pick(['surprise', 'shy', 'wink', 'pout']) });
+            if (PIX.Audio) PIX.Audio.sfx('poke');
+          }
+          break;
+        }
+        case 'dragStart':
+          Director.setExpr('surprise', { hold: 0 });
+          Director.setAction('idle');
+          if (Director.rand() < 0.5) Director.say(Director.pick(LINES.drag), { prio: 1, hold: 1.0 });
+          break;
+        case 'drop':
+          Director.setAction('startle', { expr: 'surprise' });
+          Director.say(Director.pick(LINES.drop), { prio: 1, hold: 1.4 });
+          if (PIX.Audio) PIX.Audio.sfx('jump');
+          break;
+        case 'stage':
+          Director.setAction('turnhead', {});
+          if (Director.rand() < 0.55) Director.say(Director.pick(LINES.stage), { prio: 1, hold: 1.3 });
+          break;
+        case 'neglect':
+          Director.setAction('turnhead', { line: Director.pick(LINES.neglect), speech: { prio: 2 }, expr: 'sad' });
+          if (PIX.Audio) PIX.Audio.sfx('sad');
+          break;
+      }
+    },
+
+    /** 生成最终姿态目标（动作 + 微动作叠加），返回附加信息 */
+    update: function (dt) {
+      Director.inputIdle += dt;
+      Director.pokeT += dt;
+      if (Director.pokeT > 2.2) Director.pokeCount = 0;
+      if (Director.holdExpr > 0) {
+        Director.holdExpr -= dt;
+        if (Director.holdExpr <= 0 && Director.action === 'idle') Director.setExpr('neutral');
+      }
+
+      // ---- 微动作：让待机持续有生命感 ----
+      Director.microT += dt;
+      if (Director.autoEnabled && !Director.gesture && Director.microT > Director.nextMicro) {
+        Director.microT = 0;
+        Director.nextMicro = Director.rnd(2.0, 5.0);
+        Director.gesture = Director.pick(['lookL', 'lookR', 'shift', 'tilt', 'peek', 'nudge']);
+        Director.gestureT = 0;
+        Director.gestureDur = Director.rnd(0.9, 1.8);
+      }
+      var gx = 0, gy = 0, go = { headX: 0, headY: 0, headA: 0, hipX: 0, rootY: 0, gazeX: 0, gazeY: 0 };
+      if (Director.gesture) {
+        Director.gestureT += dt;
+        var gu = Director.gestureT / Director.gestureDur;
+        if (gu >= 1) { Director.gesture = null; }
+        else {
+          var gk = Math.sin(Math.PI * gu);
+          switch (Director.gesture) {
+            case 'lookL': go.headX = -3.0 * gk; go.headA = -0.03 * gk; gx = -0.6 * gk; break;
+            case 'lookR': go.headX = 3.0 * gk; go.headA = 0.03 * gk; gx = 0.6 * gk; break;
+            case 'shift': go.hipX = 2.2 * gk; go.headA = 0.035 * gk; break;
+            case 'tilt': go.headA = -0.07 * gk; break;
+            case 'peek': go.headX = 2.4 * gk; go.headY = 1.2 * gk; gx = 0.5 * gk; gy = 0.3 * gk; break;
+            case 'nudge': go.rootY = -0.9 * gk; go.headY = 1.4 * gk; break;
+          }
+        }
+      }
+
+      // ---- 自主行为切换（10~20s） ----
+      Director.autoT += dt;
+      if (Director.autoEnabled && Director.autoT > Director.nextAuto) {
+        Director.autoT = 0;
+        Director.nextAuto = Director.rnd(10, 20);
+        if (Director.action === 'idle') {
+          var name = Director.pick(AUTO);
+          var exprs = AUTO_EXPR[name] || ['neutral'];
+          var opts = { expr: Director.pick(exprs) };
+          if (Director.rand() < 0.55 && LINES.act[name]) opts.line = LINES.act[name];
+          Director.setAction(name, opts);
+        }
+      }
+
+      // ---- 长时间冷落 ----
+      if (Director.autoEnabled && Director.inputIdle > 22 && Director.action === 'idle') {
+        Director.inputIdle = 6;
+        Director.react('neglect');
+      }
+
+      var o = A.update(dt);
+      var tgt = {
+        rootX: o.rootX + go.headX * 0 + 0,
+        rootY: o.rootY + go.rootY,
+        hipX: o.hipX + go.hipX,
+        hipA: o.hipA,
+        torsoY: o.torsoY,
+        torsoA: o.torsoA,
+        headX: o.headX + go.headX,
+        headY: o.headY + go.headY,
+        headA: o.headA + go.headA,
+        armL: o.armL, armR: o.armR, foreL: o.foreL, foreR: o.foreR,
+        legL: o.legL, legR: o.legR
+      };
+      Director.lastOut = o;
+      return {
+        target: tgt,
+        scaleX: o.scaleX, scaleY: o.scaleY,
+        alphas: o.alphas, fx: o.fx,
+        mouthOpen: o.mouthOpen,
+        gazeX: gx, gazeY: gy,
+        turn: tgt.headX / 6
+      };
+    }
+  };
+
+  PIX.Director = Director;
+  PIX.LINES = LINES;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== audio.js ===================== */
+/* ============================================================================
+ * audio.js  —  8bit 音频（WebAudio 合成，无任何外部音频文件）
+ * ----------------------------------------------------------------------------
+ * · BGM：温柔舒缓的循环曲。四声部（贝斯 / 分解和弦 / 主旋律 / 点缀），
+ *        方波 + 低通 + 延迟，8 小节一循环，用前瞻调度器精确排程。
+ * · 音效：逐字弹出音、悬停、点击、拖拽、被戳、跳跃等，全部实时合成。
+ * · 一键禁音 / 开启（总音量节点淡入淡出，不产生爆音）。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  // ---- 8 小节和弦进行（I–vi–IV–V 变体，C 大调，温柔） ----
+  // 每小节 4 拍；[贝斯根音, 和弦音(分解用), 主旋律音]
+  var PROG = [
+    { bass: 36, ch: [60, 64, 67], mel: [64, 67] },   // C
+    { bass: 33, ch: [57, 60, 64], mel: [62, 64] },   // Am
+    { bass: 29, ch: [53, 57, 60], mel: [60, 65] },   // F
+    { bass: 31, ch: [55, 59, 62], mel: [59, 62] },   // G
+    { bass: 36, ch: [60, 64, 67], mel: [67, 69] },   // C
+    { bass: 33, ch: [57, 60, 64], mel: [64, 62] },   // Am
+    { bass: 38, ch: [50, 53, 57], mel: [62, 57] },   // Dm
+    { bass: 31, ch: [55, 59, 62], mel: [59, 55] }    // G
+  ];
+
+  var Audio = {
+    ctx: null,
+    master: null,
+    bgmGain: null,
+    sfxGain: null,
+    delay: null,
+    enabled: true,
+    started: false,
+    ready: false,
+    step: 0,
+    nextTime: 0,
+    timer: null,
+    bpm: 74,
+    beat: 0.0,
+    _lastBlip: 0,
+
+    init: function () {
+      if (Audio.ctx) return Audio;
+      var AC = global.AudioContext || global.webkitAudioContext;
+      if (!AC) { Audio.ready = false; return Audio; }
+      try { Audio.ctx = new AC(); } catch (e) { Audio.ready = false; return Audio; }
+      var ctx = Audio.ctx;
+      Audio.master = ctx.createGain();
+      Audio.master.gain.value = Audio.enabled ? 0.9 : 0;
+      Audio.master.connect(ctx.destination);
+      Audio.bgmGain = ctx.createGain();
+      Audio.bgmGain.gain.value = 0.30;
+      Audio.sfxGain = ctx.createGain();
+      Audio.sfxGain.gain.value = 0.55;
+      // 延迟：营造房间感（自制反馈延迟，无需脉冲响应）
+      var dl = ctx.createDelay(1.0);
+      dl.delayTime.value = 0.34;
+      var fb = ctx.createGain(); fb.gain.value = 0.26;
+      var wet = ctx.createGain(); wet.gain.value = 0.30;
+      var lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+      Audio.delay = dl;
+      dl.connect(fb); fb.connect(dl);
+      dl.connect(wet); wet.connect(Audio.master);
+      Audio.delayIn = dl;
+      Audio.bgmGain.connect(lp); lp.connect(Audio.master); lp.connect(dl);
+      Audio.sfxGain.connect(Audio.master);
+      Audio.ready = true;
+      Audio.beat = 60 / Audio.bpm;
+      return Audio;
+    },
+
+    /** 需在用户手势内调用：解锁音频并开始 BGM */
+    unlock: function () {
+      Audio.init();
+      if (!Audio.ctx) return;
+      if (Audio.ctx.state === 'suspended') Audio.ctx.resume();
+      Audio.start();
+    },
+
+    start: function () {
+      if (!Audio.ready || Audio.started) return;
+      Audio.started = true;
+      Audio.step = 0;
+      Audio.nextTime = Audio.ctx.currentTime + 0.12;
+      Audio.timer = setInterval(Audio.schedule, 150);
+      Audio.schedule();
+    },
+
+    stop: function () {
+      if (Audio.timer) { clearInterval(Audio.timer); Audio.timer = null; }
+      Audio.started = false;
+    },
+
+    setMusic: function (on) {
+      if (!Audio.ready) return;
+      Audio.musicOn = !!on;
+      var t = Audio.ctx.currentTime;
+      Audio.bgmGain.gain.setTargetAtTime(on ? 0.30 : 0.0001, t, 0.05);
+    },
+
+    setSfx: function (on) {
+      if (!Audio.ready) return;
+      Audio.sfxOn = !!on;
+      var t = Audio.ctx.currentTime;
+      Audio.sfxGain.gain.setTargetAtTime(on ? 0.55 : 0.0001, t, 0.03);
+    },
+
+    setEnabled: function (on) {
+      Audio.enabled = !!on;
+      if (!Audio.ready) { if (on) Audio.init(); return; }
+      var t = Audio.ctx.currentTime;
+      Audio.master.gain.cancelScheduledValues(t);
+      Audio.master.gain.setTargetAtTime(Audio.enabled ? 0.9 : 0.0001, t, 0.05);
+    },
+
+    /* -------------------------------------------------- 音色 ---------------- */
+    tone: function (dest, freq, at, dur, type, vol, attack, detune) {
+      var ctx = Audio.ctx;
+      var o = ctx.createOscillator();
+      var g = ctx.createGain();
+      o.type = type || 'square';
+      o.frequency.setValueAtTime(freq, at);
+      if (detune) o.detune.setValueAtTime(detune, at);
+      var a = attack === undefined ? 0.012 : attack;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(vol, at + a);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      o.connect(g); g.connect(dest);
+      o.start(at);
+      o.stop(at + dur + 0.02);
+      return o;
+    },
+
+    /* ------------------------------------------------ BGM 排程 -------------- */
+    schedule: function () {
+      if (!Audio.ready || !Audio.started) return;
+      var ctx = Audio.ctx;
+      var spb = Audio.beat;               // 每拍秒数
+      var sixteenth = spb / 2;            // 八分音符
+      while (Audio.nextTime < ctx.currentTime + 1.4) {
+        var s = Audio.step;
+        var bar = (s >> 3) % 8;           // 每小节 8 个八分音符
+        var idx = s & 7;
+        var ch = PROG[bar];
+        var t = Audio.nextTime;
+        // 贝斯：每小节头与第三拍
+        if (idx === 0 || idx === 4) {
+          Audio.tone(Audio.bgmGain, mtof(ch.bass), t, spb * 1.7, 'triangle', 0.34, 0.02);
+          Audio.tone(Audio.bgmGain, mtof(ch.bass + 12), t, spb * 0.9, 'sine', 0.10, 0.02);
+        }
+        // 分解和弦：八分音符，上下往复
+        var pat = [0, 1, 2, 1, 0, 1, 2, 1];
+        var note = ch.ch[pat[idx]] + (idx >= 4 ? 12 : 0);
+        Audio.tone(Audio.bgmGain, mtof(note), t, sixteenth * 1.5, 'square', 0.085, 0.008);
+        // 主旋律：每小节两个长音，弱起
+        if (idx === 0) Audio.tone(Audio.bgmGain, mtof(ch.mel[0] + 12), t, spb * 1.6, 'square', 0.10, 0.05);
+        if (idx === 4) Audio.tone(Audio.bgmGain, mtof(ch.mel[1] + 12), t + 0.01, spb * 1.4, 'square', 0.09, 0.05);
+        // 点缀高音
+        if (idx === 6 && (bar % 2 === 1)) Audio.tone(Audio.bgmGain, mtof(ch.ch[2] + 24), t, 0.18, 'sine', 0.07, 0.005);
+
+        Audio.step++;
+        Audio.nextTime += sixteenth;
+      }
+    },
+
+    /* -------------------------------------------------- 音效 ---------------- */
+    sfx: function (name, opt) {
+      if (!Audio.ready || Audio.sfxOn === false) return;
+      opt = opt || {};
+      var t = Audio.ctx.currentTime + 0.001;
+      var d = Audio.sfxGain;
+      switch (name) {
+        case 'blip': {
+          var f = 760 + (opt.pitch || 0) * 26 + ((opt.i || 0) % 3) * 40;
+          Audio.tone(d, f, t, 0.05, 'square', 0.16, 0.002);
+          Audio.tone(d, f * 2, t, 0.03, 'square', 0.05, 0.002);
+          break;
+        }
+        case 'hover':
+          Audio.tone(d, 1180, t, 0.07, 'sine', 0.13, 0.004);
+          break;
+        case 'click':
+          Audio.tone(d, 620, t, 0.07, 'square', 0.20, 0.002);
+          Audio.tone(d, 930, t + 0.04, 0.07, 'square', 0.13, 0.002);
+          break;
+        case 'poke':
+          Audio.tone(d, 900, t, 0.10, 'square', 0.20, 0.004);
+          Audio.tone(d, 1400, t + 0.06, 0.10, 'square', 0.14, 0.004);
+          break;
+        case 'jump':
+          Audio.tone(d, 500, t, 0.16, 'square', 0.16, 0.004);
+          Audio.tone(d, 1000, t + 0.05, 0.18, 'square', 0.12, 0.004);
+          break;
+        case 'pop':
+          Audio.tone(d, 1500, t, 0.06, 'sine', 0.18, 0.002);
+          break;
+        case 'sparkle':
+          for (var i = 0; i < 4; i++) Audio.tone(d, mtof(84 + i * 3), t + i * 0.045, 0.14, 'square', 0.10, 0.003);
+          break;
+        case 'dizzy':
+          Audio.tone(d, 620, t, 0.5, 'sine', 0.13, 0.01);
+          Audio.tone(d, 466, t + 0.16, 0.5, 'sine', 0.11, 0.01);
+          break;
+        case 'sad':
+          Audio.tone(d, 520, t, 0.22, 'square', 0.13, 0.01);
+          Audio.tone(d, 392, t + 0.16, 0.34, 'square', 0.12, 0.01);
+          break;
+        case 'happy':
+          Audio.tone(d, mtof(76), t, 0.12, 'square', 0.14, 0.006);
+          Audio.tone(d, mtof(81), t + 0.1, 0.12, 'square', 0.13, 0.006);
+          Audio.tone(d, mtof(88), t + 0.2, 0.22, 'square', 0.12, 0.006);
+          break;
+        case 'drag':
+          Audio.tone(d, 300 + (opt.v || 0) * 400, t, 0.05, 'triangle', 0.10, 0.004);
+          break;
+        case 'type':
+          Audio.tone(d, 1000 + Math.random() * 200, t, 0.03, 'square', 0.08, 0.002);
+          break;
+      }
+    }
+  };
+
+  PIX.Audio = Audio;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== ui.js ===================== */
+/* ============================================================================
+ * ui.js  —  右侧交互面板
+ * ----------------------------------------------------------------------------
+ * 面板内所有文字都由自编像素字体渲染成 canvas（英文 5x7 / 汉字 12x12），
+ * 颜色全部取自 palette.js，CSS 变量在 app.js 中由调色板注入，无硬编码色值。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+
+  var ACT_SHORT = {
+    idle: '待机', wave: '挥手', jump: '跳跃', spin: '翻转', dance: '跳舞', cheer: '欢呼',
+    stretch: '伸腰', nod: '点头', shake: '摇头', turnhead: '张望', think: '思考',
+    shy: '害羞', sleepy: '瞌睡', mermaid: '人鱼', bow: '鞠躬', startle: '受惊'
+  };
+  var EXPR_SHORT = { star: '星星', excited: '兴奋', surprise: '惊讶', serious: '认真' };
+  var ACTS = ['idle', 'wave', 'jump', 'spin', 'dance', 'cheer', 'stretch', 'nod', 'shake',
+              'turnhead', 'think', 'shy', 'sleepy', 'mermaid', 'bow', 'startle'];
+  var EXPRS = ['neutral', 'smile', 'happy', 'laugh', 'wink', 'star', 'excited', 'surprise',
+               'sad', 'cry', 'angry', 'pout', 'shy', 'sleepy', 'dizzy', 'serious'];
+
+  var TOPICS = [
+    { label: '打招呼', lines: ['你好呀，我是小鲸！今天也请多关照。', '呀，你来了！我等你好久了。'] },
+    { label: '讲心事', lines: ['其实……我有点怕黑。不过有你在就不怕了。', '有时候会想，海的那边是什么样子呢？'] },
+    { label: '唱首歌', lines: ['♪ 浪花轻轻拍，鲸鱼慢慢游～', '哼哼～这首歌是奶奶教我的。'] },
+    { label: '夸夸我', lines: ['嘿嘿，被夸了……尾巴都要摇起来了。', '我、我也没有那么厉害啦。'] },
+    { label: '道晚安', lines: ['晚安，要做个好梦哦。', '困了就早点休息吧，我守着你。'] }
+  ];
+
+  var UI = {
+    el: null,
+    labelCache: 0,
+    toggleState: { sound: true, bg: true, bubbles: true, auto: true, music: true, sfx: true },
+    lastStatus: '',
+
+    /** 把一行文本渲染成像素 canvas 元素 */
+    makeLabel: function (text, color, scale) {
+      scale = scale || 2;
+      var font = PIX.Font;
+      var w = font.measure(text) + 2, h = 14;
+      var bm = new PIX.Bitmap(w, h);
+      font.draw(bm, text, 1, 1, color);
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.className = 'pxlabel';
+      c.style.width = (w * scale) + 'px';
+      c.style.height = (h * scale) + 'px';
+      var id = c.getContext('2d').createImageData(w, h);
+      PIX.toRGBA(bm, id.data);
+      c.getContext('2d').putImageData(id, 0, 0);
+      return c;
+    },
+
+    section: function (title) {
+      var box = document.createElement('div');
+      box.className = 'sec';
+      var head = document.createElement('div');
+      head.className = 'sechead';
+      head.appendChild(UI.makeLabel(title, P.WHITE, 1));
+      box.appendChild(head);
+      return box;
+    },
+
+    button: function (text, onClick, cls) {
+      var b = document.createElement('button');
+      b.className = 'pxbtn' + (cls ? ' ' + cls : '');
+      b.type = 'button';
+      b.dataset.text = text;
+      b.appendChild(UI.makeLabel(text, P.WHITE, 2));
+      b.addEventListener('click', onClick);
+      return b;
+    },
+
+    build: function (root, hooks) {
+      UI.el = root;
+      UI.hooks = hooks || {};
+      root.textContent = '';
+
+      // ---- 标题 ----
+      var title = document.createElement('div');
+      title.className = 'title';
+      title.appendChild(UI.makeLabel('像素 LIVE2D', P.HAIR_LIT, 2));
+      var sub = document.createElement('div');
+      sub.className = 'subtitle';
+      sub.appendChild(UI.makeLabel('小鲸 · 像素女仆', P.WHITE_SHD, 1));
+      root.appendChild(title);
+      root.appendChild(sub);
+
+      // ---- 状态 ----
+      var status = document.createElement('div');
+      status.className = 'status';
+      UI.statusEl = document.createElement('div');
+      UI.statusEl.className = 'statusrow';
+      status.appendChild(UI.statusEl);
+      UI.fpsEl = document.createElement('div');
+      UI.fpsEl.className = 'statusrow';
+      status.appendChild(UI.fpsEl);
+      root.appendChild(status);
+
+      // ---- 动作 ----
+      var secA = UI.section('动作');
+      var gridA = document.createElement('div');
+      gridA.className = 'grid g3';
+      UI.actBtns = {};
+      ACTS.forEach(function (n) {
+        var b = UI.button(ACT_SHORT[n] || n, function () {
+          if (UI.hooks.onAction) UI.hooks.onAction(n);
+        }, 'act');
+        b.dataset.key = n;
+        UI.actBtns[n] = b;
+        gridA.appendChild(b);
+      });
+      secA.appendChild(gridA);
+      root.appendChild(secA);
+
+      // ---- 表情 ----
+      var secE = UI.section('表情');
+      var gridE = document.createElement('div');
+      gridE.className = 'grid g3';
+      UI.exprBtns = {};
+      EXPRS.forEach(function (n) {
+        var b = UI.button(EXPR_SHORT[n] || PIX.Face.defs[n].label, function () {
+          if (UI.hooks.onExpr) UI.hooks.onExpr(n);
+        }, 'expr');
+        b.dataset.key = n;
+        UI.exprBtns[n] = b;
+        gridE.appendChild(b);
+      });
+      secE.appendChild(gridE);
+      root.appendChild(secE);
+
+      // ---- 话题（让她开口说话） ----
+      var secT = UI.section('对话');
+      var gridT = document.createElement('div');
+      gridT.className = 'grid g3';
+      TOPICS.forEach(function (tp, i) {
+        gridT.appendChild(UI.button(tp.label, function () {
+          if (UI.hooks.onTopic) UI.hooks.onTopic(i);
+        }, 'topic'));
+      });
+      root.appendChild(secT);
+      secT.appendChild(gridT);
+
+      // ---- 开关 ----
+      var secS = UI.section('设置');
+      var gridS = document.createElement('div');
+      gridS.className = 'grid g3';
+      UI.togBtns = {};
+      [['sound', '声音'], ['music', '音乐'], ['sfx', '音效'], ['bg', '背景'], ['bubbles', '气泡'], ['auto', '自主']]
+        .forEach(function (pair) {
+          var b = UI.button(pair[1], function () {
+            var on = !UI.toggleState[pair[0]];
+            UI.setToggle(pair[0], on);
+          }, 'tog');
+          UI.togBtns[pair[0]] = b;
+          gridS.appendChild(b);
+        });
+      secS.appendChild(gridS);
+      root.appendChild(secS);
+
+      // ---- 提示 ----
+      var tip = document.createElement('div');
+      tip.className = 'tip';
+      tip.appendChild(UI.makeLabel('悬停 / 点击 / 拖拽 都可以', P.WHITE_MID, 1));
+      root.appendChild(tip);
+      var tip2 = document.createElement('div');
+      tip2.className = 'tip';
+      tip2.appendChild(UI.makeLabel('无操作时她会自己找乐子', P.WHITE_MID, 1));
+      root.appendChild(tip2);
+
+      UI.refresh();
+      return UI;
+    },
+
+    setToggle: function (key, on) {
+      UI.toggleState[key] = on;
+      var b = UI.togBtns[key];
+      if (b) {
+        b.classList.toggle('off', !on);
+        b.dataset.on = on ? '1' : '0';
+      }
+      if (UI.hooks.onToggle) UI.hooks.onToggle(key, on);
+    },
+
+    refresh: function () {
+      var D = PIX.Director;
+      Object.keys(UI.actBtns || {}).forEach(function (k) {
+        UI.actBtns[k].classList.toggle('on', D.action === k);
+      });
+      Object.keys(UI.exprBtns || {}).forEach(function (k) {
+        UI.exprBtns[k].classList.toggle('on', D.expr === k);
+      });
+      var txt = '动作 ' + (ACT_SHORT[D.action] || D.action) + '  表情 ' + (PIX.Face.defs[D.expr] ? PIX.Face.defs[D.expr].label : D.expr);
+      if (txt !== UI.lastStatus) {
+        UI.lastStatus = txt;
+        UI.statusEl.textContent = '';
+        UI.statusEl.appendChild(UI.makeLabel(txt, P.WHITE, 1));
+      }
+    },
+
+    setFps: function (fps) {
+      UI.fpsEl.textContent = '';
+      UI.fpsEl.appendChild(UI.makeLabel('FPS ' + fps + '  ·  逻辑 336x288  ·  角色 256x256', P.WHITE_MID, 1));
+    }
+  };
+
+  PIX.UI = UI;
+  PIX.topics = TOPICS;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== scene.js ===================== */
+/* ============================================================================
+ * scene.js  —  舞台：主循环 / 合成 / 指针交互 / 粒子
+ * ----------------------------------------------------------------------------
+ * 每帧流程（全部时间驱动）：
+ *   director.update -> rig.update -> face.update -> rig.compose
+ *   -> 背景 -> 气泡 -> 影子 -> 角色 -> 粒子 -> 输出 RGBA
+ * 指针交互：悬停 / 点击（戳） / 拖拽 / 放下 / 长时间冷落，反应各不相同。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+  var D = PIX.Director, R = PIX.Rig, F = PIX.Face, S = PIX.Speech, A = PIX.Actions;
+
+  var W = 336, H = 288;
+  var CHAR_ANCHOR = [128, 251];         // 角色缓冲内的落脚点
+  var CHAR_BOX = { x0: 58, y0: 18, x1: 202, y1: 254 };
+
+  /* ------------------------------------------------------------- 粒子 */
+  function Fx() { this.list = []; }
+  Fx.prototype.spawn = function (type, x, y, opt) {
+    if (this.list.length > 40) return;
+    opt = opt || {};
+    this.list.push({
+      type: type, x: x, y: y,
+      vx: opt.vx === undefined ? 0 : opt.vx,
+      vy: opt.vy === undefined ? -14 : opt.vy,
+      life: opt.life || 1.4, t: 0, size: opt.size || 1, seed: opt.seed || 0
+    });
+  };
+  Fx.prototype.update = function (dt) {
+    var l = this.list, o = [];
+    for (var i = 0; i < l.length; i++) {
+      var p = l[i];
+      p.t += dt;
+      if (p.t >= p.life) continue;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 4 * dt;
+      o.push(p);
+    }
+    this.list = o;
+  };
+  Fx.prototype.draw = function (fb) {
+    for (var i = 0; i < this.list.length; i++) {
+      var p = this.list[i];
+      var x = Math.round(p.x), y = Math.round(p.y);
+      var k = 1 - p.t / p.life;
+      if (k < 0.15) continue;
+      this.shape(fb, p.type, x, y, k);
+    }
+  };
+  Fx.prototype.shape = function (fb, type, x, y, k) {
+    if (type === 'note') {
+      PIX.ellipse(fb, x, y, 2.2, 1.8, P.NAVY_HI);
+      PIX.rect(fb, x + 2, y - 7, 1, 7, P.NAVY_HI);
+      PIX.rect(fb, x + 3, y - 8, 3, 1, P.NAVY_HI);
+      PIX.rect(fb, x + 3, y - 6, 2, 1, P.NAVY_HI);
+    } else if (type === 'spark') {
+      PIX.rect(fb, x - 3, y, 7, 1, P.GOLD_HI);
+      PIX.rect(fb, x, y - 3, 1, 7, P.GOLD_HI);
+      PIX.rect(fb, x - 1, y - 1, 3, 3, P.WHITE_HI);
+    } else if (type === 'heart') {
+      PIX.ellipse(fb, x - 1.5, y - 1, 2.2, 2, P.BLUSH);
+      PIX.ellipse(fb, x + 1.5, y - 1, 2.2, 2, P.BLUSH);
+      PIX.poly(fb, [[x - 3, y], [x + 3, y], [x, y + 4]], P.BLUSH);
+      fb.set(x - 1, y - 2, P.WHITE_HI);
+    } else if (type === 'bubble') {
+      PIX.ellipseRing(fb, x, y, 3, 3, 1, P.GLASS);
+      fb.set(x - 1, y - 1, P.WHITE_HI);
+    } else if (type === 'sleep') {
+      PIX.ellipseRing(fb, x, y, 3 + k, 2.4 + k, 1, P.WHITE_SHD);
+    } else if (type === 'dust') {
+      PIX.ellipse(fb, x, y, 2.4, 1.4, P.WHITE_SHD);
+    } else if (type === 'anger') {
+      PIX.rect(fb, x - 3, y, 7, 2, P.BLUSH);
+      PIX.rect(fb, x, y - 3, 2, 7, P.BLUSH);
+    }
+  };
+
+  /* ------------------------------------------------------------- 舞台 */
+  var Scene = {
+    W: W, H: H,
+    canvas: null, ctx: null, imageData: null, rgba: null,
+    fb: null, charFb: null, bg: null,
+    bgOn: true,
+    charX: 40, charY: 24,
+    dragX: 0, dragY: 0,
+    dragging: false, dragMoved: false,
+    pointer: { x: -999, y: -999, over: false, onChar: false },
+    gaze: { x: 0, y: 0 },
+    hoverOn: false,
+    vel: { x: 0, y: 0 },
+    fx: new Fx(),
+    t: 0,
+    running: false,
+    lastT: 0,
+    scale: 3,
+    fps: 0,
+    _acc: 0, _frames: 0,
+    onStats: null,
+
+    init: function (canvas) {
+      Scene.canvas = canvas;
+      canvas.width = W; canvas.height = H;
+      Scene.ctx = canvas.getContext('2d', { alpha: false });
+      Scene.ctx.imageSmoothingEnabled = false;
+      Scene.imageData = Scene.ctx.createImageData(W, H);
+      Scene.rgba = Scene.imageData.data;
+      Scene.fb = new PIX.Bitmap(W, H);
+      Scene.charFb = new PIX.Bitmap(256, 256);
+      Scene.bg = PIX.Background.build();
+      S.anchor = [168, 82];
+      return Scene;
+    },
+
+    setScale: function (k) {
+      Scene.scale = k;
+      if (Scene.canvas) {
+        Scene.canvas.style.width = (W * k) + 'px';
+        Scene.canvas.style.height = (H * k) + 'px';
+      }
+    },
+
+    toLogical: function (clientX, clientY) {
+      var r = Scene.canvas.getBoundingClientRect();
+      var x = (clientX - r.left) / (r.width / W);
+      var y = (clientY - r.top) / (r.height / H);
+      return { x: x, y: y };
+    },
+
+    hitTest: function (lx, ly) {
+      var cx = Math.round(lx - Scene.charX), cy = Math.round(ly - Scene.charY);
+      if (cx < -2 || cy < -2 || cx > 258 || cy > 258) return false;
+      var d = Scene.charFb.d, w = 256;
+      for (var j = -2; j <= 2; j++) {
+        var yy = cy + j;
+        if (yy < 0 || yy > 255) continue;
+        for (var i = -2; i <= 2; i++) {
+          var xx = cx + i;
+          if (xx < 0 || xx > 255) continue;
+          if (d[yy * w + xx]) return true;
+        }
+      }
+      return false;
+    },
+
+    /* ------------------------------------------------ 指针事件处理 */
+    onMove: function (clientX, clientY) {
+      var p = Scene.toLogical(clientX, clientY);
+      Scene.pointer.x = p.x; Scene.pointer.y = p.y;
+      var on = Scene.hitTest(p.x, p.y);
+      if (on && !Scene.hoverOn) {
+        Scene.hoverOn = true;
+        D.react('hover');
+        if (PIX.Audio) PIX.Audio.sfx('hover');
+      } else if (!on && Scene.hoverOn) {
+        Scene.hoverOn = false;
+      }
+      Scene.pointer.onChar = on;
+      var ex = Scene.charX + CHAR_ANCHOR[0], ey = Scene.charY + 94;
+      var gx = Math.max(-1, Math.min(1, (p.x - ex) / 78));
+      var gy = Math.max(-1, Math.min(1, (p.y - ey) / 62));
+      if (Scene.dragging) {
+        var nx = Math.max(0, Math.min(W - 256, p.x - Scene.grabDX));
+        var ny = Math.max(0, Math.min(H - 256, p.y - Scene.grabDY));
+        Scene.vel.x = (nx - Scene.charX) * 12;
+        Scene.vel.y = (ny - Scene.charY) * 12;
+        Scene.charX = nx; Scene.charY = ny;
+        Scene.dragMoved = true;
+      }
+      Scene.gaze.x = gx; Scene.gaze.y = gy;
+    },
+    onDown: function (clientX, clientY) {
+      var p = Scene.toLogical(clientX, clientY);
+      Scene.pointer.x = p.x; Scene.pointer.y = p.y;
+      var on = Scene.hitTest(p.x, p.y);
+      Scene.pointer.onChar = on;
+      Scene.pressOn = on;
+      Scene.pressAt = [p.x, p.y];
+      Scene.pressT = Scene.t;
+      Scene.maybeDrag = on;
+      Scene.dragMoved = false;
+      if (on) Scene.grabDX = p.x - Scene.charX; Scene.grabDY = p.y - Scene.charY;
+    },
+    onUp: function (clientX, clientY) {
+      var p = Scene.toLogical(clientX, clientY);
+      if (Scene.dragging) {
+        Scene.dragging = false;
+        Scene.maybeDrag = false;
+        D.react('drop');
+      } else if (Scene.maybeDrag && !Scene.dragMoved) {
+        if (Scene.t - Scene.pressT < 0.8) D.react('poke');
+      } else if (!Scene.pressOn) {
+        // 点击空白处：角色看向该处
+        var gx = Math.max(-1, Math.min(1, (p.x - Scene.charX - CHAR_ANCHOR[0]) / 78));
+        var gy = Math.max(-1, Math.min(1, (p.y - Scene.charY - 94) / 62));
+        Scene.gaze.x = gx; Scene.gaze.y = gy;
+        D.react('stage');
+      }
+      Scene.maybeDrag = false;
+      Scene.pressOn = false;
+      if (PIX.Audio) PIX.Audio.sfx('click');
+    },
+    onLeave: function () {
+      Scene.pointer.x = -999; Scene.pointer.y = -999;
+      Scene.hoverOn = false;
+      if (Scene.dragging) { Scene.dragging = false; D.react('drop'); }
+      Scene.gaze.x = 0; Scene.gaze.y = 0;
+    },
+
+    /* ------------------------------------------------------ 每帧更新 */
+    update: function (dt) {
+      Scene.t += dt;
+      // 拖拽阈值
+      if (Scene.maybeDrag && !Scene.dragging && Scene.pointer.x > -900) {
+        var dx = Scene.pointer.x - Scene.pressAt[0], dy = Scene.pointer.y - Scene.pressAt[1];
+        if (dx * dx + dy * dy > 16) {
+          Scene.dragging = true;
+          Scene.dragMoved = true;
+          D.react('dragStart');
+        }
+      }
+
+      var res = D.update(dt);
+      var tgt = res.target;
+
+      // 拖拽中的附加反应：手臂后甩 + 惊恐
+      if (Scene.dragging) {
+        var vk = Math.max(-1, Math.min(1, Scene.vel.x / 420));
+        tgt.armL = 0.5 + vk * 0.7;
+        tgt.armR = -0.5 + vk * 0.7;
+        tgt.foreL = -0.5; tgt.foreR = 0.5;
+        tgt.headX = -vk * 3;
+        tgt.headA = -vk * 0.07;
+        F.set('surprise');
+      }
+      Scene.vel.x *= Math.pow(0.02, dt);
+      Scene.vel.y *= Math.pow(0.02, dt);
+
+      R.update(dt, tgt, Scene.t, { vx: Scene.vel.x, vy: Scene.vel.y });
+
+      // 表情上下文：视线 + 转头 + 口型
+      F.setTalk(res.mouthOpen > 0 ? res.mouthOpen : (S.cur ? 0.5 + 0.5 * Math.sin(Scene.t * 22) * (S.cur.shown < S.cur.text.length ? 1 : 0) : 0));
+      var faceSt = F.update(dt, {
+        gazeX: Scene.gaze.x + res.gazeX,
+        gazeY: Scene.gaze.y + res.gazeY,
+        turn: Math.max(-1, Math.min(1, tgt.headX / 6 + Scene.gaze.x * 0.35))
+      });
+
+      // 先按表情参数逐帧重绘面部（可眨眼 / 追随视线 / 口型开合）
+      PIX.Art.drawFace(faceSt);
+
+      // 部件 alpha（人鱼形态的抖动淡入淡出）必须在合成之前设置
+      if (res.alphas) {
+        for (var i = 0; i < R.parts.length; i++) {
+          var it = R.parts[i];
+          it.alpha = res.alphas[it.name] === undefined ? 1 : res.alphas[it.name];
+        }
+      } else {
+        for (var j = 0; j < R.parts.length; j++) R.parts[j].alpha = R.parts[j].alpha0;
+      }
+      R.compose(Scene.charFb, faceSt);
+
+      S.update(dt);
+      S.anchor = [Scene.charX + CHAR_ANCHOR[0], Scene.charY + 56];
+      Scene.emit(dt, res);
+      Scene.fx.update(dt);
+    },
+
+    /** 依据当前动作 / 表情发射装饰粒子 */
+    emit: function (dt, res) {
+      Scene._eT = (Scene._eT || 0) + dt;
+      if (Scene._eT < 0.11) return;
+      Scene._eT = 0;
+      var a = D.action, e = D.expr;
+      var hx = Scene.charX + 128, hy = Scene.charY + 40;
+      var r = D.rand ? D.rand() : 0.5;
+      if ((a === 'dance' || a === 'cheer') && r < 0.8) {
+        Scene.fx.spawn('note', hx + (r - 0.5) * 60, hy, { vx: (r - 0.5) * 12, vy: -20, life: 1.3 });
+      } else if ((e === 'star' || e === 'excited') && r < 0.6) {
+        Scene.fx.spawn('spark', hx + (r - 0.5) * 70, hy + 10, { vx: (r - 0.5) * 14, vy: -8, life: 1.0 });
+      } else if (e === 'shy' && r < 0.45) {
+        Scene.fx.spawn('heart', hx + (r - 0.5) * 46, hy + 16, { vx: (r - 0.5) * 10, vy: -16, life: 1.5 });
+      } else if (a === 'mermaid' && r < 0.7) {
+        Scene.fx.spawn('bubble', Scene.charX + 128 + (r - 0.5) * 80, Scene.charY + 210, { vy: -22, life: 1.6 });
+      } else if (a === 'sleepy' && r < 0.35) {
+        Scene.fx.spawn('sleep', Scene.charX + 190, Scene.charY + 60, { vx: 6, vy: -10, life: 1.8 });
+      } else if (a === 'jump' && r < 0.5) {
+        Scene.fx.spawn('dust', Scene.charX + 128 + (r - 0.5) * 50, Scene.charY + 250, { vx: (r - 0.5) * 18, vy: -6, life: 0.5 });
+      } else if (e === 'angry' && r < 0.3) {
+        Scene.fx.spawn('anger', Scene.charX + 168, Scene.charY + 52, { vy: -4, life: 0.9 });
+      }
+    },
+
+    /* -------------------------------------------------------- 渲染 */
+    render: function () {
+      var fb = Scene.fb;
+      var src = Scene.bgOn ? Scene.bg.room : Scene.bg.plain;
+      fb.d.set(src.d);
+      fb._bb = null;
+
+      // 影子（抖动半透明，随跳跃高度收缩）
+      var tgt = D.lastOut || { rootY: 0, scaleY: 1 };
+      var lift = Math.max(0, -tgt.rootY);
+      var sw = Math.max(16, 40 - lift * 0.5), sh = Math.max(4, 9 - lift * 0.09);
+      Scene.shadow(fb, Scene.charX + 128, Scene.charY + 254, sw, sh, lift);
+
+      S.render(fb);
+
+      var scX = (D.lastOut ? D.lastOut.scaleX : 1) * 1;
+      var scY = (D.lastOut ? D.lastOut.scaleY : 1) * 1;
+      PIX.draw(fb, Scene.charFb, {
+        x: Scene.charX + CHAR_ANCHOR[0], y: Scene.charY + CHAR_ANCHOR[1],
+        anchorX: CHAR_ANCHOR[0], anchorY: CHAR_ANCHOR[1],
+        scaleX: scX, scaleY: scY, box: CHAR_BOX
+      });
+
+      Scene.fx.draw(fb);
+
+      PIX.toRGBA(fb, Scene.rgba);
+      Scene.ctx.putImageData(Scene.imageData, 0, 0);
+    },
+
+    shadow: function (fb, cx, cy, rx, ry, lift) {
+      var dens = 7 - Math.min(4, Math.floor(lift / 8));
+      for (var y = -Math.ceil(ry); y <= Math.ceil(ry); y++) {
+        for (var x = -Math.ceil(rx); x <= Math.ceil(rx); x++) {
+          var dd = (x * x) / (rx * rx) + (y * y) / (ry * ry);
+          if (dd > 1) continue;
+          var px = Math.round(cx + x), py = Math.round(cy + y);
+          if (px < 0 || py < 0 || px >= W || py >= H) continue;
+          var th = PIX.Bayer4[((py & 3) << 2) | (px & 3)];
+          if (th < dens) fb.d[py * W + px] = P.SHADOW;
+        }
+      }
+      fb._bb = null;
+    },
+
+    /* ---------------------------------------------------- 主循环 */
+    start: function () {
+      if (Scene.running) return;
+      Scene.running = true;
+      Scene.lastT = (global.performance || Date).now();
+      var loop = function (now) {
+        if (!Scene.running) return;
+        var dt = (now - Scene.lastT) / 1000;
+        Scene.lastT = now;
+        if (!isFinite(dt) || dt < 0) dt = 0.016;
+        if (dt > 0.05) dt = 0.05;          // 防止切标签页后瞬移
+        Scene.update(dt);
+        Scene.render();
+        // 统计
+        Scene._acc += dt; Scene._frames++;
+        if (Scene._acc >= 0.5) {
+          Scene.fps = Math.round(Scene._frames / Scene._acc);
+          Scene._acc = 0; Scene._frames = 0;
+          if (Scene.onStats) Scene.onStats(Scene.fps);
+        }
+        global.requestAnimationFrame(loop);
+      };
+      global.requestAnimationFrame(loop);
+    },
+    stop: function () { Scene.running = false; }
+  };
+
+  PIX.Scene = Scene;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+  <script>
+/* ===================== app.js ===================== */
+/* ============================================================================
+ * app.js  —  启动装配：初始化各模块、绑定事件、驱动主循环
+ * ----------------------------------------------------------------------------
+ * 页面加载后立即构建美术并开始渲染，无白屏期。
+ * 所有事件监听器只在启动时绑定一次（页面级单例），不存在重复注册或泄漏。
+ * ==========================================================================*/
+(function (global) {
+  'use strict';
+  var PIX = global.PIX;
+  var P = PIX.PAL;
+
+  var errors = [];
+  global.addEventListener('error', function (e) {
+    errors.push(String(e.message || e.error));
+  });
+  global.addEventListener('unhandledrejection', function (e) {
+    errors.push('unhandledrejection: ' + e.reason);
+  });
+
+  /** 调色板 -> CSS 变量：CSS 中不出现任何硬编码色值 */
+  function injectPalette() {
+    var map = {
+      void: 'VOID', panel: 'UI_PANEL', line: 'UI_LINE', ink: 'NAVY_DEEP', navy: 'NAVY',
+      navyHi: 'NAVY_HI', navyMid: 'NAVY_MID', hair: 'HAIR', hairLit: 'HAIR_LIT',
+      white: 'WHITE', whiteSd: 'WHITE_SHD', whiteMid: 'WHITE_MID', gold: 'GOLD',
+      purple: 'PURPLE', purpleDk: 'PURPLE_DK', sky: 'SKY', dim: 'WHITE_DEEP', glare: 'HAIR_HI'
+    };
+    var st = document.documentElement.style;
+    for (var k in map) st.setProperty('--' + k, PIX.HEX[P[map[k]]]);
+  }
+
+  function boot() {
+    var t0 = (global.performance || Date).now();
+    injectPalette();
+
+    // ---- 美术（一次性生成，之后只做变换）----
+    PIX.Art.buildHead();
+    PIX.Art.buildBody();
+    var tArt = (global.performance || Date).now();
+
+    // ---- 系统 ----
+    PIX.Face.init();
+    PIX.Actions.init();
+    PIX.Rig.init();
+    PIX.Speech.init();
+    PIX.Director.init(20240919);
+
+    var canvas = document.getElementById('stage');
+    PIX.Scene.init(canvas);
+
+    // ---- 面板 ----
+    PIX.UI.build(document.getElementById('side'), {
+      onAction: function (name) {
+        var line = PIX.LINES.act[name];
+        PIX.Director.setAction(name, { restart: true, line: line, speech: { prio: 1 } });
+      },
+      onExpr: function (name) { PIX.Director.setExpr(name); },
+      onTopic: function (i) {
+        var tp = PIX.topics[i];
+        PIX.Director.say(tp.lines[(Math.random() * tp.lines.length) | 0], { prio: 2, hold: 2.4 });
+        if (PIX.Audio) PIX.Audio.sfx('happy');
+      },
+      onToggle: function (key, on) {
+        if (key === 'sound') PIX.Audio.setEnabled(on);
+        if (key === 'music') PIX.Audio.setMusic(on);
+        if (key === 'sfx') PIX.Audio.setSfx(on);
+        if (key === 'bg') PIX.Scene.bgOn = on;
+        if (key === 'bubbles') PIX.Speech.visible = on;
+        if (key === 'auto') PIX.Director.autoEnabled = on;
+      }
+    });
+
+    // 语音逐字弹出音
+    PIX.Speech.onBlip = function (ch, msg) {
+      if (PIX.Audio) PIX.Audio.sfx('blip', { i: ch.charCodeAt(0), pitch: ((ch.charCodeAt(0) % 7) - 3) });
+    };
+
+    PIX.Scene.onStats = function (fps) {
+      PIX.UI.setFps(fps);
+      PIX.UI.refresh();
+      if (diag) updateDiag(fps);
+    };
+
+    // ---- 自适应整数缩放 ----
+    function fit() {
+      var pane = document.getElementById('stagepane');
+      var w = pane.clientWidth - 20, h = pane.clientHeight - 20;
+      var k = Math.floor(Math.min(w / PIX.Scene.W, h / PIX.Scene.H));
+      if (k < 1) k = 1;
+      if (k > 5) k = 5;
+      PIX.Scene.setScale(k);
+    }
+
+    // ---- 事件绑定（仅一次）----
+    var audioUnlocked = false;
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      PIX.Audio.unlock();
+      var hint = document.getElementById('hint');
+      if (hint) hint.classList.add('hide');
+    }
+
+    // 任意位置的首次交互都解锁音频（含侧栏按钮）
+    document.addEventListener('pointerdown', unlockAudio, { passive: true });
+    document.addEventListener('touchstart', unlockAudio, { passive: true });
+    global.addEventListener('keydown', unlockAudio);
+    canvas.addEventListener('pointerdown', function (e) {
+      unlockAudio();
+      if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
+      PIX.Scene.onDown(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      PIX.Scene.onMove(e.clientX, e.clientY);
+      canvas.style.cursor = PIX.Scene.pointer.onChar ? 'grab' : (PIX.Scene.dragging ? 'grabbing' : 'default');
+    });
+    canvas.addEventListener('pointerup', function (e) {
+      if (canvas.releasePointerCapture) { try { canvas.releasePointerCapture(e.pointerId); } catch (err) {} }
+      PIX.Scene.onUp(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointerleave', function () {
+      PIX.Scene.onLeave();
+      canvas.style.cursor = 'default';
+    });
+    canvas.addEventListener('pointercancel', function () { PIX.Scene.onLeave(); });
+    canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // 快捷键：空格/回车 触发一次自主行为切换，方便键盘用户
+    global.addEventListener('keydown', function (e) {
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (e.preventDefault) e.preventDefault();
+        var pool = ['wave', 'jump', 'dance', 'cheer', 'spin', 'stretch', 'shy', 'mermaid', 'think', 'bow'];
+        var pick = pool[(Math.random() * pool.length) | 0];
+        PIX.Director.setAction(pick, { line: PIX.LINES.act[pick], speech: { prio: 1 } });
+      }
+    });
+    global.addEventListener('resize', fit);
+    // 布局稳定后再校正一次（首帧前 clientWidth 可能尚未最终确定）
+    global.requestAnimationFrame(fit);
+    global.addEventListener('load', fit);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) PIX.Scene.lastT = (global.performance || Date).now();
+    });
+
+    // ---- 调试钩子（仅在 #debug 时启用，用于自动化核对）----
+    var diag = null;
+    if (global.location && String(global.location.hash).indexOf('debug') >= 0) {
+      diag = document.createElement('div');
+      diag.id = 'diag';
+      diag.style.display = 'none';
+      document.body.appendChild(diag);
+    }
+    function updateDiag(fps) {
+      if (!diag) return;
+      var pane = document.getElementById('stagepane');
+      diag.textContent = JSON.stringify({
+        pane: [pane.clientWidth, pane.clientHeight],
+        fps: fps,
+        errors: errors,
+        artMs: Math.round(tArt - t0),
+        action: PIX.Director.action,
+        expr: PIX.Director.expr,
+        parts: PIX.Art.order.length,
+        cjk: Object.keys(PIX.CJK || {}).length,
+        scale: PIX.Scene.scale
+      });
+    }
+
+    fit();
+    PIX.Scene.update(0.016);
+    PIX.Scene.render();
+    PIX.Scene.start();
+    if (diag) updateDiag(0);
+
+    // 开局问候
+    setTimeout(function () {
+      PIX.Director.setExpr('smile', { hold: 2.5 });
+      PIX.Director.say(PIX.LINES.greet[0], { hold: 2.6 });
+    }, 900);
+
+    global.__PIX_READY = true;
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})(window);
+</script>
+
+</body>
+</html>

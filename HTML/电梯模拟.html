@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电梯群控模拟器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { max-width: 100%; overflow-x: hidden; }
+  body {
+    background: #0b1220; color: #e2e8f0; min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  }
+  header { padding: 14px 16px 6px; }
+  h1 { font-size: 20px; letter-spacing: 0.5px; }
+  .sub { color: #7f8ea8; font-size: 12px; margin-top: 4px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 12px; }
+  button {
+    cursor: pointer; background: #1a2540; color: #e2e8f0;
+    border: 1px solid #2c3a5c; border-radius: 8px; padding: 7px 16px; font-size: 13px;
+  }
+  button:hover { background: #223154; }
+  #btnRun { background: #2563eb; border-color: #3b82f6; font-weight: 600; min-width: 86px; }
+  #btnRun.running { background: #b45309; border-color: #d97706; }
+  .seg { display: inline-flex; border: 1px solid #2c3a5c; border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; padding: 7px 12px; background: #16203a; }
+  .seg button.on { background: #2563eb; color: #fff; }
+  .ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #aab8d0; }
+  input[type="range"] { width: 140px; accent-color: #38bdf8; }
+  .lambda-val { color: #e2e8f0; font-style: normal; min-width: 58px; font-variant-numeric: tabular-nums; }
+  .opt { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #c6d2e6; cursor: pointer; }
+  .opt input { accent-color: #38bdf8; }
+  main { display: flex; gap: 14px; padding: 8px 16px 14px; align-items: stretch; }
+  .building { flex: 1 1 auto; min-width: 0; background: #111a2e; border: 1px solid #1f2a44; border-radius: 12px; padding: 10px; }
+  canvas { display: block; width: 100%; height: 600px; }
+  .panel { flex: 0 0 250px; background: #111a2e; border: 1px solid #1f2a44; border-radius: 12px; padding: 14px 16px; }
+  .panel h2 { font-size: 13px; color: #8fa3bf; font-weight: 600; margin: 16px 0 6px; }
+  .panel h2:first-child { margin-top: 0; }
+  .metric { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed #1e2a45; font-size: 13px; }
+  .metric span { color: #93a5c0; }
+  .metric b { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .erow { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+  .etag { font-style: normal; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: #0b1220; flex: none; }
+  .est { flex: 1; color: #aab8d0; white-space: nowrap; }
+  .eld { font-variant-numeric: tabular-nums; color: #e2e8f0; }
+  .eld.full { color: #ef4444; font-weight: 700; }
+  footer { padding: 0 16px 18px; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 12px; color: #93a5c0; background: #111a2e; border: 1px solid #1f2a44; border-radius: 12px; padding: 10px 14px; }
+  .legend .it { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { display: block; }
+  @media (max-width: 700px) {
+    main { flex-direction: column; }
+    .panel { flex: none; width: 100%; }
+    canvas { height: 520px; }
+    h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>电梯群控模拟器</h1>
+  <p class="sub">20 层 · 3 部电梯（A/B/C，限载 8 人）· 调度策略：SCAN 同向扫描 / FCFS 先来先服务</p>
+  <div class="controls">
+    <button id="btnRun">开始</button>
+    <button id="btnReset">重置</button>
+    <span class="ctl">倍速
+      <span class="seg" id="speedSeg">
+        <button data-v="1" class="on">1×</button>
+        <button data-v="4">4×</button>
+        <button data-v="16">16×</button>
+      </span>
+    </span>
+    <span class="ctl">到达率 λ
+      <input type="range" id="lambda" min="0" max="30" step="1" value="8">
+      <em class="lambda-val" id="lambdaVal">8 人/分</em>
+    </span>
+    <span class="ctl">策略
+      <label class="opt"><input type="radio" name="strategy" value="scan" checked>SCAN</label>
+      <label class="opt"><input type="radio" name="strategy" value="fcfs">FCFS</label>
+    </span>
+    <label class="opt"><input type="checkbox" id="peak">高峰模式（40% 从 1 层上行）</label>
+  </div>
+</header>
+<main>
+  <section class="building"><canvas id="cv"></canvas></section>
+  <aside class="panel">
+    <h2>运行指标</h2>
+    <div class="metric"><span>模拟时钟</span><b id="mClock">00:00</b></div>
+    <div class="metric"><span>累计到达</span><b id="mArr">0 人</b></div>
+    <div class="metric"><span>已送达</span><b id="mDel">0 人</b></div>
+    <div class="metric"><span>平均等待（到达→上梯）</span><b id="mWait">--</b></div>
+    <div class="metric"><span>平均乘梯（上梯→送达）</span><b id="mRide">--</b></div>
+    <div class="metric"><span>平均总耗时</span><b id="mTotal">--</b></div>
+    <h2>电梯状态</h2>
+    <div class="erow"><i class="etag" style="background:#38bdf8">A</i><span class="est" id="est0">待命 · 1 层</span><b class="eld" id="eld0">0/8</b></div>
+    <div class="erow"><i class="etag" style="background:#c084fc">B</i><span class="est" id="est1">待命 · 7 层</span><b class="eld" id="eld1">0/8</b></div>
+    <div class="erow"><i class="etag" style="background:#fb923c">C</i><span class="est" id="est2">待命 · 14 层</span><b class="eld" id="eld2">0/8</b></div>
+  </aside>
+</main>
+<footer>
+  <div class="legend">
+    <span class="it"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#34d399"/></svg>上行候梯</span>
+    <span class="it"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#60a5fa"/></svg>下行候梯</span>
+    <span class="it"><svg width="14" height="14"><path d="M7 2 L12 11 L2 11 Z" fill="#34d399"/></svg>轿厢上行</span>
+    <span class="it"><svg width="14" height="14"><path d="M7 12 L12 3 L2 3 Z" fill="#60a5fa"/></svg>轿厢下行</span>
+    <span class="it"><svg width="14" height="14"><rect x="2" y="6" width="10" height="2.5" rx="1.2" fill="#64748b"/></svg>待命</span>
+    <span class="it"><svg width="16" height="16"><circle cx="8" cy="8" r="7" fill="#ef4444"/><text x="8" y="11.5" text-anchor="middle" font-size="9" fill="#fff">满</text></svg>满载</span>
+    <span class="it">楼层高亮＝有人候梯</span>
+    <span class="it">轿厢「A 3/8」＝载客数</span>
+  </div>
+</footer>
+<script>
+'use strict';
+
+/* ============================================================
+ * 配置
+ * ============================================================ */
+const FLOORS = 20;              // 楼层数（1 层在底部）
+const CAP = 8;                  // 每部电梯限载人数
+const SPEED = 1 / 1.5;          // 运行速度：1 层 / 1.5 模拟秒
+const DOOR_TIME = 0.8;          // 开门 / 开门停靠 / 关门各 0.8 模拟秒
+const START_POS = [1, 7, 14];   // 三部电梯初始停靠层
+const ELEV_NAMES = ['A', 'B', 'C'];
+const ELEV_COLORS = ['#38bdf8', '#c084fc', '#fb923c'];
+const EPS = 1e-6;
+
+/* ============================================================
+ * 模拟核心
+ *  - 乘客按泊松过程到达（λ 人/分钟，指数间隔）
+ *  - 电梯状态机：idle / moving / opening / open / closing
+ *  - 调度：SCAN 同向扫描 + 就近同向分配；FCFS 一次只服务一个呼叫
+ * ============================================================ */
+let simTime = 0;                // 模拟时钟（秒）
+let running = false;            // 开始 / 暂停
+let speed = 1;                  // 倍速 1 / 4 / 16
+let lambda = 8;                 // 到达率（人/分钟）
+let peak = false;               // 高峰模式
+let strategy = 'scan';          // 'scan' | 'fcfs'
+let waiters, elevators, stats, callOwner, fcfsQueue, queuedKeys, nextId, arrTimer, houseT;
+
+const waiterCount = (f, d) => (d === 1 ? waiters.up[f] : waiters.down[f]).length;
+const callKey = (f, d) => f + ':' + d;
+const clampFloor = x => Math.min(FLOORS, Math.max(1, x));
+
+function createElevators() {
+  return ELEV_NAMES.map((name, i) => ({
+    idx: i, name, color: ELEV_COLORS[i],
+    pos: START_POS[i],        // 连续楼层位置（浮点，用于平滑动画）
+    dir: 0,                   // 扫描 / 运行方向：1 上 / -1 下 / 0 无
+    state: 'idle',            // idle | moving | opening | open | closing
+    stateT: 0,                // 当前状态计时
+    doorT: 0,                 // 门开度 0~1
+    target: null,             // 目标楼层（数值或 null）
+    stopFloor: 1,             // 本次停靠层
+    serveDir: 0,              // 开门期间的服务方向（方向指示与同向上客）
+    parkOnly: false,          // 空驶停靠（请求中途消失，就近停层待命，不开门）
+    sweepOnly: false,         // SCAN 扫到最远请求后换向（到达时不开门，直接反向）
+    onboard: [],              // 轿内乘客
+    job: null                 // FCFS 当前任务 { phase:'pickup'|'deliver', floor, dir }
+  }));
+}
+
+function sampleArr() {
+  // 指数分布间隔：均值 60/λ 秒（即泊松过程）
+  return lambda > 0 ? -Math.log(1 - Math.random()) * 60 / lambda : Infinity;
+}
+
+function resetSim() {
+  simTime = 0; nextId = 1; houseT = 0;
+  stats = { arrived: 0, delivered: 0, sumWait: 0, sumRide: 0, sumTotal: 0 };
+  waiters = {
+    up: Array.from({ length: FLOORS + 1 }, () => []),
+    down: Array.from({ length: FLOORS + 1 }, () => [])
+  };
+  elevators = createElevators();
+  callOwner = new Map();       // SCAN：呼叫键 "f:d" -> 电梯下标
+  fcfsQueue = [];              // FCFS：待服务呼叫 FIFO 队列
+  queuedKeys = new Set();
+  arrTimer = sampleArr();
+  refreshPanel();              // 参数（λ/倍速/策略/高峰/运行状态）保持当前设置不变
+}
+
+function spawnPassenger() {
+  let from, to;
+  if (peak && Math.random() < 0.4) {
+    from = 1;                              // 高峰模式：40% 乘客从 1 层上行
+    to = 2 + Math.floor(Math.random() * (FLOORS - 1));
+  } else {
+    from = 1 + Math.floor(Math.random() * FLOORS);
+    do { to = 1 + Math.floor(Math.random() * FLOORS); } while (to === from);
+  }
+  const dir = to > from ? 1 : -1;
+  const p = { id: nextId++, from, to, tArrive: simTime, tBoard: 0 };
+  (dir === 1 ? waiters.up : waiters.down)[from].push(p);
+  stats.arrived++;
+  registerCall(from, dir);
+}
+
+function registerCall(f, d) {
+  const k = callKey(f, d);
+  if (strategy === 'scan') {
+    if (!callOwner.has(k)) callOwner.set(k, chooseElevator(f, d));
+  } else if (!queuedKeys.has(k)) {
+    queuedKeys.add(k);
+    fcfsQueue.push({ floor: f, dir: d });
+  }
+}
+
+/* 呼叫分配：就近同向优先 ——
+   距离为主；顺路（同向且在前方）加分，需折返罚分，满载重罚，并按载客量轻微均衡负载 */
+function chooseElevator(f, d) {
+  let best = 0, bestCost = Infinity;
+  for (const e of elevators) {
+    let cost = Math.abs(e.pos - f);
+    if (e.dir !== 0) {
+      const ahead = e.dir === 1 ? f >= e.pos - 0.5 : f <= e.pos + 0.5;
+      if (ahead && e.dir === d) cost -= 2;        // 顺路捎带
+      else if (!ahead) cost += 6;                 // 需要折返
+      else cost += 3;                             // 在前方但呼叫反向
+    }
+    if (e.onboard.length >= CAP) cost += 12;      // 满载
+    cost += e.onboard.length * 0.25;              // 均衡负载
+    if (cost < bestCost - EPS) { bestCost = cost; best = e.idx; }
+  }
+  return best;
+}
+
+function startOpening(e) {
+  e.state = 'opening'; e.stateT = 0; e.doorT = 0;
+  e.stopFloor = clampFloor(Math.round(e.pos));
+  e.serveDir = e.dir;
+}
+
+/* 开门期间换乘：到站乘客下梯，同层同向候梯乘客按限载上梯；
+   满载时剩余乘客留在原层继续等待 */
+function doorTransfer(e) {
+  const f = e.stopFloor;
+  for (let i = e.onboard.length - 1; i >= 0; i--) {
+    const p = e.onboard[i];
+    if (p.to === f) {
+      e.onboard.splice(i, 1);
+      stats.delivered++;
+      stats.sumWait += p.tBoard - p.tArrive;
+      stats.sumRide += simTime - p.tBoard;
+      stats.sumTotal += simTime - p.tArrive;
+    }
+  }
+  let sd = 0;                                   // 服务方向（决定哪个方向的候梯乘客可上梯）
+  if (strategy === 'fcfs') {
+    if (e.job && e.job.phase === 'pickup' && e.job.floor === f) sd = e.job.dir;
+  } else {
+    const upLeft = e.onboard.some(p => p.to > f);
+    const downLeft = e.onboard.some(p => p.to < f);
+    if (upLeft && !downLeft) sd = 1;
+    else if (downLeft && !upLeft) sd = -1;
+    else if (!upLeft && !downLeft) {
+      const hasUp = waiterCount(f, 1) > 0, hasDown = waiterCount(f, -1) > 0;
+      if (hasUp && hasDown) sd = e.dir !== 0 ? e.dir : 1;
+      else if (hasUp) sd = 1;
+      else if (hasDown) sd = -1;
+    }
+  }
+  e.serveDir = sd;
+  if (sd !== 0) {
+    const q = sd === 1 ? waiters.up[f] : waiters.down[f];
+    while (q.length > 0 && e.onboard.length < CAP) {
+      const p = q.shift();
+      p.tBoard = simTime;
+      e.onboard.push(p);
+    }
+  }
+}
+
+function onDoorClosed(e) {
+  if (strategy === 'fcfs' && e.job && e.job.phase === 'pickup') {
+    if (waiterCount(e.job.floor, e.job.dir) > 0) {   // 满载遗留 → 重新排队
+      const k = callKey(e.job.floor, e.job.dir);
+      if (!queuedKeys.has(k)) {
+        queuedKeys.add(k);
+        fcfsQueue.push({ floor: e.job.floor, dir: e.job.dir });
+      }
+    }
+    e.job = { phase: 'deliver' };
+  }
+  e.state = 'idle'; e.stateT = 0; e.target = null;
+}
+
+function plan(e) {
+  if (strategy === 'fcfs') planFcfs(e); else planScan(e);
+}
+
+/* SCAN：电梯沿当前方向逐层响应所有同向呼叫，该方向无请求后换向。
+   - 停靠层 = 轿内乘客目的地 + 分配给本梯的同向呼叫（+ 运行途中顺路的同向呼叫）
+   - 前方只剩反向呼叫时，扫到最远请求处换向（sweepOnly，到达不开门）
+   - 无任何请求 → 空驶就近停靠待命（parkOnly） */
+function planScan(e) {
+  const f = e.pos;
+  const full = e.onboard.length >= CAP;
+  const dests = e.onboard.map(p => p.to);
+  const myCalls = [];
+  for (const k of Array.from(callOwner.keys())) {
+    if (callOwner.get(k) !== e.idx) continue;
+    const parts = k.split(':'), fl = +parts[0], d = +parts[1];
+    if (waiterCount(fl, d) === 0) { callOwner.delete(k); continue; }
+    if (full && Math.round(f) === fl) continue;   // 满载时暂不响应本层呼叫
+    myCalls.push({ floor: fl, dir: d });
+  }
+  // 顺路捎带：仅运行中的电梯响应沿途同向呼叫（避免多梯空跑汇聚）
+  const collective = [];
+  if (e.state === 'moving' && e.dir !== 0 && !full) {
+    for (let fl = 1; fl <= FLOORS; fl++) {
+      if (waiterCount(fl, e.dir) > 0 &&
+          (e.dir === 1 ? fl > f + EPS : fl < f - EPS)) collective.push(fl);
+    }
+  }
+  const all = dests.concat(myCalls.map(c => c.floor), collective);
+  if (all.length === 0) {
+    if (e.state === 'moving') {
+      const t = clampFloor(e.dir === 1 ? Math.ceil(f) : Math.floor(f));
+      if (Math.abs(t - f) < EPS) { e.dir = 0; e.target = null; e.state = 'idle'; e.stateT = 0; }
+      else { e.parkOnly = true; e.sweepOnly = false; e.target = t; }
+    } else { e.dir = 0; e.target = null; }
+    return;
+  }
+  if (e.dir === 0) {
+    let near = null, nd = Infinity;
+    for (const x of all) {
+      const d = Math.abs(x - f);
+      if (d < nd - EPS || (Math.abs(d - nd) <= EPS && x > near)) { nd = d; near = x; }
+    }
+    e.dir = near > f + EPS ? 1 : (near < f - EPS ? -1 : 1);
+  }
+  const isAhead = (x, dir) => dir === 1 ? x > f + EPS : x < f - EPS;
+  for (let flip = 0; flip < 2; flip++) {
+    const stops = [];
+    for (const d of dests) if (isAhead(d, e.dir)) stops.push(d);
+    for (const c of myCalls) if (c.dir === e.dir && isAhead(c.floor, e.dir)) stops.push(c.floor);
+    for (const x of collective) if (isAhead(x, e.dir)) stops.push(x);
+    if (stops.length) {
+      e.parkOnly = false; e.sweepOnly = false;
+      e.target = e.dir === 1 ? Math.min.apply(null, stops) : Math.max.apply(null, stops);
+      return;
+    }
+    const aheadAny = all.filter(x => isAhead(x, e.dir));
+    if (aheadAny.length) {
+      e.parkOnly = false; e.sweepOnly = true;
+      e.target = e.dir === 1 ? Math.max.apply(null, aheadAny) : Math.min.apply(null, aheadAny);
+      return;
+    }
+    if (all.some(x => Math.abs(x - f) < EPS)) {
+      e.parkOnly = false; e.sweepOnly = false;   // 本层请求（换向点或当前层呼叫）：直接开门
+      e.target = Math.round(f);
+      return;
+    }
+    if (flip === 0) e.dir = -e.dir;              // 该方向已无请求 → 换向再试
+  }
+  e.dir = 0; e.target = null;
+}
+
+/* FCFS：一次只服务一个呼叫 —— 接客（pickup）→ 送达全部轿内乘客（deliver），
+   期间不响应其他呼叫；新呼叫进入 FIFO 队列等待空闲电梯 */
+function planFcfs(e) {
+  const f = e.pos;
+  e.parkOnly = false; e.sweepOnly = false;
+  if (e.onboard.length > 0) {
+    if (!e.job || e.job.phase !== 'deliver') e.job = { phase: 'deliver' };
+    let best = null, bd = Infinity;
+    for (const p of e.onboard) {
+      const d = Math.abs(p.to - f);
+      if (d < bd - EPS) { bd = d; best = p.to; }
+    }
+    if (bd < EPS) { e.dir = 0; e.target = Math.round(f); startOpening(e); return; }
+    e.dir = best > f ? 1 : -1;
+    e.target = best;
+    return;
+  }
+  if (e.job && e.job.phase === 'deliver') e.job = null;
+  if (e.job && e.job.phase === 'pickup' && waiterCount(e.job.floor, e.job.dir) === 0) e.job = null;
+  if (!e.job) {
+    while (fcfsQueue.length) {
+      const c = fcfsQueue.shift();
+      queuedKeys.delete(callKey(c.floor, c.dir));
+      if (waiterCount(c.floor, c.dir) > 0) { e.job = { phase: 'pickup', floor: c.floor, dir: c.dir }; break; }
+    }
+  }
+  if (!e.job) {
+    if (e.state === 'moving') {
+      const t = clampFloor(e.dir === 1 ? Math.ceil(f) : Math.floor(f));
+      if (Math.abs(t - f) < EPS) { e.dir = 0; e.target = null; e.state = 'idle'; e.stateT = 0; }
+      else { e.parkOnly = true; e.target = t; }
+    } else { e.dir = 0; e.target = null; }
+    return;
+  }
+  e.dir = e.job.floor > f ? 1 : -1;
+  e.target = e.job.floor;
+  if (Math.abs(e.target - f) < EPS) startOpening(e);
+}
+
+/* 策略切换：立即生效 —— 清空分配/队列并按新策略重建；轿内乘客仍按目的地送达 */
+function setStrategy(s) {
+  if (strategy === s) return;
+  strategy = s;
+  callOwner.clear(); fcfsQueue.length = 0; queuedKeys.clear();
+  for (const e of elevators) e.job = null;
+  const calls = [];
+  for (let f = 1; f <= FLOORS; f++) {
+    for (const d of [1, -1]) {
+      const q = d === 1 ? waiters.up[f] : waiters.down[f];
+      if (q.length > 0) calls.push({ floor: f, dir: d, t: q[0].tArrive });
+    }
+  }
+  if (s === 'fcfs') {
+    calls.sort((a, b) => a.t - b.t);             // 按最早到达排序，保持先来先服务
+    for (const c of calls) {
+      fcfsQueue.push({ floor: c.floor, dir: c.dir });
+      queuedKeys.add(callKey(c.floor, c.dir));
+    }
+  } else {
+    for (const c of calls) callOwner.set(callKey(c.floor, c.dir), chooseElevator(c.floor, c.dir));
+  }
+}
+
+function updateElevator(e, dt) {
+  e.stateT += dt;
+  switch (e.state) {
+    case 'idle': {
+      plan(e);
+      if (e.state === 'idle' && e.target != null) {
+        if (Math.abs(e.target - e.pos) < EPS) startOpening(e);
+        else e.state = 'moving';
+      }
+      break;
+    }
+    case 'moving': {
+      plan(e);                                    // 途中重规划：顺路新增停靠 / 请求消失改停层
+      if (e.state !== 'moving') break;
+      if (e.target == null) { e.state = 'idle'; e.stateT = 0; e.dir = 0; break; }
+      if (Math.abs(e.target - e.pos) < EPS) {
+        const wasPark = e.parkOnly, wasSweep = e.sweepOnly;
+        e.parkOnly = false; e.sweepOnly = false;
+        if (wasSweep) e.dir = -e.dir;
+        e.state = 'idle'; e.stateT = 0;
+        if (!wasPark && !wasSweep) startOpening(e);
+        break;
+      }
+      const d = e.target > e.pos ? 1 : -1;
+      e.pos += d * SPEED * dt;                    // 逐帧平滑移动
+      if ((d === 1 && e.pos >= e.target) || (d === -1 && e.pos <= e.target)) {
+        e.pos = e.target;
+        if (e.parkOnly) { e.parkOnly = false; e.dir = 0; e.state = 'idle'; e.stateT = 0; }
+        else if (e.sweepOnly) { e.sweepOnly = false; e.dir = -e.dir; e.state = 'idle'; e.stateT = 0; }
+        else startOpening(e);
+      }
+      break;
+    }
+    case 'opening': {
+      e.doorT = Math.min(1, e.stateT / DOOR_TIME);
+      if (e.stateT >= DOOR_TIME) { e.state = 'open'; e.stateT = 0; e.doorT = 1; }
+      break;
+    }
+    case 'open': {
+      doorTransfer(e);                            // 开门期间换乘（含期间新到的同向乘客）
+      if (e.stateT >= DOOR_TIME) { e.state = 'closing'; e.stateT = 0; }
+      break;
+    }
+    default: {                                    // closing
+      e.doorT = Math.max(0, 1 - e.stateT / DOOR_TIME);
+      if (e.stateT >= DOOR_TIME) { e.doorT = 0; onDoorClosed(e); }
+    }
+  }
+}
+
+function tick(dt) {
+  simTime += dt;
+  // 泊松到达
+  if (lambda <= 0) arrTimer = Infinity;
+  else {
+    if (!isFinite(arrTimer)) arrTimer = sampleArr();
+    arrTimer -= dt;
+    let guard = 0;
+    while (arrTimer <= 0 && guard++ < 500) { spawnPassenger(); arrTimer += sampleArr(); }
+  }
+  for (const e of elevators) updateElevator(e, dt);
+  // 呼叫登记清理（每模拟 1 秒）
+  houseT += dt;
+  if (houseT >= 1) {
+    houseT = 0;
+    for (const k of Array.from(callOwner.keys())) {
+      const parts = k.split(':');
+      if (waiterCount(+parts[0], +parts[1]) === 0) callOwner.delete(k);
+    }
+    for (let i = fcfsQueue.length - 1; i >= 0; i--) {
+      const c = fcfsQueue[i];
+      if (waiterCount(c.floor, c.dir) === 0) { fcfsQueue.splice(i, 1); queuedKeys.delete(callKey(c.floor, c.dir)); }
+    }
+  }
+}
+
+/* ============================================================
+ * 渲染（Canvas 大楼侧视图：楼层线与楼层号、井道、轿厢、方向指示、候梯圆点）
+ * ============================================================ */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let dpr = 1;
+
+function resizeCanvas() {
+  dpr = window.devicePixelRatio || 1;
+  const r = cv.getBoundingClientRect();
+  cv.width = Math.max(1, Math.round(r.width * dpr));
+  cv.height = Math.max(1, Math.round(r.height * dpr));
+}
+window.addEventListener('resize', resizeCanvas);
+
+function roundRect(c, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+function faceDir(e) {                            // 显示用方向：上行 1 / 下行 -1 / 待命 0
+  if (e.state === 'moving' && e.target != null) return e.target > e.pos ? 1 : -1;
+  if (e.state === 'idle') return 0;
+  return e.serveDir || 0;
+}
+
+function drawDots(n, baseX, side, groundY, r, gap, cols, color) {
+  const maxDots = cols * 2;                       // 最多两行，超出显示 +N
+  ctx.fillStyle = color;
+  const shown = Math.min(n, maxDots);
+  for (let k = 0; k < shown; k++) {
+    const dx = baseX + side * ((k % cols) * gap + r);
+    const dy = groundY - r - 2 - Math.floor(k / cols) * (2 * r + 2);
+    ctx.beginPath();
+    ctx.arc(dx, dy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (n > maxDots) {
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = side === 1 ? 'left' : 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('+' + (n - maxDots), baseX + side * r, groundY - 2 * (2 * r + 2) - 3);
+  }
+}
+
+function drawCar(e, x0, shaftW, floorH, yOf) {
+  const carW = Math.max(28, Math.min(shaftW - 12, 46));
+  const carH = Math.max(16, floorH - 6);
+  const cx = x0 + e.idx * shaftW + (shaftW - carW) / 2;
+  const yb = yOf(e.pos), yt = yb - carH;
+  const full = e.onboard.length >= CAP;
+  // 轿厢门板（亮色）
+  ctx.fillStyle = e.color;
+  roundRect(ctx, cx, yt, carW, carH, 4);
+  ctx.fill();
+  // 开门中缝（露出的轿厢内部，宽度随 doorT 增大）
+  const gap = (carW - 6) * e.doorT;
+  if (gap > 0.5) {
+    ctx.fillStyle = '#0a1120';
+    ctx.fillRect(cx + carW / 2 - gap / 2, yt + 2, gap, carH - 4);
+  }
+  ctx.lineWidth = full ? 2.2 : 1;                // 满载：红色描边
+  ctx.strokeStyle = full ? '#ef4444' : 'rgba(8,12,24,0.55)';
+  roundRect(ctx, cx, yt, carW, carH, 4);
+  ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = e.doorT <= 0.45 ? '#0b1220' : '#e6edf7';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText(e.name + ' ' + e.onboard.length + '/' + CAP, cx + carW / 2 - (full ? 4 : 0), yt + carH / 2);
+  if (full) {                                    // 「满」徽标
+    ctx.beginPath();
+    ctx.arc(cx + carW - 5, yt + 5, 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.fillText('满', cx + carW - 5, yt + 5.5);
+  }
+  // 方向指示（轿厢上方）：▲ 上行 / ▼ 下行 / － 待命
+  const fd = faceDir(e), tcx = cx + carW / 2, ty = yt - 2.5;
+  if (fd === 1) {
+    ctx.fillStyle = '#34d399';
+    ctx.beginPath(); ctx.moveTo(tcx - 4.5, ty); ctx.lineTo(tcx + 4.5, ty); ctx.lineTo(tcx, ty - 6); ctx.closePath(); ctx.fill();
+  } else if (fd === -1) {
+    ctx.fillStyle = '#60a5fa';
+    ctx.beginPath(); ctx.moveTo(tcx - 4.5, ty - 6); ctx.lineTo(tcx + 4.5, ty - 6); ctx.lineTo(tcx, ty); ctx.closePath(); ctx.fill();
+  } else {
+    ctx.strokeStyle = '#5b6b84'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(tcx - 4, ty - 3); ctx.lineTo(tcx + 4, ty - 3); ctx.stroke();
+  }
+}
+
+function draw() {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (W < 40 || H < 40) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0c1322';
+  ctx.fillRect(0, 0, W, H);
+  const padT = 12, padB = 8, padL = 6, labelW = 20, sideW = 34;
+  const x0 = padL + labelW + sideW;
+  const shaftW = (W - x0 - sideW - 6) / 3;
+  const floorH = (H - padT - padB) / FLOORS;
+  const yOf = f => padT + (FLOORS - f + 1) * floorH;   // 该层地面线 y
+  // 楼层线 / 楼层号（有人候梯的楼层醒目高亮）
+  ctx.font = '10px sans-serif';
+  for (let fl = 1; fl <= FLOORS; fl++) {
+    const y = yOf(fl);
+    const n = waiterCount(fl, 1) + waiterCount(fl, -1);
+    if (n > 0) {
+      ctx.fillStyle = 'rgba(251,191,36,0.10)';
+      ctx.fillRect(padL + labelW, y - floorH, W - padL - labelW - 4, floorH);
+    }
+    ctx.strokeStyle = n > 0 ? 'rgba(251,191,36,0.8)' : 'rgba(148,163,184,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL + labelW, y + 0.5); ctx.lineTo(W - 4, y + 0.5); ctx.stroke();
+    ctx.fillStyle = n > 0 ? '#fbbf24' : '#64748b';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(fl), padL + labelW - 4, y - floorH / 2);
+  }
+  // 井道
+  for (let i = 0; i < 3; i++) {
+    const sx = x0 + i * shaftW;
+    ctx.fillStyle = 'rgba(9,14,26,0.85)';
+    ctx.fillRect(sx + 2, padT, shaftW - 4, FLOORS * floorH);
+    ctx.strokeStyle = 'rgba(148,163,184,0.28)';
+    ctx.strokeRect(sx + 2.5, padT + 0.5, shaftW - 5, FLOORS * floorH - 1);
+  }
+  // 各层候梯乘客（左=下行，右=上行，颜色区分）
+  const dotR = Math.min(3.2, floorH * 0.11);
+  const gap = dotR * 2 + 1.6;
+  const cols = Math.max(3, Math.floor(sideW / gap));
+  for (let fl = 1; fl <= FLOORS; fl++) {
+    drawDots(waiterCount(fl, -1), x0 - 4, -1, yOf(fl), dotR, gap, cols, '#60a5fa');
+    drawDots(waiterCount(fl, 1), x0 + 3 * shaftW + 4, 1, yOf(fl), dotR, gap, cols, '#34d399');
+  }
+  // 轿厢
+  for (const e of elevators) drawCar(e, x0, shaftW, floorH, yOf);
+}
+
+/* ============================================================
+ * UI 绑定（控件事件、指标面板刷新、主循环）
+ * ============================================================ */
+const $ = id => document.getElementById(id);
+const els = {
+  btnRun: $('btnRun'), btnReset: $('btnReset'),
+  lambda: $('lambda'), lambdaVal: $('lambdaVal'), peak: $('peak'),
+  mClock: $('mClock'), mArr: $('mArr'), mDel: $('mDel'),
+  mWait: $('mWait'), mRide: $('mRide'), mTotal: $('mTotal')
+};
+const estEls = [$('est0'), $('est1'), $('est2')];
+const eldEls = [$('eld0'), $('eld1'), $('eld2')];
+
+function fmtClock(t) {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function elevStateText(e) {
+  switch (e.state) {
+    case 'moving': return (e.parkOnly ? '空驶待命' : (faceDir(e) === 1 ? '上行' : '下行')) + ' · ' + Math.round(e.pos) + ' 层';
+    case 'opening': return '开门中 · ' + e.stopFloor + ' 层';
+    case 'open': return '上下客 · ' + e.stopFloor + ' 层';
+    case 'closing': return '关门中 · ' + e.stopFloor + ' 层';
+    default: return '待命 · ' + Math.round(e.pos) + ' 层';
+  }
+}
+
+function refreshPanel() {                        // 指标面板（约每 0.25s 刷新）
+  els.mClock.textContent = fmtClock(simTime);
+  els.mArr.textContent = stats.arrived + ' 人';
+  els.mDel.textContent = stats.delivered + ' 人';
+  const n = stats.delivered;
+  const fmt = v => n > 0 ? v.toFixed(1) + ' 秒' : '--';
+  els.mWait.textContent = fmt(stats.sumWait / n);
+  els.mRide.textContent = fmt(stats.sumRide / n);
+  els.mTotal.textContent = fmt(stats.sumTotal / n);
+  elevators.forEach((e, i) => {
+    estEls[i].textContent = elevStateText(e);
+    eldEls[i].textContent = e.onboard.length + '/' + CAP;
+    eldEls[i].classList.toggle('full', e.onboard.length >= CAP);
+  });
+}
+
+// 开始 / 暂停（同一按钮切换）
+els.btnRun.addEventListener('click', () => {
+  running = !running;
+  els.btnRun.textContent = running ? '暂停' : '开始';
+  els.btnRun.classList.toggle('running', running);
+  refreshPanel();
+});
+
+// 重置：清空乘客与统计、时钟归零，参数保持当前设置
+els.btnReset.addEventListener('click', resetSim);
+
+// 倍速 1×/4×/16×
+document.querySelectorAll('#speedSeg button').forEach(b => {
+  b.addEventListener('click', () => {
+    speed = Number(b.dataset.v);
+    document.querySelectorAll('#speedSeg button').forEach(x => x.classList.toggle('on', x === b));
+  });
+});
+
+// λ 滑块（0–30 人/分，实时生效）
+els.lambda.addEventListener('input', () => {
+  lambda = Number(els.lambda.value);
+  els.lambdaVal.textContent = lambda + ' 人/分';
+  if (!isFinite(arrTimer) && lambda > 0) arrTimer = sampleArr();
+});
+
+// 策略单选（运行中可切换、立即生效）
+document.querySelectorAll('input[name="strategy"]').forEach(r => {
+  r.addEventListener('change', () => { if (r.checked) setStrategy(r.value); });
+});
+
+// 高峰模式复选框
+els.peak.addEventListener('change', () => { peak = els.peak.checked; });
+
+// 主循环：真实帧时间 × 倍速推进模拟（子步长 ≤0.08s 保证高倍速下平滑与准确）
+let lastReal = performance.now();
+let panelAcc = 1;
+
+function frame(now) {
+  const dtReal = Math.min(0.1, (now - lastReal) / 1000);
+  lastReal = now;
+  if (running) {
+    let dt = dtReal * speed;
+    let guard = 0;
+    while (dt > 1e-4 && guard++ < 600) {
+      const h = Math.min(dt, 0.08);
+      tick(h);
+      dt -= h;
+    }
+  }
+  draw();
+  panelAcc += dtReal;
+  if (panelAcc >= 0.25) { panelAcc = 0; refreshPanel(); }
+  requestAnimationFrame(frame);
+}
+
+// 初始化
+resetSim();
+resizeCanvas();
+requestAnimationFrame(t => { lastReal = t; requestAnimationFrame(frame); });
+</script>
+
+</body>
+</html>
