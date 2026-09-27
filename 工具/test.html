@@ -133,6 +133,17 @@
         color: #57606a;
     }
     .force-hint b { color: #bf8700; }
+    /* 章节内的小标题。之前代码里已经用了几处 className="divider"，
+       但一直没有对应的样式，等于白加。这里补上，顺便统一观感。 */
+    .divider {
+        margin: 14px 14px 2px;
+        padding: 6px 0 6px 9px;
+        border-left: 3px solid #0969da;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: #0969da;
+        background: #f6f8fa;
+    }
     .force-btns {
         padding: 12px 14px 14px;
         display: flex;
@@ -188,6 +199,7 @@
         .netcell .n { color: #8b949e; }
         .force-hint { background: rgba(210, 153, 34, 0.08); border-left-color: #d29922; color: #8b949e; }
         .force-hint b { color: #d29922; }
+        .divider { background: #161b22; border-left-color: #1f6feb; color: #58a6ff; }
         .fb { background: #161b22; border-color: #30363d; color: #c9d1d9; }
         .fb:hover { background: #21262d; }
         .fb.good { border-color: #238636; color: #3fb950; background: rgba(35, 134, 54, 0.15); }
@@ -702,6 +714,113 @@
             document.pictureInPictureEnabled ? "ok" : "muted");
         row(c, "全屏 API", document.fullscreenEnabled ? "支持" : "不支持",
             document.fullscreenEnabled ? "ok" : "muted");
+
+        /* ---- 硬解码检测 ----
+           canPlayType 只回答"能不能播"，回答不了"是硬解还是软解"。
+           真正能区分的是 MediaCapabilities.decodingInfo()，
+           它返回的 powerEfficient 就是"这个格式走不走硬件加速单元"。
+           老浏览器没这个接口，所以整段要包在存在性判断里。 */
+        var hwBox = document.createElement("div");
+        hwBox.className = "divider";
+        hwBox.textContent = "硬解码能力（MediaCapabilities）";
+        c.appendChild(hwBox);
+
+        if (!navigator.mediaCapabilities || !navigator.mediaCapabilities.decodingInfo) {
+            row(c, "MediaCapabilities API", "不支持（无法区分硬解/软解）", "muted");
+            log("硬解码检测跳过：浏览器没有 MediaCapabilities", "warn");
+        } else {
+            row(c, "MediaCapabilities API", "支持", "ok");
+
+            var hwCases = [
+                ["视频 H.264 (1080p)", {
+                    type: "file",
+                    video: { contentType: 'video/mp4; codecs="avc1.640028"',
+                             width: 1920, height: 1080, bitrate: 4000000, framerate: 30 }
+                }],
+                ["视频 H.265 / HEVC (1080p)", {
+                    type: "file",
+                    video: { contentType: 'video/mp4; codecs="hvc1.1.6.L93.B0"',
+                             width: 1920, height: 1080, bitrate: 4000000, framerate: 30 }
+                }],
+                ["视频 VP9 (1080p)", {
+                    type: "file",
+                    video: { contentType: 'video/webm; codecs="vp09.00.10.08"',
+                             width: 1920, height: 1080, bitrate: 4000000, framerate: 30 }
+                }],
+                ["视频 AV1 (1080p)", {
+                    type: "file",
+                    video: { contentType: 'video/mp4; codecs="av01.0.08M.08"',
+                             width: 1920, height: 1080, bitrate: 4000000, framerate: 30 }
+                }],
+                ["视频 AV1 (4K)", {
+                    type: "file",
+                    video: { contentType: 'video/mp4; codecs="av01.0.08M.08"',
+                             width: 3840, height: 2160, bitrate: 12000000, framerate: 30 }
+                }],
+                ["音频 AAC", {
+                    type: "file",
+                    audio: { contentType: 'audio/mp4; codecs="mp4a.40.2"', channels: 2, bitrate: 128000 }
+                }],
+                ["音频 Opus", {
+                    type: "file",
+                    audio: { contentType: 'audio/webm; codecs="opus"', channels: 2, bitrate: 128000 }
+                }]
+            ];
+
+            // decodingInfo 是异步的。先用 row() 建好行拿到值元素，
+            // 结果回来再回填，这样顺序不会乱，也不会追加到别的行后面。
+            hwCases.forEach(function (x) {
+                var pending = row(c, x[0], "检测中…", "muted");
+                navigator.mediaCapabilities.decodingInfo(x[1]).then(function (info) {
+                    var parts = [];
+                    var cls = "muted";
+                    if (!info.supported) {
+                        parts.push("不支持");
+                        cls = "no";
+                    } else {
+                        // powerEfficient = 用了硬件编解码单元，省电、不吃 CPU
+                        parts.push(info.powerEfficient ? "硬解" : "软解");
+                        cls = info.powerEfficient ? "ok" : "warn";
+                        parts.push(info.smooth ? "流畅" : "可能卡顿");
+                    }
+                    pending.textContent = parts.join(" · ");
+                    pending.className = "v " + cls;
+                }).catch(function () {
+                    pending.textContent = "查询失败";
+                    pending.className = "v muted";
+                });
+            });
+
+            // WebCodecs 是另一条硬解路径（不走 video 标签，直接喂码流）
+            var wcBox = document.createElement("div");
+            wcBox.className = "divider";
+            wcBox.textContent = "WebCodecs 硬件解码";
+            c.appendChild(wcBox);
+
+            if (window.VideoDecoder && window.VideoDecoder.isConfigSupported) {
+                row(c, "VideoDecoder API", "支持", "ok");
+                [["avc1.640028", "H.264 1080p"],
+                 ["hvc1.1.6.L93.B0", "H.265 1080p"],
+                 ["vp09.00.10.08", "VP9 1080p"],
+                 ["av01.0.08M.08", "AV1 1080p"]].forEach(function (x) {
+                    var cfg = {
+                        codec: x[0], codedWidth: 1920, codedHeight: 1080,
+                        hardwareAcceleration: "prefer-hardware",
+                        optimizeForLatency: true
+                    };
+                    var line = row(c, "WebCodecs " + x[1], "检测中…", "muted");
+                    window.VideoDecoder.isConfigSupported(cfg).then(function (res) {
+                        line.textContent = res.supported ? "支持硬解优先" : "不支持";
+                        line.className = "v " + (res.supported ? "ok" : "no");
+                    }).catch(function () {
+                        line.textContent = "查询失败";
+                        line.className = "v muted";
+                    });
+                });
+            } else {
+                row(c, "VideoDecoder API", "不支持", "muted");
+            }
+        }
 
         log("媒体能力检测完成", "ok");
     }
