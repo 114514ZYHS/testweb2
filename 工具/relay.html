@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay AI API Studio - ZYHS</title>
+<style>
+    /* 配色照抄原生版 MainForm 里的常量，不自己调:
+       Primary #185d46 / PrimarySoft #e5f1eb / Background #f4f5f2
+       TextColor #1c1f1c / Muted #677068 */
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f4f5f2;
+        color: #1c1f1c;
+        position: relative;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font-size: 14px;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+            linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.62)),
+            url("../bg.png") center center / cover no-repeat;
+        background-color: #000000;
+        opacity: 1;
+        z-index: -1;
+        pointer-events: none;
+    }
+    .back-link {
+        display: inline-block;
+        margin: 12px 0 0 18px;
+        color: #0969da;
+        text-decoration: none;
+        font-size: 13px;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    /* ---------- 顶栏（对应原生版的 header，高 58） ---------- */
+    .app {
+        max-width: 1220px;
+        width: calc(100% - 36px);
+        margin: 10px auto 22px;
+        background: #ffffff;
+        border: 1px solid #dde2dd;
+        display: flex;
+        flex-direction: column;
+        min-height: 620px;
+    }
+    .header {
+        height: 58px;
+        display: flex;
+        align-items: center;
+        padding: 0 18px;
+        border-bottom: 1px solid #dde2dd;
+        background: #ffffff;
+        flex: 0 0 auto;
+    }
+    .mark {
+        width: 32px; height: 32px;
+        background: #185d46;
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 32px;
+    }
+    .brand { display: flex; align-items: baseline; gap: 8px; margin-left: 12px; }
+    .brand b { font-size: 15px; color: #1c1f1c; }
+    .brand span { font-size: 10.5px; color: #677068; letter-spacing: 0.04em; }
+    .header-status { margin-left: auto; font-size: 12.5px; color: #185d46; }
+    .header-status.busy { color: #bf8700; }
+    .header-status.err { color: #b42318; }
+
+    /* ---------- 三栏主体 ---------- */
+    .body-row {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr) 330px;
+        flex: 1 1 auto;
+        min-height: 0;
+        background: #dde2dd;
+        gap: 1px;
+    }
+    .col { background: #f8f9f7; min-width: 0; display: flex; flex-direction: column; }
+    .col.center { background: #ffffff; }
+    .col.right { background: #f9faf8; overflow-y: auto; }
+
+    /* 左栏：服务商 */
+    .provider-col { padding: 12px 12px; }
+    .btn-newchat {
+        height: 40px;
+        width: 100%;
+        border: 0;
+        background: #185d46;
+        color: #ffffff;
+        font: inherit;
+        font-size: 13.5px;
+        cursor: pointer;
+    }
+    .btn-newchat:hover { background: #14684f; }
+    .field-cap { font-size: 12px; color: #677068; padding: 12px 4px 8px; }
+    .provider-list { flex: 1 1 auto; overflow-y: auto; }
+    .pv-item {
+        height: 47px;
+        padding: 7px 10px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+    }
+    .pv-item:hover { background: #eef1ec; }
+    .pv-item.on { background: #e5f1eb; }
+    .pv-item .nm { font-size: 13.5px; font-weight: 600; color: #1c1f1c; }
+    .pv-item.on .nm { color: #185d46; }
+    .pv-item .pr { font-size: 10.5px; color: #677068; }
+
+    /* 中栏：对话 */
+    .tabs {
+        display: flex;
+        border-bottom: 1px solid #dde2dd;
+        background: #ffffff;
+        flex: 0 0 auto;
+    }
+    .tab {
+        padding: 9px 16px;
+        font-size: 13px;
+        color: #677068;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+    }
+    .tab.on { color: #185d46; border-bottom-color: #185d46; font-weight: 600; }
+    .pane { flex: 1 1 auto; overflow-y: auto; padding: 14px 16px; display: none; }
+    .pane.on { display: block; }
+    .pane.mono { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; }
+
+    .msg { margin-bottom: 14px; }
+    .msg .who { font-size: 12.5px; font-weight: 600; color: #414842; margin-bottom: 4px; }
+    .msg.assistant .who { color: #185d46; }
+    .msg .txt { font-size: 13.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+    .chat-empty { color: #8b949e; font-size: 13px; padding: 20px 0; }
+
+    /* 输入区（原生版高 156） */
+    .composer {
+        flex: 0 0 auto;
+        border-top: 1px solid #dde2dd;
+        background: #f9faf8;
+        padding: 12px 16px 14px;
+        display: flex;
+        gap: 10px;
+    }
+    .composer textarea {
+        flex: 1 1 auto;
+        min-height: 108px;
+        resize: vertical;
+        font: inherit;
+        font-size: 13.5px;
+        padding: 9px 10px;
+        border: 1px solid #cdd4cd;
+        background: #ffffff;
+        color: #1c1f1c;
+    }
+    .composer textarea:focus { outline: 2px solid #185d46; outline-offset: -1px; }
+    .composer-actions { width: 116px; flex: 0 0 116px; display: flex; flex-direction: column; gap: 8px; }
+    .btn-send {
+        height: 42px;
+        border: 0;
+        background: #185d46;
+        color: #ffffff;
+        font: inherit;
+        font-size: 13.5px;
+        cursor: pointer;
+        margin-top: auto;
+    }
+    .btn-send:hover { background: #14684f; }
+    .btn-send:disabled { background: #9db3a8; cursor: not-allowed; }
+    .btn-send.stop { background: #b42318; }
+    .btn-sec {
+        height: 38px;
+        border: 1px solid #cdd4cd;
+        background: #ffffff;
+        color: #1c1f1c;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+    }
+    .btn-sec:hover { background: #f0f2ef; }
+
+    /* 右栏：连接与参数 */
+    .settings { padding: 14px 16px 20px; }
+    .settings h2 { font-size: 15px; font-weight: 700; margin: 0 0 6px; color: #1c1f1c; }
+    .fld { margin-bottom: 11px; }
+    .fld > label { display: block; font-size: 12px; color: #677068; margin-bottom: 4px; }
+    .fld input[type="text"], .fld input[type="password"], .fld select, .fld textarea {
+        width: 100%;
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 9px;
+        border: 1px solid #cdd4cd;
+        background: #ffffff;
+        color: #1c1f1c;
+    }
+    .fld textarea { min-height: 66px; resize: vertical; font-size: 12.5px; }
+    .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid #185d46; outline-offset: -1px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .model-row { display: grid; grid-template-columns: 1fr 86px; gap: 8px; }
+    .model-meta { display: flex; justify-content: space-between; font-size: 11.5px; color: #677068; margin-top: 5px; }
+    .model-meta b { color: #185d46; font-weight: 600; }
+    .chk { display: flex; align-items: center; gap: 7px; font-size: 13px; margin-bottom: 11px; }
+    .chk input { width: 15px; height: 15px; accent-color: #185d46; }
+
+    .statusbar {
+        flex: 0 0 auto;
+        border-top: 1px solid #dde2dd;
+        background: #ffffff;
+        padding: 5px 14px;
+        font-size: 12px;
+        color: #677068;
+    }
+
+    /* 提示词库弹层 */
+    .modal-bg {
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 500;
+    }
+    .modal-bg.on { display: flex; }
+    .modal {
+        width: min(760px, 92vw);
+        max-height: 82vh;
+        background: #ffffff;
+        border: 1px solid #cdd4cd;
+        display: flex;
+        flex-direction: column;
+    }
+    .modal-hd {
+        padding: 12px 16px;
+        border-bottom: 1px solid #dde2dd;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .modal-hd b { font-size: 14px; }
+    .modal-hd input {
+        margin-left: auto;
+        font: inherit; font-size: 13px;
+        padding: 6px 9px;
+        border: 1px solid #cdd4cd;
+        width: 220px;
+    }
+    .modal-bd { overflow-y: auto; padding: 10px 16px 16px; }
+    .tpl { border-bottom: 1px solid #eef1ec; padding: 10px 0; cursor: pointer; }
+    .tpl:hover { background: #f8faf8; }
+    .tpl .t { font-size: 13.5px; font-weight: 600; color: #185d46; }
+    .tpl .c { font-size: 11px; color: #677068; margin-left: 8px; }
+    .tpl .d { font-size: 12.5px; color: #677068; margin-top: 3px; }
+    .modal-ft { padding: 10px 16px; border-top: 1px solid #dde2dd; text-align: right; }
+
+    @media (max-width: 1000px) {
+        .body-row { grid-template-columns: 180px minmax(0, 1fr); }
+        .col.right { grid-column: 1 / -1; max-height: none; }
+    }
+    @media (max-width: 720px) {
+        .body-row { grid-template-columns: 1fr; }
+        .header-status { display: none; }
+        .app { width: calc(100% - 16px); }
+    }
+</style>
+</head>
+<body>
+<a href="../index.html" class="back-link">&larr; 返回主页</a>
+
+<div class="app">
+    <div class="header">
+        <div class="mark">R</div>
+        <div class="brand"><b>Relay</b><span>NATIVE API STUDIO · WEB</span></div>
+        <div class="header-status" id="hdrStatus">就绪</div>
+    </div>
+
+    <div class="body-row">
+        <!-- 左：服务商 -->
+        <div class="col provider-col">
+            <button class="btn-newchat" id="btnNewChat">新建会话</button>
+            <div class="field-cap">服务商</div>
+            <div class="provider-list" id="providerList"></div>
+        </div>
+
+        <!-- 中：对话 / 请求体 / 原始响应 -->
+        <div class="col center">
+            <div class="tabs">
+                <div class="tab on" data-pane="paneChat">对话</div>
+                <div class="tab" data-pane="paneReq">请求体</div>
+                <div class="tab" data-pane="paneRaw">原始响应</div>
+            </div>
+            <div class="pane on" id="paneChat"></div>
+            <div class="pane mono" id="paneReq"></div>
+            <div class="pane mono" id="paneRaw"></div>
+            <div class="composer">
+                <textarea id="promptBox" placeholder="输入内容，Ctrl+Enter 发送"></textarea>
+                <div class="composer-actions">
+                    <button class="btn-sec" id="btnTpl">提示词库</button>
+                    <button class="btn-send" id="btnSend">发送</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右：连接与参数 -->
+        <div class="col right">
+            <div class="settings">
+                <h2>连接与参数</h2>
+
+                <div class="fld">
+                    <label>协议</label>
+                    <select id="protocolBox">
+                        <option value="chat">Chat Completions</option>
+                        <option value="responses">Responses API</option>
+                    </select>
+                </div>
+
+                <div class="fld">
+                    <label>Base URL</label>
+                    <input type="text" id="baseUrlBox" placeholder="https://api.example.com/v1">
+                </div>
+
+                <div class="fld">
+                    <label>API Key</label>
+                    <input type="password" id="apiKeyBox" placeholder="sk-...">
+                </div>
+
+                <div class="fld">
+                    <label>模型</label>
+                    <div class="model-row">
+                        <input type="text" id="modelBox" list="modelOptions" placeholder="模型名">
+                        <button class="btn-sec" id="btnSync" style="height:auto;">同步模型</button>
+                    </div>
+                    <datalist id="modelOptions"></datalist>
+                    <div class="model-meta">
+                        <span id="modelCount">—</span>
+                        <b id="modelType">未选择</b>
+                    </div>
+                </div>
+
+                <div class="fld">
+                    <label>System Prompt</label>
+                    <textarea id="systemPromptBox">你是一个专业、准确、简洁的 AI 助手。</textarea>
+                </div>
+
+                <div class="row2">
+                    <div class="fld">
+                        <label>Temperature</label>
+                        <input type="text" id="temperatureBox" value="0.7">
+                    </div>
+                    <div class="fld">
+                        <label>Max Tokens</label>
+                        <input type="text" id="maxTokensBox" value="4096">
+                    </div>
+                </div>
+
+                <div class="fld">
+                    <label>Reasoning</label>
+                    <select id="reasoningBox">
+                        <option>none</option>
+                        <option>low</option>
+                        <option selected>medium</option>
+                        <option>high</option>
+                        <option>xhigh</option>
+                        <option>max</option>
+                    </select>
+                </div>
+
+                <label class="chk"><input type="checkbox" id="streamCheck" checked>流式输出</label>
+
+                <div class="fld">
+                    <label>自定义 Headers (JSON)</label>
+                    <textarea id="customHeadersBox" placeholder='{"X-Title": "Relay"}'></textarea>
+                </div>
+
+                <div class="fld">
+                    <button class="btn-sec" id="btnClear" style="width:100%;">清空当前会话</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="statusbar">网页版 · 密钥只存在浏览器内存，刷新即清空 · 请求由你的浏览器直连服务商</div>
+</div>
+
+<!-- 提示词库 -->
+<div class="modal-bg" id="tplModal">
+    <div class="modal">
+        <div class="modal-hd">
+            <b>提示词库</b>
+            <input type="text" id="tplSearch" placeholder="搜索标题或说明…">
+        </div>
+        <div class="modal-bd" id="tplList"></div>
+        <div class="modal-ft"><button class="btn-sec" id="tplClose" style="padding:0 18px;">关闭</button></div>
+    </div>
+</div>
+
+<script>
+/* ============================================================
+   数据部分与原生版 RelayAIStudio.cs 保持一致：
+   - 服务商预设（CreateProviders）
+   - 提示词模板（CreateTemplates）
+   - 协议 / 模型判定 / 请求体构造（BuildRequestBody）
+   改数据之前请回查仓库里那份 C#，别在这里单独改。
+   ============================================================ */
+
+// 对应 CreateProviders()，15 个预设
+var PROVIDERS = [
+    { id: "openai",      name: "OpenAI",       base: "https://api.openai.com/v1",                       proto: "responses", key: true,  models: ["gpt-5.6","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna","gpt-5.3-codex","gpt-4.1-mini"] },
+    { id: "xelvai",      name: "Xelv AI",      base: "https://api.xelvai.com/v1",                       proto: "chat",      key: true,  models: ["gpt-5.6","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna","gpt-5.5","gpt-5.4","gpt-5.4-mini","gpt-5.3-codex-spark","gpt-5.2","codex-auto-review","gpt-image-2","gpt-image-1.5","gpt-image-1"] },
+    { id: "openrouter",  name: "OpenRouter",   base: "https://openrouter.ai/api/v1",                    proto: "chat",      key: true,  models: ["openai/gpt-5.6","anthropic/claude-sonnet-4.5","google/gemini-2.5-pro"] },
+    { id: "deepseek",    name: "DeepSeek",     base: "https://api.deepseek.com",                        proto: "chat",      key: true,  models: ["deepseek-chat","deepseek-reasoner"] },
+    { id: "qwen",        name: "通义千问",      base: "https://dashscope.aliyuncs.com/compatible-mode/v1", proto: "chat",    key: true,  models: ["qwen3-max","qwen-plus","qwen3-coder-plus"] },
+    { id: "siliconflow", name: "硅基流动",      base: "https://api.siliconflow.cn/v1",                   proto: "chat",      key: true,  models: ["deepseek-ai/DeepSeek-V3","Qwen/Qwen3-30B-A3B"] },
+    { id: "moonshot",    name: "Moonshot",     base: "https://api.moonshot.cn/v1",                      proto: "chat",      key: true,  models: ["kimi-k2-0711-preview","moonshot-v1-32k"] },
+    { id: "xai",         name: "xAI",          base: "https://api.x.ai/v1",                             proto: "chat",      key: true,  models: ["grok-4","grok-4-fast","grok-3-mini"] },
+    { id: "groq",        name: "Groq",         base: "https://api.groq.com/openai/v1",                  proto: "chat",      key: true,  models: ["openai/gpt-oss-120b","llama-3.3-70b-versatile"] },
+    { id: "mistral",     name: "Mistral",      base: "https://api.mistral.ai/v1",                       proto: "chat",      key: true,  models: ["mistral-large-latest","codestral-latest"] },
+    { id: "together",    name: "Together AI",  base: "https://api.together.xyz/v1",                     proto: "chat",      key: true,  models: ["deepseek-ai/DeepSeek-V3"] },
+    { id: "perplexity",  name: "Perplexity",   base: "https://api.perplexity.ai",                       proto: "chat",      key: true,  models: ["sonar-pro","sonar","sonar-reasoning-pro"] },
+    { id: "ollama",      name: "Ollama 本地",   base: "http://localhost:11434/v1",                       proto: "chat",      key: false, models: [] },
+    { id: "lmstudio",    name: "LM Studio",    base: "http://localhost:1234/v1",                        proto: "chat",      key: false, models: [] },
+    { id: "custom",      name: "自定义接口",    base: "",                                                proto: "chat",      key: true,  models: [] }
+];
+
+// 对应 CreateTemplates()，16 条 6 类
+var TEMPLATES = [
+    { c: "编程", t: "审查代码", d: "检查正确性、安全性、性能与可维护性", x: "请审查下面的代码。优先找出会导致错误、数据丢失、安全问题或性能退化的地方，然后按严重程度列出问题并给出最小修改方案。最后补充缺失的测试用例。\n\n代码：\n" },
+    { c: "编程", t: "分析报错", d: "根据错误信息定位根因并给出验证步骤", x: "请分析下面的报错。先判断最可能的根因，再说明证据、排查顺序和最小修复方案。请给出可以直接执行的验证步骤。\n\n报错与相关代码：\n" },
+    { c: "编程", t: "重构方案", d: "在保留行为的前提下降低复杂度", x: "请在不改变外部行为的前提下重构下面的代码。指出复杂度和耦合来源，提供完整代码，并说明如何验证新旧行为一致。\n\n代码：\n" },
+    { c: "编程", t: "生成测试", d: "覆盖正常流程、边界条件与失败路径", x: "请为下面的代码编写测试，覆盖正常流程、边界条件、无效输入、异常处理和回归风险。\n\n代码：\n" },
+    { c: "产品", t: "设计 API", d: "输出资源模型、接口、错误码与示例", x: "请为下面的需求设计可落地的 API。包含资源模型、端点、请求响应示例、分页、鉴权、幂等、错误码、限流和版本兼容策略。\n\n需求：\n" },
+    { c: "产品", t: "产品需求文档", d: "整理目标、范围、流程与验收标准", x: "请把下面的想法整理成产品需求文档，包含目标用户、核心问题、范围与非范围、关键流程、异常状态、数据指标和验收标准。\n\n想法：\n" },
+    { c: "分析", t: "方案对比", d: "用一致标准比较多个方案", x: "请比较下面的方案。建立统一评价维度，从成本、复杂度、性能、风险、可维护性和适用场景分析，并给出明确建议。\n\n方案：\n" },
+    { c: "分析", t: "提取结构化数据", d: "将文本整理成稳定 JSON", x: "请从下面内容提取结构化信息并仅输出有效 JSON。字段缺失时使用 null，不要猜测，保留原始单位和专有名词。\n\n内容：\n" },
+    { c: "分析", t: "提炼摘要", d: "提取结论、依据、风险与行动项", x: "请总结下面内容，提取核心结论、关键依据、不确定点、风险和下一步行动项。数字、日期和专有名词必须保留。\n\n内容：\n" },
+    { c: "写作", t: "润色文本", d: "提升清晰度并保留原意和语气", x: "请润色下面文本，使表达自然、清晰、具体。保留原意和事实，删除空话与重复，不添加未经提供的信息。\n\n原文：\n" },
+    { c: "写作", t: "撰写邮件", d: "生成清楚、得体且有行动指向的邮件", x: "请根据下面信息写一封邮件。主题明确，正文交代必要背景和行动项，结尾给出期望回复时间，语气专业自然。\n\n信息：\n" },
+    { c: "写作", t: "专业翻译", d: "保留术语、格式与语义层次", x: "请将下面内容翻译成目标语言。保留标题、列表、代码、变量名和专有名词，术语前后一致。\n\n目标语言：\n内容：\n" },
+    { c: "学习", t: "深入解释概念", d: "从直觉、原理到实例逐层说明", x: "请解释下面概念。先用准确的直觉类比，再解释核心原理、适用条件、常见误区和实际例子，最后给出三个理解检查问题。\n\n概念：\n" },
+    { c: "学习", t: "制定学习计划", d: "按目标和时间生成可执行路径", x: "请为下面目标制定可执行学习计划，列出前置知识、阶段主题、练习项目、验证标准和复盘节点。\n\n学习目标：\n现有基础：\n可用时间：\n" },
+    { c: "创意", t: "结构化头脑风暴", d: "产生差异明显且可评估的想法", x: "请围绕下面主题进行结构化头脑风暴。先明确约束，再从五个不同方向提出想法，每个包含机制、用户、优势、风险和验证方式。\n\n主题与约束：\n" },
+    { c: "创意", t: "优化提示词", d: "提高任务边界、输出约束和可验证性", x: "请优化下面提示词。保留目标，补充上下文、成功标准、约束、输出格式和失败处理规则，并删除重复或冲突要求。\n\n原提示词：\n" }
+];
+
+/* ---------- 模型类型判定（对应 IsImageModel / GetModelType） ---------- */
+function isImageModel(m) {
+    m = (m || "").toLowerCase();
+    return m.indexOf("image") >= 0 || m.indexOf("dall") >= 0 || m.indexOf("flux") >= 0;
+}
+function modelType(m) {
+    if (isImageModel(m)) return "图像模型";
+    var l = (m || "").toLowerCase();
+    if (l.indexOf("codex") >= 0 || l.indexOf("coder") >= 0) return "代码模型";
+    if (l.indexOf("gpt-5") >= 0 || l.indexOf("reason") >= 0) return "推理模型";
+    return m ? "文本模型" : "未选择";
+}
+</script>
+
+<script>
+/* ============================================================
+   交互与网络
+   ============================================================ */
+var $ = function (id) { return document.getElementById(id); };
+
+var state = {
+    current: null,          // 当前服务商
+    messages: [],           // [{role, content}]
+    keys: {},               // providerId -> key，只存内存
+    abort: null             // 正在进行的请求
+};
+
+/* ---------- 提示条 ---------- */
+function setStatus(text, kind) {
+    var el = $("hdrStatus");
+    el.textContent = text;
+    el.className = "header-status" + (kind ? " " + kind : "");
+}
+
+/* ---------- 左栏服务商列表 ---------- */
+function renderProviders() {
+    var box = $("providerList");
+    box.innerHTML = "";
+    PROVIDERS.forEach(function (p) {
+        var d = document.createElement("div");
+        d.className = "pv-item" + (state.current && state.current.id === p.id ? " on" : "");
+        d.setAttribute("data-id", p.id);
+        d.innerHTML = '<span class="nm">' + p.name + '</span>' +
+                      '<span class="pr">' + (p.proto === "responses" ? "Responses API" : "Chat Completions") + '</span>';
+        d.addEventListener("click", function () { selectProvider(p.id); });
+        box.appendChild(d);
+    });
+}
+
+function selectProvider(id) {
+    var p = PROVIDERS.filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    // 切走之前先把当前 key 记住（原生版是 keys[provider.Id] = 输入框内容）
+    if (state.current) state.keys[state.current.id] = $("apiKeyBox").value;
+    state.current = p;
+
+    $("baseUrlBox").value = p.base;
+    $("protocolBox").value = p.proto;
+    $("apiKeyBox").value = state.keys[p.id] || "";
+    $("apiKeyBox").placeholder = p.key ? "sk-..." : "本地服务无需密钥";
+
+    fillModels(p.models);
+    $("modelBox").value = p.models.length ? p.models[0] : "";
+    updateModelMeta();
+    renderProviders();
+    updatePreview();
+    setStatus(p.key ? "待填密钥" : "就绪", p.key ? "busy" : "");
+}
+
+function fillModels(list) {
+    var dl = $("modelOptions");
+    dl.innerHTML = (list || []).map(function (m) {
+        return '<option value="' + m.replace(/"/g, "&quot;") + '"></option>';
+    }).join("");
+}
+
+function updateModelMeta() {
+    var m = $("modelBox").value.trim();
+    var n = $("modelOptions").children.length;
+    $("modelCount").textContent = n ? ("共 " + n + " 个可选模型") : "未同步模型列表";
+    $("modelType").textContent = modelType(m);
+    $("btnSend").disabled = isImageModel(m);
+}
+
+/* ---------- 请求体预览（对应 UpdateRequestPreview） ---------- */
+function buildRequestBody(protocol, newPrompt) {
+    var conv = state.messages.map(function (m) { return { role: m.role, content: m.content }; });
+    if (newPrompt) conv.push({ role: "user", content: newPrompt });
+
+    var model = $("modelBox").value.trim();
+    var stream = $("streamCheck").checked;
+
+    if (protocol === "responses") {
+        var body = {
+            model: model,
+            input: conv,
+            instructions: $("systemPromptBox").value,
+            max_output_tokens: parseInt($("maxTokensBox").value, 10) || 4096,
+            stream: stream,
+            reasoning: { effort: $("reasoningBox").value }
+        };
+        if ($("reasoningBox").value === "none") {
+            body.temperature = parseFloat($("temperatureBox").value) || 0;
+        }
+        return body;
+    }
+
+    var msgs = [];
+    if ($("systemPromptBox").value.trim().length > 0) {
+        msgs.push({ role: "system", content: $("systemPromptBox").value });
+    }
+    msgs = msgs.concat(conv);
+    return {
+        model: model,
+        messages: msgs,
+        temperature: parseFloat($("temperatureBox").value) || 0,
+        max_tokens: parseInt($("maxTokensBox").value, 10) || 4096,
+        stream: stream
+    };
+}
+
+function currentProtocol() {
+    return $("protocolBox").value === "responses" ? "responses" : "chat";
+}
+
+function updatePreview() {
+    try {
+        $("paneReq").textContent = JSON.stringify(buildRequestBody(currentProtocol(), $("promptBox").value.trim() || null), null, 2);
+    } catch (e) {
+        $("paneReq").textContent = "(预览生成失败: " + e.message + ")";
+    }
+}
+
+/* ---------- 对话渲染 ---------- */
+function renderChat() {
+    var box = $("paneChat");
+    if (!state.messages.length) {
+        box.innerHTML = '<div class="chat-empty">还没有对话。选好服务商、填上密钥，在下面输入内容发送。</div>';
+        return;
+    }
+    box.innerHTML = state.messages.map(function (m) {
+        var who = m.role === "user" ? "你" : (state.current ? state.current.name : "助手");
+        return '<div class="msg ' + (m.role === "user" ? "user" : "assistant") + '">' +
+               '<div class="who">' + who + '</div>' +
+               '<div class="txt">' + escapeHtml(m.content) + '</div></div>';
+    }).join("");
+    box.scrollTop = box.scrollHeight;
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+}
+
+/* ---------- 同步模型（对应 SyncModelsAsync） ---------- */
+async function syncModels() {
+    var p = state.current;
+    if (!p) return;
+    var base = $("baseUrlBox").value.trim().replace(/\/+$/, "");
+    if (!base) { setStatus("请先填写 Base URL", "err"); return; }
+    if (p.key && !$("apiKeyBox").value.trim()) { setStatus("请先填 API Key", "err"); return; }
+
+    setStatus("同步中", "busy");
+    try {
+        var headers = {};
+        var k = $("apiKeyBox").value.trim();
+        if (k) headers["Authorization"] = "Bearer " + k;
+        var res = await fetch(base + "/models", { headers: headers });
+        if (!res.ok) { setStatus("同步失败 HTTP " + res.status, "err"); return; }
+        var json = await res.json();
+        var src = json.data || json.models || [];
+        var ids = [];
+        src.forEach(function (it) {
+            var id = typeof it === "string" ? it : (it.id || it.name || "");
+            if (id.toLowerCase().indexOf("models/") === 0) id = id.slice(7);
+            if (id && ids.indexOf(id) < 0) ids.push(id);
+        });
+        ids.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+        if (!ids.length) { setStatus("接口没返回模型", "err"); return; }
+        fillModels(ids);
+        updateModelMeta();
+        setStatus("已同步 " + ids.length + " 个模型");
+    } catch (e) {
+        // 跨域被拦也会走到这里，要如实说明，不能说成"网络错误"
+        setStatus("同步失败：" + (e.message || e), "err");
+        $("paneRaw").textContent = "同步模型出错：\n" + (e && e.stack ? e.stack : e) +
+            "\n\n若提示 Failed to fetch，多半是这个服务商不允许浏览器直接跨域访问。";
+    }
+}
+
+/* ---------- 发送（对应 SendAsync / ReadStreamAsync） ---------- */
+async function send() {
+    var p = state.current;
+    if (!p) return;
+    var prompt = $("promptBox").value.trim();
+    if (!prompt) return;
+
+    var base = $("baseUrlBox").value.trim().replace(/\/+$/, "");
+    var model = $("modelBox").value.trim();
+    if (!base || !model) { setStatus("请填 Base URL 并选模型", "err"); return; }
+    if (p.key && !$("apiKeyBox").value.trim()) { setStatus("请填 API Key", "err"); return; }
+    if (isImageModel(model)) { setStatus("图像模型不支持对话接口", "err"); return; }
+
+    var protocol = currentProtocol();
+    var endpoint = base + (protocol === "responses" ? "/responses" : "/chat/completions");
+    var body = buildRequestBody(protocol, prompt);
+    var reqJson = JSON.stringify(body);
+
+    $("paneReq").textContent = JSON.stringify(body, null, 2);
+    $("paneRaw").textContent = "";
+    state.messages.push({ role: "user", content: prompt });
+    renderChat();
+    $("promptBox").value = "";
+
+    var btn = $("btnSend");
+    btn.textContent = "停止";
+    btn.classList.add("stop");
+    state.abort = new AbortController();
+    setStatus("请求中", "busy");
+
+    var headers = { "Content-Type": "application/json" };
+    var k = $("apiKeyBox").value.trim();
+    if (k) headers["Authorization"] = "Bearer " + k;
+    // 自定义 Headers 允许覆盖，对应 ApplyHeaders 里的 TryAddWithoutValidation
+    var ch = $("customHeadersBox").value.trim();
+    if (ch) {
+        try {
+            var extra = JSON.parse(ch);
+            Object.keys(extra).forEach(function (key) { headers[key] = String(extra[key]); });
+        } catch (e) {
+            setStatus("自定义 Headers 不是合法 JSON", "err");
+        }
+    }
+
+    var answer = "";
+    try {
+        var res = await fetch(endpoint, {
+            method: "POST",
+            headers: headers,
+            body: reqJson,
+            signal: state.abort.signal
+        });
+
+        if (!res.ok) {
+            var fail = await res.text();
+            $("paneRaw").textContent = fail;
+            throw new Error("HTTP " + res.status + ": " + fail.slice(0, 400));
+        }
+
+        if ($("streamCheck").checked && res.body && res.body.getReader) {
+            // 流式：逐行读 SSE，data: 开头的取 delta
+            setStatus("接收中", "busy");
+            state.messages.push({ role: "assistant", content: "" });
+            renderChat();
+            var lastTxt = $("paneChat").querySelectorAll(".msg.assistant .txt");
+            var el = lastTxt[lastTxt.length - 1];
+
+            var reader = res.body.getReader();
+            var decoder = new TextDecoder("utf-8");
+            var buf = "";
+            while (true) {
+                var r = await reader.read();
+                if (r.done) break;
+                buf += decoder.decode(r.value, { stream: true });
+                var lines = buf.split("\n");
+                buf = lines.pop();
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].trim();
+                    $("paneRaw").textContent += line + "\n";
+                    if (line.indexOf("data:") !== 0) continue;
+                    var data = line.slice(5).trim();
+                    if (!data || data === "[DONE]") continue;
+                    var delta = extractDelta(data, protocol);
+                    if (delta) {
+                        answer += delta;
+                        state.messages[state.messages.length - 1].content = answer;
+                        if (el) { el.textContent = answer; $("paneChat").scrollTop = $("paneChat").scrollHeight; }
+                    }
+                }
+            }
+            if (!answer) {
+                state.messages[state.messages.length - 1].content = "(流式响应里没有解析到文本，可切到「原始响应」看原文)";
+                renderChat();
+            }
+            setStatus("完成");
+        } else {
+            var json = await res.json();
+            $("paneRaw").textContent = JSON.stringify(json, null, 2);
+            answer = extractText(json, protocol);
+            state.messages.push({
+                role: "assistant",
+                content: answer || "请求完成，但响应中没有可显示的文本。"
+            });
+            renderChat();
+            setStatus("完成");
+        }
+    } catch (e) {
+        if (e && e.name === "AbortError") {
+            setStatus("已停止");
+        } else {
+            setStatus("请求失败", "err");
+            var tip = "";
+            if (String(e.message).indexOf("Failed to fetch") >= 0) {
+                tip = "\n\n这类报错常见于两种情况：\n" +
+                      "1. 该服务商不允许浏览器跨域直连（OpenAI 的接口就是这样）；\n" +
+                      "2. http 页面上请求 http 接口被浏览器拦（本地 Ollama 要注意）。\n" +
+                      "这跟原生桌面版不同 —— 原生版没有跨域限制，网页版有这个先天限制。";
+            }
+            $("paneRaw").textContent = "请求出错：" + e.message + tip;
+        }
+    } finally {
+        state.abort = null;
+        btn.textContent = "发送";
+        btn.classList.remove("stop");
+        btn.disabled = isImageModel($("modelBox").value);
+    }
+}
+
+/* 响应解析：与 C# 的 ExtractText / ExtractResponseOutput 同逻辑 */
+function extractText(json, protocol) {
+    if (protocol === "responses") {
+        if (json.output_text) return String(json.output_text);
+        var out = "";
+        (json.output || []).forEach(function (item) {
+            (item.content || []).forEach(function (part) {
+                if (part.type === "output_text") out += String(part.text || "");
+            });
+        });
+        return out;
+    }
+    var ch = json.choices || [];
+    if (!ch.length) return "";
+    return String((ch[0].message || {}).content || "");
+}
+
+function extractDelta(data, protocol) {
+    var j;
+    try { j = JSON.parse(data); } catch (e) { return ""; }
+    if (protocol === "responses") {
+        return j.type === "response.output_text.delta" ? String(j.delta || "") : "";
+    }
+    var ch = j.choices || [];
+    if (!ch.length) return "";
+    return String((ch[0].delta || {}).content || "");
+}
+
+/* ---------- 提示词库 ---------- */
+function renderTemplates(query) {
+    var q = (query || "").trim().toLowerCase();
+    var box = $("tplList");
+    var list = TEMPLATES.filter(function (t) {
+        if (!q) return true;
+        return (t.t + t.d + t.c).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!list.length) { box.innerHTML = '<div class="chat-empty">没有匹配的模板</div>'; return; }
+    box.innerHTML = list.map(function (t, i) {
+        return '<div class="tpl" data-i="' + TEMPLATES.indexOf(t) + '">' +
+               '<span class="t">' + t.t + '</span><span class="c">' + t.c + '</span>' +
+               '<div class="d">' + t.d + '</div></div>';
+    }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll(".tpl"), function (el) {
+        el.addEventListener("click", function () {
+            var t = TEMPLATES[parseInt(el.getAttribute("data-i"), 10)];
+            $("promptBox").value = t.x;
+            $("tplModal").classList.remove("on");
+            updatePreview();
+            $("promptBox").focus();
+        });
+    });
+}
+
+/* ---------- 绑定 ---------- */
+$("btnSend").addEventListener("click", function () {
+    if (state.abort) { state.abort.abort(); return; }   // 按钮变"停止"后点它就是中断
+    send();
+});
+$("btnSync").addEventListener("click", syncModels);
+$("btnNewChat").addEventListener("click", function () {
+    state.messages = [];
+    renderChat();
+    setStatus("已新建会话");
+});
+$("btnClear").addEventListener("click", function () {
+    state.messages = [];
+    renderChat();
+    setStatus("已清空会话");
+});
+$("btnTpl").addEventListener("click", function () {
+    renderTemplates("");
+    $("tplSearch").value = "";
+    $("tplModal").classList.add("on");
+    $("tplSearch").focus();
+});
+$("tplClose").addEventListener("click", function () { $("tplModal").classList.remove("on"); });
+$("tplModal").addEventListener("click", function (e) {
+    if (e.target === $("tplModal")) $("tplModal").classList.remove("on");
+});
+$("tplSearch").addEventListener("input", function () { renderTemplates(this.value); });
+
+document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+        document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("on"); });
+        document.querySelectorAll(".pane").forEach(function (p) { p.classList.remove("on"); });
+        tab.classList.add("on");
+        $(tab.getAttribute("data-pane")).classList.add("on");
+    });
+});
+
+$("modelBox").addEventListener("input", function () { updateModelMeta(); updatePreview(); });
+$("protocolBox").addEventListener("change", updatePreview);
+$("baseUrlBox").addEventListener("input", updatePreview);
+$("systemPromptBox").addEventListener("input", updatePreview);
+$("streamCheck").addEventListener("change", updatePreview);
+$("reasoningBox").addEventListener("change", updatePreview);
+$("customHeadersBox").addEventListener("input", updatePreview);
+$("temperatureBox").addEventListener("input", updatePreview);
+$("maxTokensBox").addEventListener("input", updatePreview);
+$("promptBox").addEventListener("input", updatePreview);
+$("promptBox").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+});
+$("apiKeyBox").addEventListener("input", function () {
+    if (state.current) state.keys[state.current.id] = this.value;
+});
+
+/* ---------- 启动 ---------- */
+renderProviders();
+selectProvider("deepseek");
+renderChat();
+</script>
+</body>
+</html>
