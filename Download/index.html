@@ -131,7 +131,7 @@
         font-family: monospace;
     }
 
-    /* ---------- 列表视图（唯一的视图，横排列表） ---------- */
+    /* ---------- 列表视图 ---------- */
     .list-view { display: table; width: 100%; border-collapse: collapse; font-size: 13px; }
     .list-view th {
         text-align: left;
@@ -190,6 +190,50 @@
         font-size: 14px;
     }
 
+    /* ---------- 图标视图 ----------
+       卡片式网格：一行铺 5 张，窄屏自动降列。
+       和列表视图共用同一份数据，只是换个摆法。 */
+    .grid-view {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+        padding: 14px;
+    }
+    .grid-card {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #e1e4e8;
+        background: #ffffff;
+        cursor: pointer;
+        overflow: hidden;
+    }
+    .grid-card:hover { border-color: #0969da; }
+    .grid-thumb {
+        height: 112px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f6f8fa;
+        border-bottom: 1px solid #e1e4e8;
+        overflow: hidden;
+    }
+    .grid-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .grid-thumb .glyph { font-size: 44px; }
+    .grid-name {
+        padding: 8px 9px 4px;
+        font-size: 12.5px;
+        line-height: 1.4;
+        color: #1e1e1e;
+        word-break: break-all;
+    }
+    .grid-meta {
+        padding: 0 9px 9px;
+        font-size: 11px;
+        color: #8b949e;
+        font-family: monospace;
+        margin-top: auto;
+    }
+
     .footer {
         margin-top: 28px;
         text-align: center;
@@ -223,12 +267,19 @@
         .col-size, .col-date, .col-type { color: #8b949e; }
         .dl-btn { background: #21262d; border-color: #30363d; color: #58a6ff; }
         .dl-btn:hover { background: #1f6feb; border-color: #1f6feb; color: #ffffff; }
+        .grid-card { background: #161b22; border-color: #30363d; }
+        .grid-card:hover { border-color: #1f6feb; }
+        .grid-thumb { background: #0d1117; border-bottom-color: #30363d; }
+        .grid-name { color: #c9d1d9; }
         .footer { border-top-color: #30363d; }
     }
+    @media (max-width: 900px) { .grid-view { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 700px) { .grid-view { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 620px) {
         .search-box { width: 100%; }
         .col-type { display: none; }
         .list-view th.col-type { display: none; }
+        .grid-view { grid-template-columns: repeat(2, 1fr); }
     }
 </style>
 </head>
@@ -241,6 +292,9 @@
     <div class="toolbar">
         <button type="button" class="tb-btn" id="btnBack">↑ 上一级</button>
         <button type="button" class="tb-btn" id="btnRefresh">刷新</button>
+        <span class="tb-sep"></span>
+        <button type="button" class="tb-btn active" id="btnList">列表</button>
+        <button type="button" class="tb-btn" id="btnGrid">图标</button>
         <span class="tb-spacer"></span>
         <input type="text" class="search-box" id="search" placeholder="搜索文件名…">
     </div>
@@ -265,6 +319,7 @@
             </thead>
             <tbody id="listBody"></tbody>
         </table>
+        <div class="grid-view" id="gridView" style="display:none;"></div>
         <div class="empty-tip" id="emptyTip" style="display:none;">没有匹配的文件</div>
     </div>
 
@@ -464,7 +519,7 @@ function humanLabel(item) {
 }
 
 /* ---------- 渲染 ---------- */
-var state = { sortKey: "name", sortAsc: true, query: "" };
+var state = { sortKey: "name", sortAsc: true, query: "", view: "list" };
 
 function visibleFiles() {
     var q = state.query.trim().toLowerCase();
@@ -514,14 +569,42 @@ function listRowHtml(it) {
            '</tr>';
 }
 
+/* 图标卡片：缩略图和列表视图共用同一套 lead 逻辑，
+   只是把大图标换成 44px 的缩略图/图标。
+   点整张卡片 = 打开文件（和列表视图行为一致）。 */
+function gridCardHtml(it) {
+    var t = typeOf(it), meta = TYPE_MAP[t];
+    var url = encodeURI(it.name);
+    var lead;
+    if (t === "image") {
+        lead = '<img src="' + url + '" alt="" loading="lazy">';
+    } else {
+        lead = '<span class="glyph">' + meta.glyph + '</span>';
+    }
+    return '<div class="grid-card" data-href="' + url + '" data-name="' +
+           it.name.replace(/"/g, "&quot;") + '" title="' + humanLabel(it) + '">' +
+           '<div class="grid-thumb">' + lead + '</div>' +
+           '<div class="grid-name">' + humanLabel(it) + '</div>' +
+           '<div class="grid-meta">' + fmtSize(it.size) + ' · ' + meta.label + '</div>' +
+           '</div>';
+}
+
 function render() {
     var list = visibleFiles();
     var listBody = document.getElementById("listBody");
+    var gridView = document.getElementById("gridView");
     var emptyTip = document.getElementById("emptyTip");
+    var listView = document.getElementById("listView");
 
     listBody.innerHTML = list.map(listRowHtml).join("");
+    gridView.innerHTML = list.map(gridCardHtml).join("");
+
+    // 两个视图都生成好东西，靠 display 切换，
+    // 这样来回切不会丢滚动位置、也不用重排队列
+    var showList = state.view === "list";
+    listView.style.display = (list.length && showList) ? "table" : "none";
+    gridView.style.display = (list.length && !showList) ? "grid" : "none";
     emptyTip.style.display = list.length ? "none" : "block";
-    document.getElementById("listView").style.display = list.length ? "table" : "none";
 
     var total = 0;
     list.forEach(function (it) { total += it.size || 0; });
@@ -538,6 +621,12 @@ function render() {
     Array.prototype.forEach.call(listBody.querySelectorAll(".dl-btn"), function (btn) {
         btn.addEventListener("click", function (ev) {
             ev.stopPropagation();
+        });
+    });
+    // 图标卡片整张点击 = 打开文件
+    Array.prototype.forEach.call(gridView.querySelectorAll(".grid-card"), function (card) {
+        card.addEventListener("click", function () {
+            window.open(card.getAttribute("data-href"), "_blank");
         });
     });
 }
@@ -561,10 +650,23 @@ Array.prototype.forEach.call(document.querySelectorAll(".list-view th.sortable")
         render();
     });
 });
-render();
-document.getElementById("statSel").textContent = "网站: 4444442.xyz";
 
-render();
+/* 视图切换。选择记在 localStorage 里，下次进来还是上次那个视图 */
+function setView(v) {
+    state.view = v;
+    document.getElementById("btnList").classList.toggle("active", v === "list");
+    document.getElementById("btnGrid").classList.toggle("active", v === "grid");
+    try { localStorage.setItem("dl-view", v); } catch (e) { /* 隐私模式忽略 */ }
+    render();
+}
+document.getElementById("btnList").addEventListener("click", function () { setView("list"); });
+document.getElementById("btnGrid").addEventListener("click", function () { setView("grid"); });
+
+var savedView = "list";
+try { savedView = localStorage.getItem("dl-view") || "list"; } catch (e) { /* 忽略 */ }
+setView(savedView === "grid" ? "grid" : "list");
+
+document.getElementById("statSel").textContent = "网站: 4444442.xyz";
 </script>
 </body>
 </html>
